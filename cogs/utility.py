@@ -97,7 +97,7 @@ class Utility(commands.Cog):
             break
 
         if(embed is None):
-            await ctx.send("Command not found, here's a list of all the commands: https://github.com/nkrasn/g_man/blob/master/COMMANDS.md")
+            await ctx.send("Command not found, here's a list of all the commands: https://github.com/MiniatureEge2006/g_man-revived/blob/master/COMMANDS.md")
 
         
     # TODO: make this automatic in video_creator.py
