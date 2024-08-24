@@ -7,7 +7,7 @@ import os
 import traceback
 
 boost_info = [
-    { 'mb': 7.9, 'bits': 750000 },
+    { 'mb': 24.9, 'bits': 20000000 },
     { 'mb': 49.9, 'bits': 45000000 },
     { 'mb': 99.9, 'bits': 95000000 }
 ]
