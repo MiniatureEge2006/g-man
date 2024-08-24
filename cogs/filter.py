@@ -294,6 +294,7 @@ class Filter(commands.Cog):
             'psnr',
             'pullup',
             'qp',
+            'qrencode',
             'random',
             'readeia608',
             'readvitc',
