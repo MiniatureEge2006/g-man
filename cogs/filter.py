@@ -994,5 +994,5 @@ class Filter(commands.Cog):
     
         
 
-def setup(bot):
-    bot.add_cog(Filter(bot))
+async def setup(bot):
+    await bot.add_cog(Filter(bot))
