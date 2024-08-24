@@ -288,5 +288,5 @@ class Corruption(commands.Cog):
 
 
 
-def setup(bot):
-    bot.add_cog(Corruption(bot))
+async def setup(bot):
+    await bot.add_cog(Corruption(bot))
