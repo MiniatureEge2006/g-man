@@ -18,15 +18,15 @@ for f in vid_files:
 
 
 extensions = ['cogs.bitrate', 'cogs.filter', 'cogs.fun', 'cogs.corruption', 'cogs.bookmarks', 'cogs.utility']
-bot = commands.Bot(command_prefix=commands.when_mentioned_or('!'), help_command=None)
+bot = commands.Bot(command_prefix=commands.when_mentioned_or('!'), help_command=None, intents=discord.Intents.all())
 
 # Loads extensions, returns string saying what reloaded
-def reload_extensions(exs):
+async def reload_extensions(exs):
     module_msg = ''
     for ex in exs:
         try:
-            bot.unload_extension(ex)
-            bot.load_extension(ex)
+           await bot.load_extension(ex)
+          # await bot.unload_extension(ex) This pretty much just unloads the extensions after loading them, resulting in commands not working.
             module_msg += 'module "{}" reloaded\n'.format(ex)
         except Exception as e:
             module_msg += 'reloading "{}" failed, error is:```{}```\n'.format(ex, e)
@@ -45,7 +45,7 @@ async def on_ready():
     print('------')
     await bot.change_presence(activity=discord.Game(name="!help"))
     global extensions
-    print(reload_extensions(extensions))
+    print(await reload_extensions(extensions))
 
 # Process commands
 @bot.event
@@ -91,10 +91,10 @@ async def reload(ctx, *, exs : str = None):
     else:
         module_msg = reload_extensions(exs.split())
     await ctx.send(module_msg)
-
-for ex in extensions:
+async def setup(bot):
+ for ex in extensions:
     try:
-        bot.load_extension(ex)
+        await bot.load_extension(ex)
     except Exception as e:
         print('Failed to load {} because: {}'.format(ex, e))
 
