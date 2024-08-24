@@ -1,3 +1,5 @@
+**This project is a fork of the original g_man bot. (https://github.com/nkrasn/g_man) So credits to them for making this bot.**
+
 # g_man
 A Discord bot for editing videos, useful for simple edits or making memes. It can apply a large variety of filters, modify bitrate, and create glitch art. <br>
 Filters are applied using FFMPEG, with some corruption commands using tomato.py (https://github.com/itsKaspar/tomato) or AviGlitch (https://github.com/ucnv/aviglitch).
@@ -11,7 +13,7 @@ Filters are applied using FFMPEG, with some corruption commands using tomato.py 
 * Save your videos using a personal bookmark system, and load your bookmarks in any server g_man is in.
 
 ## Usage/Commands
-https://github.com/nkrasn/g_man/blob/master/COMMANDS.md<br>
+https://github.com/MiniatureEge2006/g_man-revived/blob/master/COMMANDS.md<br>
 You can get this link from within Discord by sending "!help" in a channel
 
 ## Requirements
@@ -19,14 +21,14 @@ You can get this link from within Discord by sending "!help" in a channel
 * A MongoDB database
   * The bot looks for a database called `gman`. It uses a collection called `inventory` for the bookmark system and `videos` for keeping track of videos sent.
 * AviGlitch, see https://github.com/ucnv/aviglitch for installation instructions. This is needed for the !mosh command.
-* All the Python packages in requirements.txt
+* All the Python packages in requirements.txt **(You will need Python 3.11.9)**
 
 You can install the Python packages, preferably in a virtual environment, by running
 ```
 pip install -r requirements.txt
 ```
 
-*Tip:* If you using Mac or Linux, you may have Python 2/Pip 2 preinstalled. You should run:
+*Tip:* If your using Mac or Linux, you may have Python 2/Pip 2 preinstalled. You should run:
 ```
 pip3 install -r requirements.txt
 ```
