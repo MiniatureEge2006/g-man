@@ -25,7 +25,9 @@ class Utility(commands.Cog):
     @commands.command()
     async def fix(self, ctx):
         await self.download(ctx)
-    
+    @commands.command()
+    async def dl(self, ctx):
+        await self.download(ctx)
 
     async def _gif(self, ctx, vstream, astream, kwargs):
         fps = kwargs['fps']
@@ -42,10 +44,10 @@ class Utility(commands.Cog):
     @commands.command()
     async def help(self, ctx, command_name : str = ''):
         if(command_name == ''):
-            await ctx.send('https://github.com/nkrasn/g_man/blob/master/COMMANDS.md')
+            await ctx.send('https://github.com/MiniatureEge2006/g_man-revived/blob/master/COMMANDS.md')
             return
         if(command_name == 'filter'):
-            await ctx.send('For more information about the filter command, please read: https://github.com/nkrasn/g_man/blob/master/COMMANDS.md#filter-command')
+            await ctx.send('For more information about the filter command, please read: https://github.com/MiniatureEge2006/g_man-revived/blob/master/COMMANDS.md#filter-command')
             return
         if(command_name == 'help'):
             await ctx.send('`!help` to get a list of all the commands.\n`!help <command_name>` to get help on a specific command.')
@@ -196,5 +198,5 @@ class Utility(commands.Cog):
 
 
 
-def setup(bot):
-    bot.add_cog(Utility(bot))
+async def setup(bot):
+    await bot.add_cog(Utility(bot))
