@@ -52,7 +52,7 @@ async def yt(ctx, url, suffix, extra_ydl_opts=None):
                 ydl_opts = {
                     'noplaylist': True,
                     'format': f'bestvideo[height<={res}]+bestaudio/best[height<={res}]',
-                    'ffmpeg_location': 'ffmpeg-static/ffmpeg',
+                    'ffmpeg_location': 'ffmpeg-static/ffmpeg.exe',
                     'outtmpl': 'vids/target' + str(suffix) + '.mp4'
                 }
                 if(extra_ydl_opts is not None):
@@ -88,7 +88,7 @@ async def download_nth_video(ctx, n, ydl_opts={}):
         if(not result):
             #await ctx.send("Could not download the video!")
             return None, None, False
-    else: # discord video
+    if(not is_yt): # discord video
         file_extension = input_vid.split('.')[-1]
         input_vid_filepath = f'vids/target{ctx.message.id}{n}.{file_extension}'
         with open(input_vid_filepath, 'wb') as f:
