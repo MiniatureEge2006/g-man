@@ -13,6 +13,7 @@ discord_cdn_regex = (r'https://(cdn|media)\.discordapp\.(com|net)/attachments/.+
 twitter_regex = (r'(https://)?(www\.)?(mobile\.)?(((fx|vx)?twitter)|(x))\.com/.+/status/[0-9]+(\?.+)?')
 tumblr_regex = (r'(https://)?(www\.)?((va\.media\.tumblr\.com/tumblr_.+\.(mp4|MP4|webm|WEBM|mov|MOV|mkv|MKV|gif|GIF))|(.+\.tumblr\.com/(post|video/.+)/[0-9]+(/[0-9]+/)?))')
 hosted_file_regex = (r'(https://)?(www\.)?.+\.(com|org|net|us|co|edu|ca|cn|fr|ch|au|in|de|jp|nl|uk|mx|no|ru|br|se|es)/.+\.(png|PNG|jpg|JPG|jpeg|JPEG|mp4|MP4|webm|WEBM|mov|MOV|mkv|MKV|gif|GIF)')
+soundcloud_regex = (r'(https://(?:www.)?soundcloud\.com/[\w-]+/?(?:sets/)?[\w-]+)')
 
 audio_filetypes = ['mp3', 'ogg', 'wav']
 video_filetypes = ['mp4', 'mov', 'avi', 'webm', 'flv', 'wmv', 'mkv']
@@ -88,6 +89,8 @@ async def download_nth_video(ctx, n, ydl_opts={}):
         if(not result):
             #await ctx.send("Could not download the video!")
             return None, None, False
+    if(re.match(soundcloud_regex, input_vid): # soundcloud url
+        result, input_vid = await yt(ctx, input_vid, ctx.message.id, extra_ydl_opts={'format': 'mp3', 'outtmpl': 'vids/target' + str(ctx.message.id) + '.mp3'})
     if(not is_yt): # discord video
         file_extension = input_vid.split('.')[-1]
         input_vid_filepath = f'vids/target{ctx.message.id}{n}.{file_extension}'
