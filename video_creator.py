@@ -113,7 +113,7 @@ async def apply_filters_and_send(ctx, code, kwargs, ydl_opts=None):
                         if(stream.is_video() or stream.is_audio()):
                             duration = stream.duration_seconds()
                             longest_duration = max(longest_duration, duration)
-                    output_params['b:v'] = bits_limit / longest_duration
+                    output_params['b:v' and 'b:a'] = bits_limit / longest_duration
 
                     # Create the new video
                     input_filename_pass2 = 'vids/pass2' + output_filename.split('/')[1]
