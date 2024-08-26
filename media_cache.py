@@ -92,8 +92,9 @@ async def download_nth_video(ctx, n, ydl_opts={}):
             return None, None, False
     if(re.match(soundcloud_regex, input_vid) or re.match(bandcamp_regex, input_vid)): # soundcloud/bandcamp url
         result, input_vid = await yt(ctx, input_vid, ctx.message.id, extra_ydl_opts={
-            'noplaylist': True, 
-            'format': 'bestaudio', 
+            'noplaylist': True,
+            'format': 'bestaudio',
+            'ffmpeg_location': 'ffmpeg-static/ffmpeg.exe',
             'outtmpl': 'vids/target' + str(ctx.message.id) + '.mp3'
         })
     if(not is_yt): # discord video
