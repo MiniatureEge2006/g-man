@@ -65,9 +65,9 @@ async def on_message(message):
     elif(re.match(media_cache.yt_regex, message.content) or re.match(media_cache.twitter_regex, message.content) or re.match(media_cache.tumblr_regex, message.content)):
         media_cache.add_to_cache(message, message.content)
         print("Added yt/twitter/tumblr url! " + message.content)
-    elif(re.match(media_cache.soundcloud_regex, message.content):
+    elif(re.match(media_cache.soundcloud_regex, message.content) or re.match(media_cache.bandcamp_regex, message.content)):
         media_cache.add_to_cache(message, message.content)
-        print("Added soundcloud url! " + message.content)
+        print("Added soundcloud/bandcamp url! " + message.content)
 
     await bot.process_commands(message)
 
