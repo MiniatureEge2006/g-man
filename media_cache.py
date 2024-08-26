@@ -15,7 +15,7 @@ tumblr_regex = (r'(https://)?(www\.)?((va\.media\.tumblr\.com/tumblr_.+\.(mp4|MP
 hosted_file_regex = (r'(https://)?(www\.)?.+\.(com|org|net|us|co|edu|ca|cn|fr|ch|au|in|de|jp|nl|uk|mx|no|ru|br|se|es)/.+\.(png|PNG|jpg|JPG|jpeg|JPEG|mp4|MP4|webm|WEBM|mov|MOV|mkv|MKV|gif|GIF)')
 soundcloud_regex = (r'(https://(?:www.)?soundcloud\.com/[\w-]+/?(?:sets/)?[\w-]+)')
 
-audio_filetypes = ['mp3', 'ogg', 'wav']
+audio_filetypes = ['mp3', 'ogg', 'wav', 'opus']
 video_filetypes = ['mp4', 'mov', 'avi', 'webm', 'flv', 'wmv', 'mkv']
 image_filetypes = ['gif', 'png', 'jpg', 'jpeg']
 approved_filetypes = audio_filetypes + video_filetypes + image_filetypes
@@ -92,7 +92,7 @@ async def download_nth_video(ctx, n, ydl_opts={}):
     if(re.match(soundcloud_regex, input_vid): # soundcloud url
         result, input_vid = await yt(ctx, input_vid, ctx.message.id, extra_ydl_opts={
             'noplaylist': True, 
-            'format': 'mp3', 
+            'format': 'bestaudio', 
             'outtmpl': 'vids/target' + str(ctx.message.id) + '.mp3'
         })
     if(not is_yt): # discord video
