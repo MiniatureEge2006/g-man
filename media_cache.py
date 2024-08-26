@@ -90,7 +90,11 @@ async def download_nth_video(ctx, n, ydl_opts={}):
             #await ctx.send("Could not download the video!")
             return None, None, False
     if(re.match(soundcloud_regex, input_vid): # soundcloud url
-        result, input_vid = await yt(ctx, input_vid, ctx.message.id, extra_ydl_opts={'noplaylist': True, 'format': 'mp3', 'outtmpl': 'vids/target' + str(ctx.message.id) + '.mp3'})
+        result, input_vid = await yt(ctx, input_vid, ctx.message.id, extra_ydl_opts={
+            'noplaylist': True, 
+            'format': 'mp3', 
+            'outtmpl': 'vids/target' + str(ctx.message.id) + '.mp3'
+        })
     if(not is_yt): # discord video
         file_extension = input_vid.split('.')[-1]
         input_vid_filepath = f'vids/target{ctx.message.id}{n}.{file_extension}'
