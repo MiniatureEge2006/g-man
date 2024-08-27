@@ -106,7 +106,7 @@ You can bookmark videos and load them in any server with g_man. Bookmark labels 
 | download<br>fix<br>dl | `!download` | | Downloads the last video sent and sends it as an MP4. Useful for downloading youtube/twitter videos and fixing videos Discord has trouble playing. | `!download` |
 | img2vid | `!img2vid` | | Converts an image to a video. | `!img2vid` |
 | gif | `!gif [fps]` | `1 to 24` | Converts the video to a GIF. Default `[fps]` is 24, consider lowering this number or scaling the video down if the GIF gets cut off. | `!gif`<br><br>`!gif 12`|
-| png | `!png` | | Converts a video to an image. | `!png` |
+| vid2img | `!vid2img` | | Converts a video to an image. | `!vid2img` |
 | mp3 | `!mp3` | | Converts the video to an mp3. Also useful for downloading audio from websites like SoundCloud. | `!mp3`|
 | swap | `!swap` | | Swaps the last two videos sent, simply by reposting the second to last video. | `!swap` |
 | time<br>timestamp | `!time [speed]` | `0.05 to inf` | Draws a timestamp on the video to help you figure out when to `!extract`. You can set a lower `[speed]` for the video to help with precise timing.<br><br>NOTE: The video created by this command is ignored by g_man! This is so you don't have to run `!swap` or `!undo` afterwards in order to `!extract` from the original video. | `!time`<br><br>`!time 0.5` |
