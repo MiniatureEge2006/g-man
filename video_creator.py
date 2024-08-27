@@ -43,13 +43,10 @@ async def apply_filters_and_send(ctx, code, kwargs, ydl_opts=None):
     await set_progress_bar(ctx.message, 1)
 
     is_mp3 = False
-    is_png = False
     is_gif = False
     is_ignored_mp4 = False
     if('is_mp3' in kwargs):
         is_mp3 = kwargs['is_mp3']
-    if('is_png' in kwargs):
-        is_png = kwargs['is_png']
     if('is_gif' in kwargs):
         is_gif = kwargs['is_gif']
     if('is_ignored_mp4' in kwargs):
@@ -59,8 +56,6 @@ async def apply_filters_and_send(ctx, code, kwargs, ydl_opts=None):
     output_filename = f'vids/{ctx.message.id}.'
     if(is_mp3):
         output_filename += 'mp3'
-    elif(is_png):
-        output_filename += 'png'
     elif(is_gif):
         output_filename += 'gif'
     elif(is_ignored_mp4): # Regular mp4, but not recorded in the database
@@ -94,8 +89,6 @@ async def apply_filters_and_send(ctx, code, kwargs, ydl_opts=None):
                 ffmpeg_output = None
                 if(is_mp3):
                     ffmpeg_output = ffmpeg.output(astream, output_filename, **output_params)
-                elif(is_png):
-                    ffmpeg_output = ffmpeg.output(vstream, output_filename, **output_params)
                 elif(is_gif):
                     ffmpeg_output = ffmpeg.output(vstream, output_filename, **output_params)
                 else:
