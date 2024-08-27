@@ -39,12 +39,28 @@ class Utility(commands.Cog):
     async def gif(self, ctx, fps : int = 24):
         fps = max(1, min(fps, 24))
         await video_creator.apply_filters_and_send(ctx, self._gif, {'is_gif':True, 'fps':fps})
-    
-    async def _png(self, ctx, vstream, astream, kwargs):
-        return (vstream, astream, {})
-        @commands.command()
-        async def png(self, ctx):
-            await video_creator.apply_filters_and_send(ctx, self._png, {'is_png': True})
+
+    @commands.command()
+    async def vid2img(self, ctx):
+        await video_creator.set_progress_bar(ctx.message, 0)
+        input_filepath = media_cache.get_from_cache(str(ctx.message.channel.id))[-1]
+        output_filename = 'vids/' + str(ctx.message.channel.id) + '.png'
+        await video_creator.set_progress_bar(ctx.message, 1)
+
+        await video_creator.set_progress_bar(ctx.message, 2)
+        subprocess.run([
+            'ffmpeg',
+            '-i', f'{input_filepath}',
+            '-frames:v', '1',
+            output_filename
+        ])
+        await video_creator.set_progress_bar(ctx.message, 3)
+        if(os.path.isfile(output_filename)):
+            await ctx.send(file=discord.File(output_filename))
+            os.remove(output_filename)
+        else:
+            await ctx.send(f'There was an error converting the video (`{input_filepath}`) to an image.')
+        await ctx.message.clear_reactions()
 
 
     @commands.command()
