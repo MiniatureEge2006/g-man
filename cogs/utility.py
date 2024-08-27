@@ -39,6 +39,12 @@ class Utility(commands.Cog):
     async def gif(self, ctx, fps : int = 24):
         fps = max(1, min(fps, 24))
         await video_creator.apply_filters_and_send(ctx, self._gif, {'is_gif':True, 'fps':fps})
+    
+    async def _png(self, ctx, vstream, astream, kwargs):
+        return (vstream, astream, {})
+        @commands.command()
+        async def png(self, ctx):
+            await video_creator.apply_filters_and_send(ctx, self._png, {'is_png': True})
 
 
     @commands.command()
