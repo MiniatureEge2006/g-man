@@ -90,9 +90,9 @@ async def on_command_error(ctx, error):
 async def reload(ctx, *, exs : str = None):
     module_msg = 'd' # d
     if(exs is None):
-        module_msg = reload_extensions(extensions)
+        module_msg = await reload_extensions(extensions)
     else:
-        module_msg = reload_extensions(exs.split())
+        module_msg = await reload_extensions(exs.split())
     await ctx.send(module_msg)
 async def setup(bot):
  for ex in extensions:
