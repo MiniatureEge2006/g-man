@@ -25,8 +25,8 @@ async def reload_extensions(exs):
     module_msg = ''
     for ex in exs:
         try:
+           #await bot.unload_extension(ex)
            await bot.load_extension(ex)
-          # await bot.unload_extension(ex) This pretty much just unloads the extensions after loading them, resulting in commands not working.
             module_msg += 'module "{}" reloaded\n'.format(ex)
         except Exception as e:
             module_msg += 'reloading "{}" failed, error is:```{}```\n'.format(ex, e)
