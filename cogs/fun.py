@@ -257,7 +257,7 @@ class Fun(commands.Cog):
     async def sequencer(self, ctx, *, notes : str = '0 0 12x 7x ..'):
         # Unfortunately, does not work at the moment
         # Maybe one day...
-        return
+        # return
         # Tokenize
         notes = notes.split(' ')
         await ctx.send(notes)
