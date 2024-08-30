@@ -83,6 +83,7 @@ _Note_: You can use `k` for kilobits in your parameters. Examples: `4.3k` instea
 | mahna<br>mahnamahna | `!mahna` | | Replaces the video's audio with "Mah Na Mah Na" from the Muppets soundtrack. | `!mahna` |
 | pingpong | `!pingpong` | | Plays the video, then plays it in reverse. | `!pingpong` |
 | rainbow | `!rainbow [speed]` | `-inf to inf` | Makes the hue change over time, creating a rainbow effect. Default `[speed]` is 1. | `!rainbow`<br><br>`!rainbow 2` |
+| sequencer | `!sequencer [notes]` | `-inf to inf` | Sequences notes. | `!sequencer 0 0 12x 7x ..` |
 | tetris | `!tetris` | | Replaces the video's audio with the vocoded version of tetris beatbox. | `!tetris` |
 | text | `!text [top_text]\|[bottom_text]` | | Adds captions to the top and bottom of the video. You separate `[top_text]` and `[bottom_text]` with a pipe symbol `\|`. | `!text this will be on top\|and this will be on the bottom`<br><br>`!text this will only be on top`<br><br>`!text \|this will only be on the bottom` |
 | trippy | `!trippy [speed] [blend_mode]` | speed: `0.5 to 1` | Overlays and blends a slowed down version of the video on top of itself. You can control the `[speed]` of the overlay, by default it's 0.97.<br><br>`[blend_mode]` specifies how the videos blend together, by default it's set to `average`. A full list of blend modes can be found here: https://ffmpeg.org/ffmpeg-filters.html#blend-1 | `!trippy`<br><br>`!trippy 0.7`<br><br>`!trippy 0.8 xor` |
