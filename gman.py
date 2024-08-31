@@ -37,7 +37,7 @@ async def reload_extensions(exs):
         try:
            #await bot.unload_extension(ex)
            await bot.load_extension(ex)
-            module_msg += 'module "{}" reloaded\n'.format(ex)
+           module_msg += 'module "{}" reloaded\n'.format(ex)
         except Exception as e:
             module_msg += 'reloading "{}" failed, error is:```{}```\n'.format(ex, e)
     return module_msg
@@ -72,7 +72,7 @@ async def on_message(message):
     elif(re.match(media_cache.discord_cdn_regex, message.content) or re.match(media_cache.hosted_file_regex, message.content)):
         media_cache.add_to_cache(message, message.content)
         print("Added discord cdn/hosted file url!")
-    elif(re.match(media_cache.yt_regex, message.content) or re.match(media_cache.twitter_regex, message.content) or re.match(media_cache.tumblr_regex, message.content) or re.match(media_cache.medaltv_regex, message.content):
+    elif(re.match(media_cache.yt_regex, message.content) or re.match(media_cache.twitter_regex, message.content) or re.match(media_cache.tumblr_regex, message.content) or re.match(media_cache.medaltv_regex, message.content)):
         media_cache.add_to_cache(message, message.content)
         print("Added yt/twitter/tumblr url! " + message.content)
     elif(re.match(media_cache.soundcloud_regex, message.content) or re.match(media_cache.bandcamp_regex, message.content)):
