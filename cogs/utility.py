@@ -66,10 +66,19 @@ class Utility(commands.Cog):
     @commands.command()
     async def help(self, ctx, command_name : str = ''):
         if(command_name == ''):
-            await ctx.send('https://github.com/MiniatureEge2006/g_man-revived/blob/master/COMMANDS.md')
+            await ctx.send(embed=discord.Embed(title='Command list', color=0x0000FF)
+                           .add_field(name='Bitrate', value='`b` `vb` `ab`')
+                           .add_field(name='Filters', value='`amplify` `audioblend/audiomerge` `audioswap` `backwards/reverse` `bassboost` `bitcrush` `blur` `brightness` `concat/merge` `contrast` `edges` `equalize/equalizer` `extract` `fps` `gamma` `greenscreen` `hue` `interpolate` `invert/inverse/negate/negative` `lagfun` `loop` `nervous` `pitch` `retro` `rotate` `rotatedeg` `saturate/saturation` `scale/size` `scroll` `semitone` `shader` `speed` `volume` `wobble` `zoom`')
+                           .add_field(name='Corruption', value='`corrupt` `faketime` `mosh` `rearrange` `smear` `stutter`')
+                           .add_field(name='Fun effects', value='`americ` `cartoony/cartoon` `deepfry` `demonize` `harmonize` `harmonizedeep` `histogram` `hypercam` `ifunny` `mahna/mahnamahna` `pingpong` `rainbow` `sequencer` `tetris` `text` `trippy` `tutorial` `vintage`')
+                           .add_field(name='Bookmarks', value='`save/store` `load/use` `delete/remove` `bookmarks`')
+                           .add_field(name='Utility', value='`download/fix/dl` `img2vid` `gif` `vid2img` `mp3` `swap` `time/timestamp` `undo`')
+                           .add_field(name='Advanced (power users only!)', value='`filter`')
+                           .add_field(name='Owner only (NO ACCESS)', value='`reload` `eval/exec/code`'))
             return
         if(command_name == 'filter'):
-            await ctx.send('For more information about the filter command, please read: https://github.com/MiniatureEge2006/g_man-revived/blob/master/COMMANDS.md#filter-command')
+            await ctx.send(embed=discord.Embed(title='Filter command', description='The filter command is used to apply almost any filter that is in FFMPEG. If you know how FFMPEG syntax works then this command is the perfect command for you. However, if you don\'t know how this works then I suggest reading the FFMPEG documentation [here.](https://ffmpeg.org/ffmpeg-filters.html)', color=0xFF0000)
+                           .add_field(name='Format, examples and info', value='`!filter <filter_name> <filter_args>`\n`<filter_args>` are formatted in this way: `arg1_name=arg1_value arg2_name=arg2_value ...`\nExamples: `!filter aecho` or `!filter edgedetect low=0.1 mode=wires` or `!filter drawtext text="g_man was here" x="(main_w-tw)/2" y="(main_h-th)/2 + 100*sin(t*6)" fontsize=50`\nMultiple: `!filter reverse !filter areverse` or `!filter eq contrast=1.2 !filter hue h=60 enable=gte(t,3) !filter negate`'))
             return
         if(command_name == 'help'):
             await ctx.send('`!help` to get a list of all the commands.\n`!help <command_name>` to get help on a specific command.')
@@ -98,7 +107,7 @@ class Utility(commands.Cog):
 
             if(command_name not in command['names']):
                 continue
-            embed = discord.Embed(title=command_name, description=command['description'])
+            embed = discord.Embed(title=command_name, description=command['description'], color=0x00FF00)
             embed.add_field(name='Syntax', value=command['syntax'], inline=False)
             if(command['limits'] != ''):
                 embed.add_field(name='Min/Max Values', value=command['limits'], inline=False)
@@ -119,7 +128,7 @@ class Utility(commands.Cog):
             break
 
         if(embed is None):
-            await ctx.send("Command not found, here's a list of all the commands: https://github.com/MiniatureEge2006/g_man-revived/blob/master/COMMANDS.md")
+            await ctx.send("Command not found. Please type `!help` to see a list of commands.")
 
         
     # TODO: make this automatic in video_creator.py
