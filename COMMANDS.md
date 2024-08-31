@@ -126,3 +126,9 @@ EXPERIMENTAL: You can apply almost any filter from FFMPEG using the !filter comm
 * Examples:
     * `!filter reverse !filter areverse`
     * `!filter eq contrast=1.2 !filter hue h=60 enable=gte(t,3) !filter negate`
+
+# Owner only
+| Command | Format | Min/Max Values | Description | Examples |
+| --- | --- | --- | --- | --- |
+| reload | `!reload` | | Reloads a cog, or all cogs by just typing the command. Mostly useful to reload a cog to see changes. | `!reload`<br><br>`!reload filter` |
+| eval<br>exec<br>code | `!eval` | | Evaluates arbitrary code in the bot's account. **DO NOT USE IF YOU DON'T KNOW WHAT THIS DOES. USE AT YOUR OWN RISK** | `!eval print("hello world")`<br><br>`!eval await ctx.send("hi")` |
