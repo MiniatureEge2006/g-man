@@ -6,7 +6,7 @@ import bot_info
 import database as db
 import discord
 from discord.ext import commands
-from discord.ext import Paginator
+from discord.ext.buttons import Paginator
 import media_cache
 import os
 import re
