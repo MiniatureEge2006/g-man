@@ -1,8 +1,12 @@
 import asyncio
+import contextlib
+import io
+import textwrap
 import bot_info
 import database as db
 import discord
 from discord.ext import commands
+from discord.ext import Paginator
 import media_cache
 import os
 import re
@@ -10,6 +14,12 @@ import sys
 import traceback
 from urllib.parse import urlparse
 
+class Pag(Paginator):
+    async def teardown(self):
+        try:
+            await self.page.clear_reactions()
+        except discord.HTTPException:
+            pass
 
 # If any videos were not deleted while the bot was last up, remove them
 vid_files = [f for f in os.listdir('vids') if os.path.isfile(os.path.join('vids', f))]
@@ -100,6 +110,53 @@ async def setup(bot):
         await bot.load_extension(ex)
     except Exception as e:
         print('Failed to load {} because: {}'.format(ex, e))
+
+@bot.command(name="eval", aliases=["exec", "code"])
+@bot_info.is_owner()
+async def _eval(ctx, *, code):
+    code = clean_code(code)
+
+    local_variables = {
+        "discord": discord,
+        "commands": commands,
+        "bot": bot,
+        "ctx": ctx,
+        "channel": ctx.channel,
+        "author": ctx.author,
+        "guild": ctx.guild,
+        "message": ctx.message
+
+    }
+
+    stdout = io.StringIO()
+    
+    try:
+        with contextlib.redirect_stdout(stdout):
+            exec(
+                f"async def func():\n{textwrap.indent(code, '    ')}", local_variables,
+            )
+
+            obj = await local_variables["func"]()
+            result = f'{stdout.getvalue()}\n-- {obj}\n'
+    except Exception as e:
+        result = "".join(traceback.format_exception(e, e, e.__traceback__))
+    
+    pager = Pag(
+        timeout=100,
+        entries=[result[i: i + 2000] for i in range(0, len(result), 2000)],
+        length=1,
+        prefix="```py\n",
+        suffix="```",
+        color=discord.colour
+    )
+
+    await pager.start(ctx)
+
+def clean_code(content):
+    if(content.startswith("```") and content.endswith("```")):
+        return "\n".join(content.split("\n")[1:][:-3])
+    else:
+        return content
 
 
 # Start the bot
