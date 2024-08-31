@@ -13,8 +13,7 @@ Filters are applied using FFMPEG, with some corruption commands using tomato.py 
 * Save your videos using a personal bookmark system, and load your bookmarks in any server g_man is in.
 
 ## Usage/Commands
-https://github.com/MiniatureEge2006/g_man-revived/blob/master/COMMANDS.md<br>
-You can get this link from within Discord by sending "!help" in a channel
+You can now just type `!help` in a channel to see all the commands.
 
 ## Requirements
 * Static build of ffmpeg (version 4.2 or above)
