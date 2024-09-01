@@ -98,7 +98,7 @@ async def on_command_error(ctx, error):
 @bot.command(description='Reloads extensions. Usage: /reload [extension_list]', pass_context=True)
 @bot_info.is_owner()
 async def reload(ctx, *, exs : str = None):
-    if(str(ctx.message.author.id) not in bot_info.data['owners']:
+    if(str(ctx.message.author.id) not in bot_info.data['owners']):
         await ctx.send("Error using command: You do not have permission to use this command. (Are you owner?)")
         return
     else:
@@ -118,7 +118,7 @@ async def setup(bot):
 @bot.command(name="eval", aliases=["exec", "code"])
 @bot_info.is_owner()
 async def _eval(ctx, *, code):
-    if(str(ctx.message.author.id) not in bot_info.data['owners']:
+    if(str(ctx.message.author.id) not in bot_info.data['owners']):
         await ctx.send("Error using command: You do not have permission to use this command. (Are you owner?)")
         return
     else:
