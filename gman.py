@@ -98,6 +98,10 @@ async def on_command_error(ctx, error):
 @bot.command(description='Reloads extensions. Usage: /reload [extension_list]', pass_context=True)
 @bot_info.is_owner()
 async def reload(ctx, *, exs : str = None):
+    if(str(ctx.message.author.id) not in bot_info.data['owners']:
+        await ctx.send("Error using command: You do not have permission to use this command. (Are you owner?)")
+        return
+    else:
     module_msg = 'd' # d
     if(exs is None):
         module_msg = await reload_extensions(extensions)
@@ -114,13 +118,19 @@ async def setup(bot):
 @bot.command(name="eval", aliases=["exec", "code"])
 @bot_info.is_owner()
 async def _eval(ctx, *, code):
+    if(str(ctx.message.author.id) not in bot_info.data['owners']:
+        await ctx.send("Error using command: You do not have permission to use this command. (Are you owner?)")
+        return
+    else:
     code = clean_code(code)
 
     local_variables = {
         "discord": discord,
         "commands": commands,
         "bot": bot,
+        "client": bot,
         "ctx": ctx,
+        "context": ctx,
         "channel": ctx.channel,
         "author": ctx.author,
         "guild": ctx.guild,
