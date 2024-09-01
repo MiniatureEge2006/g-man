@@ -98,10 +98,6 @@ async def on_command_error(ctx, error):
 @bot.command(description='Reloads extensions. Usage: /reload [extension_list]', pass_context=True)
 @bot_info.is_owner()
 async def reload(ctx, *, exs : str = None):
-    if(str(ctx.message.author.id) not in bot_info.data['owners']):
-        await ctx.send("Error using command: You do not have permission to use this command. (Are you owner?)")
-        return
-    else:
     module_msg = 'd' # d
     if(exs is None):
         module_msg = await reload_extensions(extensions)
@@ -118,10 +114,6 @@ async def setup(bot):
 @bot.command(name="eval", aliases=["exec", "code"])
 @bot_info.is_owner()
 async def _eval(ctx, *, code):
-    if(str(ctx.message.author.id) not in bot_info.data['owners']):
-        await ctx.send("Error using command: You do not have permission to use this command. (Are you owner?)")
-        return
-    else:
     code = clean_code(code)
 
     local_variables = {
@@ -138,16 +130,16 @@ async def _eval(ctx, *, code):
 
     }
 
-    stdout = io.StringIO()
+    sys.stdout = io.StringIO()
     
     try:
-        with contextlib.redirect_stdout(stdout):
+        with contextlib.redirect_stdout(sys.stdout):
             exec(
                 f"async def func():\n{textwrap.indent(code, '    ')}", local_variables,
             )
 
             obj = await local_variables["func"]()
-            result = f'{stdout.getvalue()}\n-- {obj}\n'
+            result = f'{sys.stdout.getvalue()}\n-- {obj}\n'
     except Exception as e:
         result = "".join(traceback.format_exception(e, e, e.__traceback__))
     
