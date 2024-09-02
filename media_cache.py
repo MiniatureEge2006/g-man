@@ -48,7 +48,7 @@ def get_from_cache(channel):
 
 # Download youtube video
 async def yt(ctx, url, suffix, extra_ydl_opts=None):
-    resolutions_to_try = (360, 720, 240, 480, 1080)
+    resolutions_to_try = (480, 360, 240, 720, 1080)
     async with ctx.typing():
         for res in resolutions_to_try:
             try:
