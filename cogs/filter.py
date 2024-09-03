@@ -3,7 +3,6 @@ import asyncio
 import discord
 from discord.ext import commands
 import ffmpeg
-from ffprobe import FFProbe
 import filter_helper
 import math
 import media_cache
@@ -481,44 +480,33 @@ class Filter(commands.Cog):
         await video_creator.apply_filters_and_send(ctx, self._brightness, {'brightness':brightness})
 
 
-    async def _concat(self, ctx, vstream, astream, kwargs):
-        first_vid_filepath = kwargs['first_vid_filepath']
-        second_vid_filepath = kwargs['input_filename']
-
-        target_width = 640
-        target_height = 480
-        first_vid_metadata = FFProbe(first_vid_filepath)
-        second_vid_metadata = FFProbe(second_vid_filepath)
-        for stream in first_vid_metadata.streams + second_vid_metadata.streams:
-            if(stream.is_video()):
-                width, height = stream.frame_size()
-                target_width = min(target_width, width)
-                target_height = min(target_height, height)
-
-        first_stream = ffmpeg.input(first_vid_filepath)
-        vfirst = (
-            first_stream.video
-            .filter('scale', w=target_width, h=target_height)
-            .filter('setsar', r='1:1')
-        )
-        afirst = first_stream.audio
-        
-        vstream = (
-            vstream
-            .filter('scale', w=target_width, h=target_height)
-            .filter('setsar', r='1:1')
-        )
-
-        joined = ffmpeg.concat(vfirst, afirst, vstream, astream, v=1, a=1).node
-        return (joined[0], joined[1], {'vsync':0})
+    
     @commands.command()
     async def concat(self, ctx):
-        first_vid_filepath, is_yt, result = await media_cache.download_nth_video(ctx, 1)
-        if(not result):
-            return
-        await video_creator.apply_filters_and_send(ctx, self._concat, {'first_vid_filepath':first_vid_filepath})
-        if(os.path.isfile(first_vid_filepath)):
-            os.remove(first_vid_filepath)
+        await video_creator.set_progress_bar(ctx.message, 0)
+        first_vid = media_cache.get_from_cache(str(ctx.message.channel.id))[-1]
+        second_vid = media_cache.get_from_cache(str(ctx.message.channel.id))[-2]
+        output_filename = 'vids/' + str(ctx.message.id) + '.mp4'
+        await video_creator.set_progress_bar(ctx.message, 1)
+        
+        await video_creator.set_progress_bar(ctx.message, 2)
+        subprocess.run([
+            'ffmpeg',
+            '-i', f'{first_vid}',
+            '-i', f'{second_vid}',
+            '-filter_complex', 
+            '[0:v]scale=640:480,setsar=1[v0];[1:v]scale=640:480,setsar=1[v1];[v0][0:a][v1][1:a]concat=n=2:v=1:a=1[v][a]',
+            '-map', '[v]',
+            '-map', '[a]',
+            output_filename
+        ])
+        await video_creator.set_progress_bar(ctx.message, 3)
+        if(os.path.isfile(output_filename)):
+            await ctx.send(file=discord.File(output_filename))
+            os.remove(output_filename)
+        else:
+            await ctx.send(f'There was an error concatenating the videos. (`{first_vid}`) (`{second_vid}`)')
+        await ctx.message.clear_reactions()
     @commands.command()
     async def merge(self, ctx):
         await self.concat(ctx)
@@ -996,4 +984,4 @@ class Filter(commands.Cog):
         
 
 async def setup(bot):
-    await bot.add_cog(Filter(bot))
+   await bot.add_cog(Filter(bot))
