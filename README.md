@@ -21,7 +21,7 @@ You can now just type `!help` in a channel to see all the commands.
 * A MongoDB database
   * The bot looks for a database called `gman`. It uses a collection called `inventory` for the bookmark system and `videos` for keeping track of videos sent.
 * AviGlitch, see https://github.com/ucnv/aviglitch for installation instructions. This is needed for the !mosh command.
-* All the Python packages in requirements.txt **(You will need Python 3.11.9)**
+* All the Python packages in requirements.txt (As of right now, the latest Python version is supported.)
 
 You can install the Python packages, preferably in a virtual environment, by running
 ```
