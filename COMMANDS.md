@@ -112,6 +112,7 @@ You can bookmark videos and load them in any server with g_man. Bookmark labels 
 | swap | `!swap` | | Swaps the last two videos sent, simply by reposting the second to last video. | `!swap` |
 | time<br>timestamp | `!time [speed]` | `0.05 to inf` | Draws a timestamp on the video to help you figure out when to `!extract`. You can set a lower `[speed]` for the video to help with precise timing.<br><br>NOTE: The video created by this command is ignored by g_man! This is so you don't have to run `!swap` or `!undo` afterwards in order to `!extract` from the original video. | `!time`<br><br>`!time 0.5` |
 | undo | `!undo` | | Deletes the last video sent. | `!undo` |
+| ping | `!ping` | | Shows bot latency. | `!ping` |
 
 # Advanced
 ## !filter command
@@ -131,4 +132,6 @@ EXPERIMENTAL: You can apply almost any filter from FFMPEG using the !filter comm
 | Command | Format | Min/Max Values | Description | Examples |
 | --- | --- | --- | --- | --- |
 | reload | `!reload` | | Reloads a cog, or all cogs by just typing the command. Mostly useful to reload a cog to see changes. | `!reload`<br><br>`!reload filter` |
-| eval<br>exec<br>code | `!eval` | | Evaluates arbitrary code in the bot's account. **DO NOT USE IF YOU DON'T KNOW WHAT THIS DOES. USE AT YOUR OWN RISK** | `!eval print("hello world")`<br><br>`!eval await ctx.send("hi")` |
+| eval<br>exec<br>code | `!eval [code]` | | Evaluates arbitrary code in the bot's account. **DO NOT USE IF YOU DON'T KNOW WHAT THIS DOES. USE AT YOUR OWN RISK.** | `!eval print("hello world")`<br><br>`!eval await ctx.send("hi")` |
+| blacklist | `!blacklist [user mention or id]` | | Blacklist a user from using the bot. | `!blacklist @jacquesmorneau Being a crappy bot developer.` |
+| unblacklist | `!unblacklist [user mention or id]` | | Unblacklist a user from using the bot. | `!unblacklist @jacquesmorneau` |
