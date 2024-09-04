@@ -479,33 +479,37 @@ class Filter(commands.Cog):
             pass
         await video_creator.apply_filters_and_send(ctx, self._brightness, {'brightness':brightness})
 
-    
+
     async def _concat(self, ctx, vstream, astream, kwargs):
-        await video_creator.set_progress_bar(ctx.message, 0)
         first_vid_filepath = kwargs['first_vid_filepath']
         second_vid_filepath = kwargs['input_filename']
-        output_filename = 'vids/' + str(ctx.message.id) + '.mp4'
-        await video_creator.set_progress_bar(ctx.message, 1)
 
-        await video_creator.set_progress_bar(ctx.message, 2)
+        target_width = 640
+        target_height = 480
+        first_vid_metadata = ffmpeg.probe(first_vid_filepath)
+        second_vid_metadata = ffmpeg.probe(second_vid_filepath)
+        for stream in first_vid_metadata['streams'] + second_vid_metadata['streams']:
+            if(stream['codec_type'] == 'video'):
+                width, height = stream['width'], stream['height']
+                target_width = min(target_width, width)
+                target_height = min(target_height, height)
+
+        first_stream = ffmpeg.input(first_vid_filepath)
+        vfirst = (
+            first_stream.video
+            .filter('scale', w=target_width, h=target_height)
+            .filter('setsar', r='1:1')
+        )
+        afirst = first_stream.audio
         
-        subprocess.run([
-            'ffmpeg',
-            '-i', f'{first_vid_filepath}',
-            '-i', f'{second_vid_filepath}',
-            '-filter_complex', 
-            '[0:v]scale=640:480,setsar=1[v0];[1:v]scale=640:480,setsar=1[v1];[v0][0:a][v1][1:a]concat=n=2:v=1:a=1[v][a]',
-            '-map', '[v]',
-            '-map', '[a]',
-            output_filename
-        ])
-        await video_creator.set_progress_bar(ctx.message, 3)
-        if(os.path.isfile(output_filename)):
-            await ctx.send(file=discord.File(output_filename))
-            os.remove(output_filename)
-        else:
-            await ctx.send(f'There was an error concatenating the videos. (`{first_vid_filepath}`) (`{second_vid_filepath}`)')
-        await ctx.message.clear_reactions()
+        vstream = (
+            vstream
+            .filter('scale', w=target_width, h=target_height)
+            .filter('setsar', r='1:1')
+        )
+
+        joined = ffmpeg.concat(vfirst, afirst, vstream, astream, v=1, a=1).node
+        return (joined[0], joined[1], {'vsync':0})
     @commands.command()
     async def concat(self, ctx):
         first_vid_filepath, is_yt, result = await media_cache.download_nth_video(ctx, 1)
