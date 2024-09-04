@@ -62,7 +62,6 @@ class Utility(commands.Cog):
             await ctx.send(f'There was an error converting the video (`{input_filepath}`) to an image.')
         await ctx.message.clear_reactions()
 
-
     @commands.command()
     async def help(self, ctx, command_name : str = ''):
         if(command_name == ''):
@@ -72,13 +71,16 @@ class Utility(commands.Cog):
                            .add_field(name='Corruption', value='`corrupt` `faketime` `mosh` `rearrange` `smear` `stutter`')
                            .add_field(name='Fun effects', value='`americ` `cartoony/cartoon` `deepfry` `demonize` `harmonize` `harmonizedeep` `histogram` `hypercam` `ifunny` `mahna/mahnamahna` `pingpong` `rainbow` `sequencer` `tetris` `text` `trippy` `tutorial` `vintage`')
                            .add_field(name='Bookmarks', value='`save/store` `load/use` `delete/remove` `bookmarks`')
-                           .add_field(name='Utility', value='`download/fix/dl` `img2vid` `gif` `vid2img` `mp3` `swap` `time/timestamp` `undo`')
+                           .add_field(name='Utility', value='`download/fix/dl` `img2vid` `gif` `vid2img` `mp3` `swap` `time/timestamp` `undo` `ping`')
                            .add_field(name='Advanced (power users only!)', value='`filter`')
-                           .add_field(name='Owner only (NO ACCESS)', value='`reload` `eval/exec/code`'))
+                           .add_field(name='Owner only (NO ACCESS)', value='`reload` `eval/exec/code` `blacklist` `unblacklist`'))
             return
         if(command_name == 'filter'):
             await ctx.send(embed=discord.Embed(title='Filter command', description='The filter command is used to apply almost any filter that is in FFMPEG. If you know how FFMPEG syntax works then this command is the perfect command for you. However, if you don\'t know how this works then I suggest reading the FFMPEG documentation [here.](https://ffmpeg.org/ffmpeg-filters.html)', color=0xFF0000)
-                           .add_field(name='Format, examples and info', value='`!filter <filter_name> <filter_args>`\n`<filter_args>` are formatted in this way: `arg1_name=arg1_value arg2_name=arg2_value ...`\nExamples: `!filter aecho` or `!filter edgedetect low=0.1 mode=wires` or `!filter drawtext text="g_man was here" x="(main_w-tw)/2" y="(main_h-th)/2 + 100*sin(t*6)" fontsize=50`\nMultiple: `!filter reverse !filter areverse` or `!filter eq contrast=1.2 !filter hue h=60 enable=gte(t,3) !filter negate`'))
+                           .add_field(name='Format', value='`!filter <filtr_name> <filter_args>`\n`<filter_args>` are formatted in this way: `arg1_name=arg1_value arg2_name=arg2_value ...`')
+                           .add_field(name='Examples', value='`!filter aecho` or `!filter edgedetect low=0.1 mode=wires` or `!filter drawtext text="g_man was here" x="(main_w-tw)/2" y="(main_h-th)/2 + 100*sin(t*6)" fontsize=50`')
+                           .add_field(name='Multiple filters', value='`!filter reverse !filter areverse` or `!filter eq contrast=1.2 !filter hue h=60 enable=gte(t,3) !filter negate`')
+                           .add_field(name="Info", value='At the moment you **cannot** apply filters requiring multiple inputs.'))
             return
         if(command_name == 'help'):
             await ctx.send('`!help` to get a list of all the commands.\n`!help <command_name>` to get help on a specific command.')
@@ -101,8 +103,8 @@ class Utility(commands.Cog):
                 'names' : command[0].split('<br>'),
                 'syntax' : command[1].replace('<br><br>','\n'),
                 'limits' : command[2].replace('<br>', '\n'),
-                'description' : command[3].replace('<br>', '\n').replace('\|', '|'),
-                'examples' : command[4].replace('<br><br>', '\n').replace('\|', '|')
+                'description' : command[3].replace('<br>', '\n').replace('\\|', '|'),
+                'examples' : command[4].replace('<br><br>', '\n').replace('\\|', '|')
             }
 
             if(command_name not in command['names']):
@@ -193,7 +195,7 @@ class Utility(commands.Cog):
                 text="%{pts}",
                 #x="main_w/2 - tw/2", y="main_h/2 - th/2",
                 x="15", y="main_h - th*2 - 35",
-                fontsize=40, fontcolor="white", borderw=2, bordercolor="black",
+                fontsize=40, fontcolor="white", fontfile="/windows/fonts/arial.ttf", borderw=2, bordercolor="black",
                 escape_text=False
             )
         )
@@ -222,12 +224,18 @@ class Utility(commands.Cog):
         await vid_to_undo.delete()
         await ctx.message.delete()
         db.vids.delete_one({'message_id': vid_msg_id})
-
-
-
-        
-
-
+    
+    @commands.command()
+    async def ping(self, ctx):
+        if round(self.bot.latency * 1000) <= 50:
+            embed = discord.Embed(title="Bot latency", description=f"Pong! Latency is {round(self.bot.latency * 1000)} ms", color=0x00FF00)
+        elif round(self.bot.latency * 1000) <= 100:
+            embed = discord.Embed(title="Bot latency", description=f"Pong! Latency is {round(self.bot.latency * 1000)} ms", color=0xFFFF00)
+        elif round(self.bot.latency * 1000) <= 200:
+            embed = discord.Embed(title="Bot latency", description=f"Pong! Latency is {round(self.bot.latency * 1000)} ms", color=0xFFCC00)
+        else:
+            embed = discord.Embed(title="Bot latency", description=f"Pong! Latency is {round(self.bot.latency * 1000)} ms", color=0xFF0000)
+        await ctx.send(embed=embed)
 
 async def setup(bot):
     await bot.add_cog(Utility(bot))
