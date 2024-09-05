@@ -17,7 +17,7 @@ hosted_file_regex = (r'(https://)?(www\.)?.+\.(com|org|net|us|co|edu|ca|cn|fr|ch
 soundcloud_regex = (r'(https://(?:www.)?soundcloud\.com/[\w-]+/?(?:sets/)?[\w-]+)')
 bandcamp_regex = (r'(https://)?([\d|\w]+)\.bandcamp\.com/?.*')
 
-audio_filetypes = ['mp3', 'ogg', 'wav', 'opus', 'm4a', 'flac']
+audio_filetypes = ['mp3', 'ogg', 'wav', 'opus', 'm4a', 'flac', 'wma', 'mka']
 video_filetypes = ['mp4', 'mov', 'avi', 'webm', 'flv', 'wmv', 'mkv']
 image_filetypes = ['gif', 'png', 'jpg', 'jpeg']
 approved_filetypes = audio_filetypes + video_filetypes + image_filetypes
