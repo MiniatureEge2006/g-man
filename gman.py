@@ -106,6 +106,8 @@ async def on_message_delete(message):
 # Command error
 @bot.event
 async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandNotFound):
+        return
     if(str(ctx.message.author.id) not in bot_info.data['owners']):
         await ctx.send("You do not have permission to run this command. (Are you owner?)")
         return
