@@ -106,13 +106,14 @@ async def on_message_delete(message):
 # Command error
 @bot.event
 async def on_command_error(ctx, error):
-    if isinstance(error, commands.CommandNotFound):
+    if(isinstance(error, commands.CommandNotFound)):
+        return
+    if(ctx.message.author.id in bot.blacklisted_users):
+        await ctx.send("You are blocked from using G-Man.")
         return
     if(str(ctx.message.author.id) not in bot_info.data['owners']):
         await ctx.send("You do not have permission to run this command. (Are you owner?)")
         return
-    if isinstance(error, Blacklisted):
-        return await ctx.send("You are blocked from using G-Man.")
     else:
         if(not isinstance(error, commands.CommandNotFound)):
             await ctx.send('Oops, something is wrong!\n```\n' + repr(error) + '\n```')
@@ -121,24 +122,24 @@ async def on_command_error(ctx, error):
     
 @bot.command()
 @bot_info.is_owner()
-async def blacklist(ctx, user: discord.Member, *, reason):
+async def block(ctx, user: discord.Member, *, reason):
      if ctx.message.author.id == user.id:
-        await ctx.send("Don't blacklist yourself lol")
+        await ctx.send("Don't block yourself dummy")
         return
      bot.blacklisted_users.append(user.id)
      data = read_json("blacklistedusers")
      data["blacklistedUsers"].append(user.id)
      write_json(data, "blacklistedusers")
-     await ctx.send(f"Blacklisted {user.name}. Reason: `{reason}`")
+     await ctx.send(f"Blocked {user.name}. Reason: `{reason}`")
 
 @bot.command()
 @bot_info.is_owner()
-async def unblacklist(ctx, user: discord.Member):
+async def unblock(ctx, user: discord.Member):
      bot.blacklisted_users.remove(user.id)
      data = read_json("blacklistedusers")
      data["blacklistedUsers"].remove(user.id)
      write_json(data, "blacklistedusers")
-     await ctx.send(f"Unblacklisted {user.name}.")
+     await ctx.send(f"Unblocked {user.name}.")
 
 # Reloading extensions
 @bot.command(description='Reloads extensions. Usage: /reload [extension_list]', pass_context=True)
