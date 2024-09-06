@@ -73,7 +73,7 @@ class Utility(commands.Cog):
                            .add_field(name='Bookmarks', value='`save/store` `load/use` `delete/remove` `bookmarks`')
                            .add_field(name='Utility', value='`download/fix/dl` `img2vid` `gif` `vid2img` `mp3` `swap` `time/timestamp` `undo` `ping`')
                            .add_field(name='Advanced (power users only!)', value='`filter`')
-                           .add_field(name='Owner only (NO ACCESS)', value='`reload` `eval/exec/code` `blacklist` `unblacklist`'))
+                           .add_field(name='Owner only (NO ACCESS)', value='`reload` `eval/exec/code` `block` `unblock`'))
             return
         if(command_name == 'filter'):
             await ctx.send(embed=discord.Embed(title='Filter command', description='The filter command is used to apply almost any filter that is in FFMPEG. If you know how FFMPEG syntax works then this command is the perfect command for you. However, if you don\'t know how this works then I suggest reading the FFMPEG documentation [here.](https://ffmpeg.org/ffmpeg-filters.html)', color=0xFF0000)
