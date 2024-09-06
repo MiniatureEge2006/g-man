@@ -132,6 +132,6 @@ EXPERIMENTAL: You can apply almost any filter from FFMPEG using the !filter comm
 | Command | Format | Min/Max Values | Description | Examples |
 | --- | --- | --- | --- | --- |
 | reload | `!reload [cog]` | | Reloads a cog, or all cogs by just typing the command. Mostly useful to reload a cog to see changes. | `!reload`<br><br>`!reload filter` |
-| eval<br>exec<br>code | `!eval [code]` | | Evaluates arbitrary code in the bot's account. **DO NOT USE IF YOU DON'T KNOW WHAT THIS DOES. USE AT YOUR OWN RISK.** | `!eval print("hello world")`<br><br>`!eval await ctx.send("hi")` |
-| blacklist | `!blacklist [user mention or id]` | | Blacklist a user from using the bot. | `!blacklist @jacquesmorneau Being a crappy bot developer.` |
-| unblacklist | `!unblacklist [user mention or id]` | | Unblacklist a user from using the bot. | `!unblacklist @jacquesmorneau` |
+| eval<br>exec<br>code | `!eval <code>` | | Evaluates arbitrary code in the bot's account. **DO NOT USE IF YOU DON'T KNOW WHAT THIS DOES. USE AT YOUR OWN RISK.** | `!eval print("hello world")`<br><br>`!eval await ctx.send("hi")` |
+| block | `!block <user mention or id> <reason>` | | Block an user from using the bot. | `!block @jacquesmorneau Being a crappy bot developer.` |
+| unblock | `!unblock <user mention or id>` | | Unblock an user from using the bot. | `!unblock @jacquesmorneau` |
