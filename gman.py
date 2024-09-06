@@ -16,6 +16,7 @@ import sys
 import traceback
 from urllib.parse import urlparse
 
+
 class Blacklisted(CheckFailure):
     pass
 
@@ -106,6 +107,9 @@ async def on_message_delete(message):
 # Command error
 @bot.event
 async def on_command_error(ctx, error):
+    if(isinstance(error, commands.CommandInvokeError)):
+        print(error)
+        return
     if(isinstance(error, commands.CommandNotFound)):
         return
     if(ctx.message.author.id in bot.blacklisted_users):
