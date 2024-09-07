@@ -77,7 +77,7 @@ _Note_: You can use `k` for kilobits in your parameters. Examples: `4.3k` instea
 | demonize | `!demonize` | | Makes the video look and sound more scary. | `!demonize` |
 | harmonize | `!harmonize [semitones]` | `-inf to inf` | Mixes pitched versions of the audio, pitches determined by how many `[semitones]` you want the original audio off by. If you don't provide a list of `[semitones]`, a random selection will be used.<br><br>For example, `!harmonize 4 7` mixes the original audio with versions that are 4 semitones higher and 7 semitones higher (AKA a major chord).  | `!harmonize`<br><br>`!harmonize -12`<br><br>`!harmonize 4 3 10` |
 | harmonizedeep | `!harmonizedeep [semitones]` | `-inf to inf` | More chaotic version of !harmonize where the pitch of the last mix is adjusted rather than the original video. If you don't provide a list of `[semitones]`, a random selection will be used.<br><br>Difference between this and !harmonize becomes apparent when two pitches are provided, and gets more noticable as more `[semitones]` are added.<br><br>Example: `!harmonizedeep 3 7 -12` is the same as running these three commands in order: `!harmonize 3`, `!harmonize 7`, `!harmonize 12`. | `!harmonizedeep`<br><br>`!harmonizedeep -12 12`<br><br>`!harmonizedeep 3 7 10` |
-| histogram | `!histogram` | | Converts the video into a histogram of the audio volume. | `!volume` |
+| histogram | `!histogram` | | Converts the video into a histogram of the audio volume. | `!histogram` |
 | hypercam | `!hypercam` | | Adds an Unregistered Hypercam 2 watermark. | `!hypercam` |
 | ifunny | `!ifunny` | | Adds an iFunny watermark. | `!ifunny` |
 | mahna<br>mahnamahna | `!mahna` | | Replaces the video's audio with "Mah Na Mah Na" from the Muppets soundtrack. | `!mahna` |
