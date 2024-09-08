@@ -195,7 +195,7 @@ class Utility(commands.Cog):
                 text="%{pts}",
                 #x="main_w/2 - tw/2", y="main_h/2 - th/2",
                 x="15", y="main_h - th*2 - 35",
-                fontsize=40, fontcolor="white", fontfile="/windows/fonts/arial.ttf", borderw=2, bordercolor="black",
+                fontsize=40, fontcolor="white", fontfile="../fonts/arial.ttf", borderw=2, bordercolor="black",
                 escape_text=False
             )
         )
