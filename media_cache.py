@@ -85,7 +85,7 @@ async def download_nth_video(ctx, n, ydl_opts={}):
     input_vid = input_vid[n]
     #await ctx.send(f'working on `{input_vid}`')
     is_yt = True # TODO: remove this flag, all videos will be downloaded now instead of passing URL to ffmpeg
-    if(re.match(yt_regex, input_vid) or re.match(twitter_regex, input_vid) or re.match(tumblr_regex, input_vid) or re.match(medaltv_regex, input_vid): # yt video
+    if(re.match(yt_regex, input_vid) or re.match(twitter_regex, input_vid) or re.match(tumblr_regex, input_vid) or re.match(medaltv_regex, input_vid)): # yt video
         is_yt = True
         result, input_vid = await yt(ctx, input_vid, ctx.message.id, ydl_opts)
         if(not result):
