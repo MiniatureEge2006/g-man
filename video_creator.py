@@ -63,6 +63,78 @@ async def apply_filters_and_send(ctx, code, kwargs, ydl_opts=None):
     else:
         output_filename += 'mp4'
     
+    if isinstance(ctx.message.channel, discord.channel.DMChannel): # Bot is used in DMs
+        boost_level = 0
+        mb_limit = boost_info[boost_level]['mb']
+        bits_limit = boost_info[boost_level]['bits']
+        async with ctx.typing():
+            try:
+                input_stream = ffmpeg.input(input_vid)
+                vstream = input_stream.video
+                astream = input_stream.audio
+                output_params = {}
+                if(code is not None):
+                    vstream, astream, output_params = await code(ctx, vstream, astream, kwargs)
+                if('ignore' not in output_params):
+                    if('fs' in output_params):
+                        del output_params['fs']
+                    if('movflags' not in output_params):
+                        output_params['movflags'] = 'faststart'
+                    await set_progress_bar(ctx.message, 2)
+
+                    ffmpeg_output = None
+                    if(is_mp3):
+                        ffmpeg_output = ffmpeg.output(astream, output_filename, **output_params)
+                    elif(is_gif):
+                        ffmpeg_output = ffmpeg.output(vstream, output_filename, **output_params)
+                    else:
+                        ffmpeg_output = ffmpeg.output(astream, vstream, output_filename, **output_params)
+                    
+                    try:
+                        ffmpeg_output.run(cmd='ffmpeg-static/ffmpeg', overwrite_output=True, capture_stderr=True)
+                    except ffmpeg._run.Error as e:
+                        ffmpeg_output = ffmpeg.output(vstream, output_filename, **output_params)
+                        ffmpeg_output.run(cmd='ffmpeg-static/ffmpeg', overwrite_output=True, capture_stderr=True)
+                    
+                    resulting_filesize = os.path.getsize(output_filename) / 1000000
+                    if(resulting_filesize > mb_limit):
+                        longest_duration = 0
+                        metadata = FFProbe(output_filename)
+                        for stream in metadata.streams:
+                            if(stream.is_video() or stream.is_audio()):
+                                duration = stream.duration_seconds()
+                                longest_duration = max(longest_duration, duration)
+                        output_params['b:v'] = bits_limit / longest_duration
+
+                        input_filename_pass2 = 'vids/pass2' + output_filename.split('/')[1]
+                        os.rename(output_filename, input_filename_pass2)
+                        input_stream = ffmpeg.input(input_filename_pass2)
+                        ffmpeg.output(input_stream, output_filename, **output_params).run(cmd='ffmpeg-static/ffmpeg', overwrite_output=True, capture_stderr=True)
+                        os.remove(input_filename_pass2)
+                    
+                    await set_progress_bar(ctx.message, 3)
+                try:
+                    await ctx.send(file=discord.File(output_filename))
+                except Exception as e:
+                    resulting_filesize = os.path.getsize(output_filename) / 1000000
+                    await ctx.send(f"File too big to send ({resulting_filesize} mb)")
+            except asyncio.TimeoutError as e:
+                await ctx.send(f'Command took too long to execute.\n```\n{str(e)}```')
+            except ffmpeg.Error as e:
+                await print_ffmpeg_error(ctx, e)
+            except Exception as e:
+                await ctx.send(f'Error:\n```\n{str(e)}```')
+                print(traceback.format_exc())
+            try:
+                if(os.path.isfile(output_filename)):
+                    os.remove(output_filename)
+            except Exception as e:
+                print(e)
+            try:
+                if(is_yt):
+                    os.remove(input_vid)
+            except Exception as e:
+                print(e)
     boost_level = 0
     if(ctx.guild.premium_subscription_count >= 7):
         boost_level = 1;
