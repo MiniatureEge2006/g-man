@@ -1,295 +1,226 @@
 import asyncio
+import contextlib
+import io
+import textwrap
+import bot_info
+import json
+import database as db
 import discord
-import ffmpeg
-from ffprobe import FFProbe
+from discord.ext import commands
+from discord.ext.buttons import Paginator
+from discord.ext.commands import CheckFailure
 import media_cache
 import os
+import re
+import sys
 import traceback
+from urllib.parse import urlparse
 
-boost_info = [
-    { 'mb': 24.9, 'bits': 20000000 },
-    { 'mb': 49.9, 'bits': 45000000 },
-    { 'mb': 99.9, 'bits': 95000000 }
-]
 
-loading_emotes = [
-    '\U0001F1EC',
-    '\U0001F1F2',
-    '\U0001F1E6',
-    '\U0001F1F3'
-]
-async def set_progress_bar(message, idx):
-    await message.add_reaction(loading_emotes[idx])
+class Blacklisted(CheckFailure):
+    pass
 
-async def print_ffmpeg_error(ctx, e):
-    err_full = str(e.stderr.decode('utf8'))
-    err = err_full.split('\n')
-    friendlier_err = ''
-    for line in err:
-        if(line.startswith('[') and 'Copyleft' not in line):
-            friendlier_err += '* ' + line[line.rfind(']')+2:] + '\n'
-    if(len(friendlier_err) > 1800):
-        friendlier_err = friendlier_err[:1800]
-    await ctx.send(f"An error occurred :( ```{friendlier_err}```\nIf the error doesn't make sense, try scaling the video(s) down using `!scale 480` and try again.")
-    print(err_full)
+class Pag(Paginator):
+    async def teardown(self):
+        try:
+            await self.page.clear_reactions()
+        except discord.HTTPException:
+            pass
 
-# Download the video, then wrap the filter code in a try catch statement
-async def apply_filters_and_send(ctx, code, kwargs, ydl_opts=None):
-    await set_progress_bar(ctx.message, 0)
-    input_vid, is_yt, result = await media_cache.download_last_video(ctx, ydl_opts)
-    if(not result):
-        await ctx.send("There was an error downloading the video, try uploading the video again.")
-        return
-    await set_progress_bar(ctx.message, 1)
 
-    is_mp3 = False
-    is_gif = False
-    is_ignored_mp4 = False
-    if('is_mp3' in kwargs):
-        is_mp3 = kwargs['is_mp3']
-    if('is_gif' in kwargs):
-        is_gif = kwargs['is_gif']
-    if('is_ignored_mp4' in kwargs):
-        is_ignored_mp4 = kwargs['is_ignored_mp4']
-    kwargs['input_filename'] = input_vid
-                
-    output_filename = f'vids/{ctx.message.id}.'
-    if(is_mp3):
-        output_filename += 'mp3'
-    elif(is_gif):
-        output_filename += 'gif'
-    elif(is_ignored_mp4): # Regular mp4, but not recorded in the database
-        output_filename += '_ignore.mp4'
+# If any videos were not deleted while the bot was last up, remove them
+vid_files = [f for f in os.listdir('vids') if os.path.isfile(os.path.join('vids', f))]
+for f in vid_files:
+    os.remove(f'vids/{f}')
+
+
+extensions = ['cogs.bitrate', 'cogs.filter', 'cogs.fun', 'cogs.corruption', 'cogs.bookmarks', 'cogs.utility']
+bot = commands.Bot(command_prefix=commands.when_mentioned_or('!'), help_command=None, intents=discord.Intents.all())
+
+bot.blacklisted_users = []
+
+# Loads extensions, returns string saying what reloaded
+async def reload_extensions(exs):
+    module_msg = ''
+    for ex in exs:
+        try:
+            #await bot.unload_extension(ex)
+            await bot.load_extension(ex)
+            module_msg += 'module "{}" reloaded\n'.format(ex)
+        except Exception as e:
+           module_msg += 'reloading "{}" failed, error is:```{}```\n'.format(ex, e)
+    return module_msg
+
+
+@bot.check
+async def blacklist_detector(ctx):
+    if ctx.message.author.id in bot.blacklisted_users:
+        raise Blacklisted("User has been blacklisted from using the bot")
     else:
-        output_filename += 'mp4'
+        return True
     
-    if isinstance(ctx.message.channel, discord.channel.DMChannel):
-        boost_level = 0
-        mb_limit = boost_info[boost_level]['mb']
-        bits_limit = boost_info[boost_level]['bits']
-        async with ctx.typing():
-            try:
-                input_stream = ffmpeg.input(input_vid)
-                vstream = input_stream.video
-                astream = input_stream.audio
-                output_params = {}
-                if(code is not None):
-                    vstream, astream, output_params = await code(ctx, vstream, astream, kwargs)
-                if('ignore' not in output_params):
-                    if('fs' in output_params):
-                        del output_params['fs']
-                    if('movflags' not in output_params):
-                        output_params['movflags'] = 'faststart'
-                    await set_progress_bar(ctx.message, 2)
-
-                    ffmpeg_output = None
-                    if(is_mp3):
-                        ffmpeg_output = ffmpeg.output(astream, output_filename, **output_params)
-                    elif(is_gif):
-                        ffmpeg_output = ffmpeg.output(vstream, output_filename, **output_params)
-                    else:
-                        ffmpeg_output = ffmpeg.output(astream, vstream, output_filename, **output_params)
-                    
-                    try:
-                        ffmpeg_output.run(cmd='ffmpeg-static/ffmpeg', overwrite_output=True, capture_stderr=True)
-                    except ffmpeg._run.Error as e:
-                        ffmpeg_output = ffmpeg.output(vstream, output_filename, **output_params)
-                        ffmpeg_output.run(cmd='ffmpeg-static/ffmpeg', overwrite_output=True, capture_stderr=True)
-                    
-                    resulting_filesize = os.path.getsize(output_filename) / 1000000
-                    if(resulting_filesize > mb_limit):
-                        longest_duration = 0
-                        metadata = FFProbe(output_filename)
-                        for stream in metadata.streams:
-                            if(stream.is_video() or stream.is_audio()):
-                                duration = stream.duration_seconds()
-                                longest_duration = max(longest_duration, duration)
-                        output_params['b:v'] = bits_limit / longest_duration
-
-                        input_filename_pass2 = 'vids/pass2' + output_filename.split('/')[1]
-                        os.rename(output_filename, input_filename_pass2)
-                        input_stream = ffmpeg.input(input_filename_pass2)
-                        ffmpeg.output(input_stream, output_filename, **output_params).run(cmd='ffmpeg-static/ffmpeg', overwrite_output=True, capture_stderr=True)
-                        os.remove(input_filename_pass2)
-                    
-                    await set_progress_bar(ctx.message, 3)
-                try:
-                    await ctx.send(file=discord.File(output_filename))
-                except Exception as e:
-                    resulting_filesize = os.path.getsize(output_filename) / 1000000
-                    await ctx.send(f"File too big to send ({resulting_filesize} mb)")
-            except asyncio.TimeoutError as e:
-                await ctx.send(f'Command took too long to execute.\n```\n{str(e)}```')
-            except ffmpeg.Error as e:
-                await print_ffmpeg_error(ctx, e)
-            except Exception as e:
-                await ctx.send(f'Error:\n```\n{str(e)}```')
-                print(traceback.format_exc())
-            try:
-                if(os.path.isfile(output_filename)):
-                    os.remove(output_filename)
-            except Exception as e:
-                print(e)
-            try:
-                if(is_yt):
-                    os.remove(input_vid)
-            except Exception as e:
-                print(e)
-    boost_level = 0
-    if(ctx.guild.premium_subscription_count >= 7):
-        boost_level = 1;
-    if(ctx.guild.premium_subscription_count >= 14):
-        boost_level = 2;
-    mb_limit = boost_info[boost_level]['mb']
-    bits_limit = boost_info[boost_level]['bits']
     
-    async with ctx.typing():
-        try:
-            input_stream = ffmpeg.input(input_vid)
-            vstream = input_stream.video
-            astream = input_stream.audio
-            output_params = {}
-            if(code is not None):
-                vstream, astream, output_params = await code(ctx, vstream, astream, kwargs)
-            if('ignore' not in output_params):
-                if('fs' in output_params):
-                    del output_params['fs']
-                if('movflags' not in output_params):
-                    output_params['movflags'] = 'faststart'
-                await set_progress_bar(ctx.message, 2)
+    
+    
+# Set up stuff
+@bot.event
+async def on_ready():
+    print('Logged in as')
+    print(bot.user.name)
+    print(bot.user.id)
+    print('------')
+    data = read_json("blacklistedusers")
+    bot.blacklisted_users = data["blacklistedUsers"]
+    await bot.change_presence(activity=discord.Game(name="!help"))
+    global extensions
+    print(await reload_extensions(extensions))
 
-                ffmpeg_output = None
-                if(is_mp3):
-                    ffmpeg_output = ffmpeg.output(astream, output_filename, **output_params)
-                elif(is_gif):
-                    ffmpeg_output = ffmpeg.output(vstream, output_filename, **output_params)
-                else:
-                    ffmpeg_output = ffmpeg.output(astream, vstream, output_filename, **output_params)
+# Process commands
+@bot.event
+async def on_message(message):
+    # Adding URLs to the cache
+    if(len(message.attachments) > 0):
+        print(message.attachments[0].url)
+        msg_url = message.attachments[0].url
+        parsed_url = urlparse(msg_url)
+        url_path = parsed_url.path
+        if(not url_path.endswith('_ignore.mp4') and url_path.split('.')[-1].lower() in media_cache.approved_filetypes):
+            media_cache.add_to_cache(message, msg_url)
+            print("Added file!")
+    elif(re.match(media_cache.discord_cdn_regex, message.content) or re.match(media_cache.hosted_file_regex, message.content)):
+        media_cache.add_to_cache(message, message.content)
+        print("Added discord cdn/hosted file url!")
+    elif(re.match(media_cache.yt_regex, message.content) or re.match(media_cache.twitter_regex, message.content) or re.match(media_cache.tumblr_regex, message.content) or re.match(media_cache.medaltv_regex, message.content)):
+        media_cache.add_to_cache(message, message.content)
+        print("Added yt/twitter/tumblr url! " + message.content)
+    elif(re.match(media_cache.soundcloud_regex, message.content) or re.match(media_cache.bandcamp_regex, message.content)):
+        media_cache.add_to_cache(message, message.content)
+        print("Added soundcloud/bandcamp url! " + message.content)
 
-                # Pass 1
-                try:
-                    ffmpeg_output.run(cmd='ffmpeg-static/ffmpeg', overwrite_output=True, capture_stderr=True)
-                except ffmpeg._run.Error as e:
-                    # Error will most likely happen due to the video having no audio
-                    # TODO: add silent audio here
-                    ffmpeg_output = ffmpeg.output(vstream, output_filename, **output_params)
-                    ffmpeg_output.run(cmd='ffmpeg-static/ffmpeg', overwrite_output=True, capture_stderr=True)
+    await bot.process_commands(message)
 
-                # Pass 2 (if the file is too big)
-                resulting_filesize = os.path.getsize(output_filename) / 1000000
-                if(resulting_filesize > mb_limit):
-                    # Calculate bitrate needed
-                    longest_duration = 0
-                    metadata = FFProbe(output_filename)
-                    for stream in metadata.streams:
-                        if(stream.is_video() or stream.is_audio()):
-                            duration = stream.duration_seconds()
-                            longest_duration = max(longest_duration, duration)
-                    output_params['b:v'] = bits_limit / longest_duration
+# Forgetting videos that get deleted
+@bot.event
+async def on_message_delete(message):
+    db.vids.delete_one({'message_id':str(message.id)})
 
-                    # Create the new video
-                    input_filename_pass2 = 'vids/pass2' + output_filename.split('/')[1]
-                    os.rename(output_filename, input_filename_pass2)
-                    input_stream = ffmpeg.input(input_filename_pass2)
-                    ffmpeg.output(input_stream, output_filename, **output_params).run(cmd='ffmpeg-static/ffmpeg', overwrite_output=True, capture_stderr=True)
-                    os.remove(input_filename_pass2)
-
-
-                await set_progress_bar(ctx.message, 3)
-            try:
-                await ctx.send(file=discord.File(output_filename))
-            except Exception as e:
-                resulting_filesize = os.path.getsize(output_filename) / 1000000
-                gman_msg = await ctx.send(f"File too big to send ({resulting_filesize} mb)")
-
-        except asyncio.TimeoutError as e:
-            await ctx.send(f'Command took to long to execute.\n```\n{str(e)}```')
-        # Making errors a little easier to understand
-        except ffmpeg.Error as e:
-            await print_ffmpeg_error(ctx, e)
-        except Exception as e:
-            await ctx.send(f'Error:\n```\n{str(e)}```')
-            print(traceback.format_exc())
-
-    # Remove files
-    try:
-        if(os.path.isfile(output_filename)):
-            os.remove(output_filename)
-    except Exception as e:
-        print(e)
-    try:
-        if(is_yt):
-            os.remove(input_vid)
-    except Exception as e:
-        print(e)
-    await ctx.message.clear_reactions()
-
-
-# Convert corrupted video to mp4
-# Very repetitive, maybe there's a way to combine the two wrappers
-async def apply_corruption_and_send(ctx, code, code_kwargs, avi_kwargs = {}, mp4_kwargs = {}):
-    await set_progress_bar(ctx.message, 0)
-    input_vid, is_yt, result = await media_cache.download_last_video(ctx)
-    if(not result):
-        await ctx.send("There was an error downloading the video, try uploading the video again.")
+# Command error
+@bot.event
+async def on_command_error(ctx, error):
+    if(isinstance(error, commands.CommandInvokeError)):
+        print(error)
         return
-    await set_progress_bar(ctx.message, 1)
+    if(isinstance(error, commands.CommandNotFound)):
+        return
+    if(ctx.message.author.id in bot.blacklisted_users):
+        await ctx.send("You are blocked from using G-Man.")
+        return
+    if(str(ctx.message.author.id) not in bot_info.data['owners']):
+        await ctx.send("You do not have permission to run this command. (Are you owner?)")
+        return
+    else:
+        if(not isinstance(error, commands.CommandNotFound)):
+            await ctx.send('Oops, something is wrong!\n```\n' + repr(error) + '\n```')
+        #print(error)
+        traceback.print_exception(type(error), error, error.__traceback__, file=sys.stderr)
 
-    avi_filename = f'vids/{ctx.message.id}.avi'
-    output_filename = f'vids/{ctx.message.id}.mp4'
+
+@bot.command()
+@bot_info.is_owner()
+async def block(ctx, user: discord.Member, *, reason):
+     if ctx.message.author.id == user.id:
+        await ctx.send("Don't block yourself dummy")
+        return
+     bot.blacklisted_users.append(user.id)
+     data = read_json("blacklistedusers")
+     data["blacklistedUsers"].append(user.id)
+     write_json(data, "blacklistedusers")
+     await ctx.send(f"Blocked {user.name}. Reason: `{reason}`")
+
+@bot.command()
+@bot_info.is_owner()
+async def unblock(ctx, user: discord.Member):
+     bot.blacklisted_users.remove(user.id)
+     data = read_json("blacklistedusers")
+     data["blacklistedUsers"].remove(user.id)
+     write_json(data, "blacklistedusers")
+     await ctx.send(f"Unblocked {user.name}.")
+
+# Reloading extensions
+@bot.command(description='Reloads extensions. Usage: /reload [extension_list]', pass_context=True)
+@bot_info.is_owner()
+async def reload(ctx, *, exs : str = None):
+    module_msg = 'd' # d
+    if(exs is None):
+         module_msg = await reload_extensions(extensions)
+    else:
+        module_msg = await reload_extensions(exs.split())
+    await ctx.send(module_msg)
+async def setup(bot):
+ for ex in extensions:
+    try:
+        await bot.load_extension(ex)
+    except Exception as e:
+        print('Failed to load {} because: {}'.format(ex, e))
+
+@bot.command(name="eval", aliases=["exec", "code"])
+@bot_info.is_owner()
+async def eval(ctx, *, code):
+    code = clean_code(code)
+
+    local_variables = {
+        "discord": discord,
+        "commands": commands,
+        "bot": bot,
+        "client": bot,
+        "ctx": ctx,
+        "context": ctx,
+        "channel": ctx.channel,
+        "author": ctx.author,
+        "guild": ctx.guild,
+        "message": ctx.message
+
+    }
+
+    sys.stdout = io.StringIO()
     
-    async with ctx.typing():
-        try:
-            #x264_params = {'x264-params':'keyint=25:min-keyint=25:scenecut=0'}
-            (
-                ffmpeg
-                .input(input_vid)
-                .output(avi_filename, fs='7M', **avi_kwargs)#qmin=30, qmax=30, g=2500, keyint_min=2500)#**x264_params)
-                .run(cmd='ffmpeg-static/ffmpeg', overwrite_output=True)
-            )
-
-            successful_corrupt = True
-            try:
-                await code(ctx, avi_filename, code_kwargs)
-                await set_progress_bar(ctx.message, 2)
-            except Exception as e:
-                await ctx.send(f'Error while corrupting the video: {e}')
-                print(e)
-                successful_corrupt = False
-
-            if(successful_corrupt):
-                (
-                    ffmpeg
-                    .input(avi_filename)
-                    .output(output_filename, fs='7M', **mp4_kwargs)
-                    .run(cmd='ffmpeg-static/ffmpeg', overwrite_output=True, capture_stderr=True)
+    try:
+        with contextlib.redirect_stdout(sys.stdout):
+                exec(
+                f"async def func():\n{textwrap.indent(code, '   ')}", local_variables,
                 )
-                await set_progress_bar(ctx.message, 3)
-                await ctx.send(file=discord.File(output_filename))
-        except asyncio.TimeoutError as e:
-            await ctx.send(f'Command took to long to execute.\n```\n{str(e)}```')
-        # Making errors a little easier to understand
-        except ffmpeg.Error as e:
-            await print_ffmpeg_error(ctx, e)
-        except Exception as e:
-            await ctx.send(f'Error:\n```\n{str(e)}```')
-            print(traceback.format_exc())
 
-        # Remove files
-        try:
-            if(os.path.isfile(avi_filename)):
-                os.remove(avi_filename)
-        except Exception as e:
-            print(e)
-        try:
-            if(os.path.isfile(output_filename)):
-                os.remove(output_filename)
-        except Exception as e:
-            print(e)
-        try:
-            os.remove(input_vid)
-        except Exception as e:
-            print(e)
-        await ctx.message.clear_reactions()
-
+        obj = await local_variables["func"]()
+        result = f"{sys.stdout.getvalue()}\n-- {obj}\n"
+    except Exception as e:
+            result = "".join(traceback.format_exception(e, e, e.__traceback__))
     
+    pager = Pag(
+        timeout=100,
+        entries=[result[i: i + 2000] for i in range(0, len(result), 2000)],
+        length=1,
+        prefix="```py\n",
+        suffix="```",
+        color=discord.Color.random()
+    )
+
+    await pager.start(ctx)
+
+def clean_code(content):
+    if content.startswith("```") and content.endswith("```"):
+        return "\n".join(content.split("\n")[1:][:-3])
+    else:
+        return content
+
+def read_json(filename):
+    with open(f"{filename}.json", "r") as file:
+        data = json.load(file)
+        return data
+
+def write_json(data, filename):
+    with open(f"{filename}.json", "w") as file:
+        json.dump(data, file)
+
+
+# Start the bot
+bot.run(bot_info.data['login'])
