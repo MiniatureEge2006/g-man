@@ -77,7 +77,7 @@ class Utility(commands.Cog):
             return
         if(command_name == 'filter'):
             await ctx.send(embed=discord.Embed(title='Filter command', description='The filter command is used to apply almost any filter that is in FFMPEG. If you know how FFMPEG syntax works then this command is the perfect command for you. However, if you don\'t know how this works then I suggest reading the FFMPEG documentation [here.](https://ffmpeg.org/ffmpeg-filters.html)', color=0xFF0000)
-                           .add_field(name='Format', value='`!filter <filtr_name> <filter_args>`\n`<filter_args>` are formatted in this way: `arg1_name=arg1_value arg2_name=arg2_value ...`')
+                           .add_field(name='Format', value='`!filter <filter_name> <filter_args>`\n`<filter_args>` are formatted in this way: `arg1_name=arg1_value arg2_name=arg2_value ...`')
                            .add_field(name='Examples', value='`!filter aecho` or `!filter edgedetect low=0.1 mode=wires` or `!filter drawtext text="g_man was here" x="(main_w-tw)/2" y="(main_h-th)/2 + 100*sin(t*6)" fontsize=50`')
                            .add_field(name='Multiple filters', value='`!filter reverse !filter areverse` or `!filter eq contrast=1.2 !filter hue h=60 enable=gte(t,3) !filter negate`')
                            .add_field(name="Info", value='At the moment you **cannot** apply filters requiring multiple inputs.'))
