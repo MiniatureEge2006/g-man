@@ -232,7 +232,7 @@ class Utility(commands.Cog):
         elif round(self.bot.latency * 1000) <= 100:
             embed = discord.Embed(title="Bot latency", description=f"Pong! Latency is {round(self.bot.latency * 1000)} ms", color=0xFFFF00)
         elif round(self.bot.latency * 1000) <= 200:
-            embed = discord.Embed(title="Bot latency", description=f"Pong! Latency is {round(self.bot.latency * 1000)} ms", color=0xFFCC00)
+            embed = discord.Embed(title="Bot latency", description=f"Pong! Latency is {round(self.bot.latency * 1000)} ms", color=0xFF8000)
         else:
             embed = discord.Embed(title="Bot latency", description=f"Pong! Latency is {round(self.bot.latency * 1000)} ms", color=0xFF0000)
         await ctx.send(embed=embed)
