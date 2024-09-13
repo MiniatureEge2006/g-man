@@ -13,6 +13,7 @@ discord_cdn_regex = (r'https://(cdn|media)\.discordapp\.(com|net)/attachments/.+
 twitter_regex = (r'(https://)?(www\.)?(mobile\.)?(((fx|vx)?twitter)|(fixupx|x))\.com/.+/status/[0-9]+(\?.+)?')
 tumblr_regex = (r'(https://)?(www\.)?((va\.media\.tumblr\.com/tumblr_.+\.(mp4|MP4|webm|WEBM|mov|MOV|mkv|MKV|gif|GIF))|(.+\.tumblr\.com/(post|video/.+)/[0-9]+(/[0-9]+/)?))')
 medaltv_regex = (r'(https://)(?:www\.)?medal\.tv/games/[^/?#&]+/clips/(?P<id>[^/?#&]+)')
+archive_regex = (r'https?://(?:www\.)?archive\.org/(?:details|embed)/(?P<id>[^?#]+)(?:[?].*)?$')
 hosted_file_regex = (r'(https://)?(www\.)?.+\.(com|org|net|us|co|edu|ca|cn|fr|ch|au|in|de|jp|nl|uk|mx|no|ru|br|se|es)/.+\.(png|PNG|jpg|JPG|jpeg|JPEG|mp4|MP4|webm|WEBM|mov|MOV|mkv|MKV|gif|GIF)')
 soundcloud_regex = (r'(https://(?:www.)?soundcloud\.com/[\w-]+/?(?:sets/)?[\w-]+)')
 bandcamp_regex = (r'(https://)?([\d|\w]+)\.bandcamp\.com/?.*')
@@ -85,7 +86,7 @@ async def download_nth_video(ctx, n, ydl_opts={}):
     input_vid = input_vid[n]
     #await ctx.send(f'working on `{input_vid}`')
     is_yt = True # TODO: remove this flag, all videos will be downloaded now instead of passing URL to ffmpeg
-    if(re.match(yt_regex, input_vid) or re.match(twitter_regex, input_vid) or re.match(tumblr_regex, input_vid) or re.match(medaltv_regex, input_vid)): # yt video
+    if(re.match(yt_regex, input_vid) or re.match(twitter_regex, input_vid) or re.match(tumblr_regex, input_vid) or re.match(medaltv_regex, input_vid) or re.match(archive_regex, input_vid)): # yt video
         is_yt = True
         result, input_vid = await yt(ctx, input_vid, ctx.message.id, ydl_opts)
         if(not result):
