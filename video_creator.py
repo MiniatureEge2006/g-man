@@ -53,7 +53,7 @@ async def apply_filters_and_send(ctx, code, kwargs, ydl_opts=None):
         is_ignored_mp4 = kwargs['is_ignored_mp4']
     kwargs['input_filename'] = input_vid
                 
-    output_filename = f'vids/{ctx.message.id}.'
+    output_filename = f'vids/discord-{ctx.message.id}.'
     if(is_mp3):
         output_filename += 'mp3'
     elif(is_gif):
