@@ -709,7 +709,50 @@ class Filter(commands.Cog):
         await video_creator.apply_filters_and_send(ctx, self._greenscreen, {'first_vid_filepath':first_vid_filepath, 'color':color, 'similarity':similarity})
         if(os.path.isfile(first_vid_filepath)):
             os.remove(first_vid_filepath)
+    
 
+    async def _overlay(self, ctx, vstream, astream, kwargs):
+        first = ffmpeg.input(kwargs['first_vid_filepath'])
+        vfirst = first.video
+        afirst = first.audio
+
+        vfirst = (
+            vfirst
+            .filter('scale', w=kwargs['w'], h=kwargs['h'])
+            .filter('setsar', r='1:1')
+        )
+        vstream = (
+            vstream
+            .filter('scale', w=480, h=320)
+            .filter('setsar', r='1:1')
+        )
+        vstream = ffmpeg.overlay(vstream, vfirst, x=kwargs['x'], y=kwargs['y'], shortest=kwargs['shortest'])
+        astream = (
+            ffmpeg
+            .filter([astream, afirst], 'amix', dropout_transition=4000)
+            .filter('volume', volume=2, precision='fixed')
+        )
+
+        return vstream, astream, {}
+    @commands.command()
+    async def overlay(self, ctx, w : str = '480', h : str = 'auto', x : str = '0', y : str = '0', shortest : str = '0'):
+        if(w == 'auto' and h == 'auto'):
+            return
+        if(w != 'auto'):
+            w = min(1240, max(int(w), 50))
+        else:
+            w = -2
+        if(h != 'auto'):
+            h = min(1240, max(int(h), 50))
+        else:
+            h = -2
+        
+        first_vid_filepath, is_yt, result = await media_cache.download_nth_video(ctx, 1)
+        if(not result):
+            return
+        await video_creator.apply_filters_and_send(ctx, self._overlay, {'first_vid_filepath':first_vid_filepath, 'w':w, 'h':h, 'x':x, 'y':y, 'shortest':shortest})
+        if(os.path.isfile(first_vid_filepath)):
+            os.remove(first_vid_filepath)
         
     async def _hue(self, ctx, vstream, astream, kwargs):
         vstream = vstream.filter('hue', h=kwargs['h'])
