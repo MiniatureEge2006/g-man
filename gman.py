@@ -127,7 +127,7 @@ async def on_command_error(ctx, error):
 
 @bot.command()
 @bot_info.is_owner()
-async def block(ctx, user: discord.Member, *, reason):
+async def block(ctx, user: discord.User, *, reason):
      if ctx.message.author.id == user.id:
         await ctx.send("Don't block yourself dummy")
         return
@@ -139,7 +139,7 @@ async def block(ctx, user: discord.Member, *, reason):
 
 @bot.command()
 @bot_info.is_owner()
-async def unblock(ctx, user: discord.Member):
+async def unblock(ctx, user: discord.User):
      bot.blacklisted_users.remove(user.id)
      data = read_json("blacklistedusers")
      data["blacklistedUsers"].remove(user.id)
