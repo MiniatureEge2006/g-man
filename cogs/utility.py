@@ -2,6 +2,7 @@ import asyncio
 from genericpath import isfile
 import discord
 from discord.ext import commands
+from discord import app_commands
 import database as db
 import ffmpeg
 import filter_helper
@@ -67,13 +68,13 @@ class Utility(commands.Cog):
         if(command_name == ''):
             await ctx.send(embed=discord.Embed(title='Command list', color=0x0000FF)
                            .add_field(name='Bitrate', value='`b` `vb` `ab`')
-                           .add_field(name='Filters', value='`amplify` `audioblend/audiomerge` `audioswap` `backwards/reverse` `bassboost` `bitcrush` `blur` `brightness` `concat/merge` `contrast` `edges` `equalize/equalizer` `extract` `fps` `gamma` `greenscreen` `hue` `interpolate` `invert/inverse/negate/negative` `lagfun` `loop` `nervous` `pitch` `retro` `rotate` `rotatedeg` `saturate/saturation` `scale/size` `scroll` `semitone` `shader` `speed` `volume` `wobble` `zoom`')
+                           .add_field(name='Filters', value='`amplify` `audioblend/audiomerge` `audioswap` `backwards/reverse` `bassboost` `bitcrush` `blur` `brightness` `concat/merge` `contrast` `edges` `equalize/equalizer` `extract` `fps` `gamma` `greenscreen` `overlay` `hue` `interpolate` `invert/inverse/negate/negative` `lagfun` `loop` `nervous` `pitch` `retro` `rotate` `rotatedeg` `saturate/saturation` `scale/size` `scroll` `semitone` `shader` `speed` `volume` `wobble` `zoom`')
                            .add_field(name='Corruption', value='`corrupt` `faketime` `mosh` `rearrange` `smear` `stutter`')
                            .add_field(name='Fun effects', value='`americ` `cartoony/cartoon` `deepfry` `demonize` `harmonize` `harmonizedeep` `histogram` `hypercam` `ifunny` `mahna/mahnamahna` `pingpong` `rainbow` `sequencer` `tetris` `text` `trippy` `tutorial` `vintage`')
                            .add_field(name='Bookmarks', value='`save/store` `load/use` `delete/remove` `bookmarks`')
                            .add_field(name='Utility', value='`download/fix/dl` `img2vid` `gif` `vid2img` `mp3` `swap` `time/timestamp` `undo` `ping`')
                            .add_field(name='Advanced (power users only!)', value='`filter`')
-                           .add_field(name='Owner only (NO ACCESS)', value='`reload` `eval/exec/code` `block` `unblock`'))
+                           .add_field(name='Owner only (NO ACCESS)', value='`reload` `eval/exec/code` `block` `unblock` `sync`'))
             return
         if(command_name == 'filter'):
             await ctx.send(embed=discord.Embed(title='Filter command', description='The filter command is used to apply almost any filter that is in FFMPEG. If you know how FFMPEG syntax works then this command is the perfect command for you. However, if you don\'t know how this works then I suggest reading the FFMPEG documentation [here.](https://ffmpeg.org/ffmpeg-filters.html)', color=0xFF0000)
@@ -132,7 +133,77 @@ class Utility(commands.Cog):
         if(embed is None):
             await ctx.send("Command not found. Please type `!help` to see a list of commands.")
 
+    @app_commands.command(name="help", description="Get a list of my commands.")
+    @app_commands.user_install()
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    async def _help(self, ctx: discord.Interaction, command_name: str = ''):
+        if(command_name == ''):
+            await ctx.response.send_message(embed=discord.Embed(title="Command list", color=0x0000FF)
+                                            .add_field(name="Bitrate", value="`b` `vb` `ab`")
+                                            .add_field(name="Filters", value="`amplify` `audioblend/audiomerge` `audioswap` `backwards/reverse` `bassboost` `bitcrush` `blur` `brightness` `concat/merge` `contrast` `edges` `equalize/equalizer` `extract` `fps` `gamma` `greenscreen` `overlay` `hue` `interpolate` `invert/inverse/negate/negative` `lagfun` `loop` `nervous` `pitch` `retro` `rotate` `rotatedeg` `saturate/saturation` `scale/size` `scroll` `semitone` `shader` `speed` `volume` `wobble` `zoom`")
+                                            .add_field(name="Corruption", value="`corrupt` `faketime` `mosh` `rearrange` `smear` `stutter`")
+                                            .add_field(name="Fun effects", value="`americ` `cartoony/cartoon` `deepfry` `demonize` `harmonize` `harmonizedeep` `histogram` `hypercam` `ifunny` `mahna/mahnamahna` `pingpong` `rainbow` `sequencer` `tetris` `text` `trippy` `tutorial` `vintage`")
+                                            .add_field(name="Bookmarks", value="`save/store` `load/use` `delete/remove` `bookmarks`")
+                                            .add_field(name="Utility", value="`download/fix/dl` `img2vid` `gif` `vid2img` `mp3` `swap` `time/timestamp` `undo` `ping`")
+                                            .add_field(name="Advanced (power users only!)", value="`filter`")
+                                            .add_field(name="Owner only (NO ACCESS)", value="`reload` `eval/exec/code` `block` `unblock` `sync`"))
+            return
+        if(command_name == 'filter'):
+            await ctx.response.send_message(embed=discord.Embed(title='Filter command', description='The filter command is used to apply almost any filter that is in FFMPEG. If you know how FFMPEG syntax works then this command is the perfect command for you. However, if you don\'t know how this works then I suggest reading the FFMPEG documentation [here.](https://ffmpeg.org/ffmpeg-filters.html)', color=0xFF0000)
+                           .add_field(name='Format', value='`!filter <filter_name> <filter_args>`\n`<filter_args>` are formatted in this way: `arg1_name=arg1_value arg2_name=arg2_value ...`')
+                           .add_field(name='Examples', value='`!filter aecho` or `!filter edgedetect low=0.1 mode=wires` or `!filter drawtext text="g_man was here" x="(main_w-tw)/2" y="(main_h-th)/2 + 100*sin(t*6)" fontsize=50`')
+                           .add_field(name='Multiple filters', value='`!filter reverse !filter areverse` or `!filter eq contrast=1.2 !filter hue h=60 enable=gte(t,3) !filter negate`')
+                           .add_field(name="Info", value='At the moment you **cannot** apply filters requiring multiple inputs.'))
+            return
+        if(command_name == 'help'):
+            await ctx.response.send_message("`/help` to get a list of commands.\n`/help <command_name>` to get help on a specific command.")
+            return
         
+        commands_file = open('COMMANDS.md', 'r')
+        all_commands = commands_file.read().split('\n')
+        commands_file.close()
+
+        embed = None
+        for command in all_commands:
+            if(command == '' or command[0] != '|' or command.startswith('| Command') or command.startswith('| ---')):
+                continue
+            command = re.split(r'^\| | \| |\| | \|$', command)
+            if(command[0] == ''):
+                command = command[1:]
+            if(command[-1] == ''):
+                command = command[:-1]
+            command = {
+                'names' : command[0].split('<br>'),
+                'syntax' : command[1].replace('<br><br>','\n'),
+                'limits' : command[2].replace('<br>', '\n'),
+                'description' : command[3].replace('<br>', '\n').replace('\\|', '|'),
+                'examples' : command[4].replace('<br><br>', '\n').replace('\\|', '|')
+            }
+
+            if(command_name not in command['names']):
+                continue
+            embed = discord.Embed(title=command_name, description=command['description'], color=0x00FF00)
+            embed.add_field(name='Syntax', value=command['syntax'], inline=False)
+            if(command['limits'] != ''):
+                embed.add_field(name='Min/Max Values', value=command['limits'], inline=False)
+            if(command['syntax'] != command['examples']):
+                embed.add_field(name='Examples', value=command['examples'], inline=False)
+            if(len(command['names']) > 1):
+                aliases = list(filter(lambda x : x != command_name, command['names']))
+                aliases = ', '.join(aliases)
+                footer_text = 'Alternative command name'
+                if(len(command['names']) > 2):
+                    footer_text += 's:\n'
+                else:
+                    footer_text += ': '
+                footer_text += aliases
+                embed.set_footer(text=footer_text)
+            
+            await ctx.response.send_message(embed=embed)
+            break
+
+        if(embed is None):
+            await ctx.response.send_message("Command not found. Please use /help to see a list of commands.")
     # TODO: make this automatic in video_creator.py
     @commands.command()
     async def img2vid(self, ctx):
@@ -236,6 +307,20 @@ class Utility(commands.Cog):
         else:
             embed = discord.Embed(title="Bot latency", description=f"Pong! Latency is {round(self.bot.latency * 1000)} ms", color=0xFF0000)
         await ctx.send(embed=embed)
+    @app_commands.command(name="ping", description="Get G-Man's latency.")
+    @app_commands.user_install()
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    async def _ping(self, ctx: discord.Interaction):
+        if round(self.bot.latency * 1000) <= 50:
+            embed = discord.Embed(title="Bot latency", description=f"Pong! Latency is {round(self.bot.latency * 1000)} ms", color=0x00FF00)
+        elif round(self.bot.latency * 1000) <= 100:
+            embed = discord.Embed(title="Bot latency", description=f"Pong! Latency is {round(self.bot.latency * 1000)} ms", color=0xFFFF00)
+        elif round(self.bot.latency * 1000) <= 200:
+            embed = discord.Embed(title="Bot latency", description=f"Pong! Latency is {round(self.bot.latency * 1000)} ms", color=0xFF8000)
+        else:
+            embed = discord.Embed(title="Bot latency", description=f"Pong! Latency is {round(self.bot.latency * 1000)} ms", color=0xFF0000)
+        await ctx.response.send_message(embed=embed)
+
 
 async def setup(bot):
     await bot.add_cog(Utility(bot))
