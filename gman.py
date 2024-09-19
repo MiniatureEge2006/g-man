@@ -124,6 +124,13 @@ async def on_command_error(ctx, error):
         #print(error)
         traceback.print_exception(type(error), error, error.__traceback__, file=sys.stderr)
 
+@bot.command()
+@bot_info.is_owner()
+async def sync(ctx):
+    await ctx.send("ok")
+    await bot.tree.sync()
+    print("Commands synced!")
+
 
 @bot.command()
 @bot_info.is_owner()
