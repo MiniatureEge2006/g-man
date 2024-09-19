@@ -136,3 +136,4 @@ EXPERIMENTAL: You can apply almost any filter from FFMPEG using the !filter comm
 | eval<br>exec<br>code | `!eval <code>` | | Evaluates arbitrary code in the bot's account. **DO NOT USE IF YOU DON'T KNOW WHAT THIS DOES. USE AT YOUR OWN RISK.** | `!eval print("hello world")`<br><br>`!eval await ctx.send("hi")` |
 | block | `!block <username/mention/displayname/id> <reason>` | | Block an user from using the bot. | `!block @miniatureege2006 Being a crappy bot developer.` |
 | unblock | `!unblock <username/mention/displayname/id>` | | Unblock an user from using the bot. | `!unblock @miniatureege2006` |
+| sync | `!sync` | | Sync and register slash commands. | `!sync` |
