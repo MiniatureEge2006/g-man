@@ -11,6 +11,7 @@ Filters are applied using FFMPEG, with some corruption commands using tomato.py 
 * Apply premade sequences of filters, such as !tutorial to convert a video into an old-school YouTube tutorial.
 * Corrupt videos in various ways, such as datamoshing and modifying random chunks of bytes in the video file.
 * Save your videos using a personal bookmark system, and load your bookmarks in any server g_man is in.
+* Slash commands. (only help and ping for now.)
 * A blacklisting system incase you do not want some users to use your bot.
 
 ## Usage/Commands
