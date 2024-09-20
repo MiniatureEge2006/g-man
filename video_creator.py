@@ -235,8 +235,8 @@ async def apply_corruption_and_send(ctx, code, code_kwargs, avi_kwargs = {}, mp4
         return
     await set_progress_bar(ctx.message, 1)
 
-    avi_filename = f'vids/{ctx.message.id}.avi'
-    output_filename = f'vids/{ctx.message.id}.mp4'
+    avi_filename = f'vids/discord-{ctx.message.id}.avi'
+    output_filename = f'vids/discord-{ctx.message.id}.mp4'
     
     async with ctx.typing():
         try:
