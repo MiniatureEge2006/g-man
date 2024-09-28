@@ -101,7 +101,7 @@ async def on_message(message):
 
 @bot.event
 async def on_command(ctx):
-    print(f'User {ctx.message.author} ({ctx.message.author.id}) used command {ctx.command} in guild {ctx.guild} at #{ctx.channel}')
+    print(f'User {ctx.message.author} ({ctx.message.author.id}) used command {ctx.command} in guild {ctx.guild} ({ctx.guild.id}) at #{ctx.channel} ({ctx.channel.id})')
 
 # Forgetting videos that get deleted
 @bot.event
