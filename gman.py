@@ -99,6 +99,10 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
+@bot.event
+async def on_command(ctx):
+    print(f'User {ctx.message.author} ({ctx.message.author.id}) used command {ctx.command} in guild {ctx.guild} at #{ctx.channel}')
+
 # Forgetting videos that get deleted
 @bot.event
 async def on_message_delete(message):
