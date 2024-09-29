@@ -101,7 +101,10 @@ async def on_message(message):
 
 @bot.event
 async def on_command(ctx):
-    print(f'User {ctx.message.author} ({ctx.message.author.id}) used command {ctx.command} in guild {ctx.guild} ({ctx.guild.id}) at #{ctx.channel} ({ctx.channel.id})')
+    if isinstance(ctx.message.channel, discord.DMChannel):
+        print(f'User {ctx.message.author} ({ctx.message.author.id}) used command {ctx.command} in {bot.user.name}\'s ({bot.user.id}) DMs')
+    else:
+        print(f'User {ctx.message.author} ({ctx.message.author.id}) used command {ctx.command} in guild {ctx.guild} ({ctx.guild.id}) at #{ctx.channel} ({ctx.channel.id})')
 
 # Forgetting videos that get deleted
 @bot.event
