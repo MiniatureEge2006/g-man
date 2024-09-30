@@ -196,16 +196,16 @@ async def eval(ctx, *, code):
 
     }
 
-    sys.stdout = io.StringIO()
+    stdout = io.StringIO()
     
     try:
-        with contextlib.redirect_stdout(sys.stdout):
+        with contextlib.redirect_stdout(stdout):
                 exec(
                 f"async def func():\n{textwrap.indent(code, '   ')}", local_variables,
                 )
 
         obj = await local_variables["func"]()
-        result = f"{sys.stdout.getvalue()}\n-- {obj}\n"
+        result = f"{stdout.getvalue()}\n-- {obj}\n"
     except Exception as e:
             result = "".join(traceback.format_exception(e, e, e.__traceback__))
     
