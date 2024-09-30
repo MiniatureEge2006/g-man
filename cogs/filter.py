@@ -729,13 +729,13 @@ class Filter(commands.Cog):
         vstream = ffmpeg.overlay(vstream, vfirst, x=kwargs['x'], y=kwargs['y'], shortest=kwargs['shortest'])
         astream = (
             ffmpeg
-            .filter([astream, afirst], 'amix', dropout_transition=4000)
+            .filter([astream, afirst], 'amix', dropout_transition=4000, duration=kwargs['ashortest'])
             .filter('volume', volume=2, precision='fixed')
         )
 
         return vstream, astream, {}
     @commands.command()
-    async def overlay(self, ctx, w : str = '480', h : str = 'auto', x : str = '0', y : str = '0', shortest : str = '0'):
+    async def overlay(self, ctx, w : str = '480', h : str = 'auto', x : str = '0', y : str = '0', shortest : str = '0', ashortest : str = '0'):
         if(w == 'auto' and h == 'auto'):
             return
         if(w != 'auto'):
@@ -746,11 +746,19 @@ class Filter(commands.Cog):
             h = min(1240, max(int(h), 50))
         else:
             h = -2
+        if(shortest == 'true'):
+            shortest = 1
+        elif(shortest == 'false'):
+            shortest = 0
+        if(ashortest == 'true'):
+            ashortest = 1
+        elif(ashortest == 'false'):
+            ashortest = 0
         
         first_vid_filepath, is_yt, result = await media_cache.download_nth_video(ctx, 1)
         if(not result):
             return
-        await video_creator.apply_filters_and_send(ctx, self._overlay, {'first_vid_filepath':first_vid_filepath, 'w':w, 'h':h, 'x':x, 'y':y, 'shortest':shortest})
+        await video_creator.apply_filters_and_send(ctx, self._overlay, {'first_vid_filepath':first_vid_filepath, 'w':w, 'h':h, 'x':x, 'y':y, 'shortest':shortest, 'ashortest':ashortest})
         if(os.path.isfile(first_vid_filepath)):
             os.remove(first_vid_filepath)
         
