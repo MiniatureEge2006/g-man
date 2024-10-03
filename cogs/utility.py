@@ -45,7 +45,7 @@ class Utility(commands.Cog):
     async def vid2img(self, ctx):
         await video_creator.set_progress_bar(ctx.message, 0)
         input_filepath = media_cache.get_from_cache(str(ctx.message.channel.id))[-1]
-        output_filename = 'vids/' + str(ctx.message.channel.id) + '.png'
+        output_filename = 'vids/discord-' + str(ctx.message.id) + '.png'
         await video_creator.set_progress_bar(ctx.message, 1)
 
         await video_creator.set_progress_bar(ctx.message, 2)
@@ -209,7 +209,7 @@ class Utility(commands.Cog):
     async def img2vid(self, ctx):
         await video_creator.set_progress_bar(ctx.message, 0)
         input_filepath = media_cache.get_from_cache(str(ctx.message.channel.id))[-1]
-        output_filename = 'vids/' + str(ctx.message.channel.id) + '.mp4'
+        output_filename = 'vids/discord-' + str(ctx.message.id) + '.mp4'
         await video_creator.set_progress_bar(ctx.message, 1)
 
         await video_creator.set_progress_bar(ctx.message, 2)
