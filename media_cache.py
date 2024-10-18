@@ -70,7 +70,8 @@ async def yt(ctx, url, suffix, extra_ydl_opts=None):
                             break
                     return True, resulting_file
             except yt_dlp.utils.DownloadError as e:
-                continue
+                await ctx.send(f"```ansi\n{e}```")
+                break
     return False, None
 
 
