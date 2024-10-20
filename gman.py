@@ -6,6 +6,7 @@ import bot_info
 import json
 import database as db
 import discord
+from discord import app_commands
 from discord.ext import commands
 from discord.ext.buttons import Paginator
 from discord.ext.commands import CheckFailure
@@ -178,6 +179,8 @@ async def setup(bot):
         print('Failed to load {} because: {}'.format(ex, e))
 
 @bot.hybrid_command(name="eval", description="Evaluate code.", aliases=["exec", "code"])
+@app_commands.user_install()
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @bot_info.is_owner()
 async def eval(ctx, *, code):
     code = clean_code(code)
