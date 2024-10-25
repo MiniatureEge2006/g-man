@@ -85,7 +85,7 @@ class Corruption(commands.Cog):
                 await ctx.send("Error downloading the video")
                 return
 
-            output_filename = f'./vids/{ctx.message.id}.'
+            output_filename = f'./vids/discord-{ctx.message.id}.'
             output_params = {}
             if(fake_type == 'increasing'):
                 output_filename += 'webm'
