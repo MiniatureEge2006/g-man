@@ -15,7 +15,7 @@ tumblr_regex = (r'(https://)?(www\.)?((va\.media\.tumblr\.com/tumblr_.+\.(mp4|MP
 medaltv_regex = (r'(https://)(?:www\.)?medal\.tv/games/[^/?#&]+/clips/(?P<id>[^/?#&]+)')
 archive_regex = (r'(https://)(?:www\.)?archive\.org/(?:details|embed)/(?P<id>[^?#]+)(?:[?].*)?$')
 hosted_file_regex = (r'(https://)?(www\.)?.+\.(com|org|net|us|co|edu|ca|cn|fr|ch|au|in|de|jp|nl|uk|mx|no|ru|br|se|es)/.+\.(png|PNG|jpg|JPG|jpeg|JPEG|mp4|MP4|webm|WEBM|mov|MOV|mkv|MKV|gif|GIF)')
-soundcloud_regex = (r'(https://)(?:www.)?soundcloud\.com/[\w-]+/?(?:sets/)?[\w-]+)')
+soundcloud_regex = (r'(https://(?:www.)?soundcloud\.com/[\w-]+/?(?:sets/)?[\w-]+)')
 bandcamp_regex = (r'(https://)?([\d|\w]+)\.bandcamp\.com/?.*')
 
 audio_filetypes = ['aac', 'mp3', 'ogg', 'wav', 'opus', 'm4a', 'flac', 'wma', 'mka']
