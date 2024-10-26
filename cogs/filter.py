@@ -656,6 +656,38 @@ class Filter(commands.Cog):
             await self.bot.get_cog('Bookmarks').save(ctx, label=bookmark_name)
             await self.bot.get_cog('Utility').swap(ctx)
     
+    async def _fade(self, ctx, vstream, astream, kwargs):
+        first_vid_filepath = ffmpeg.input(kwargs['first_vid_filepath'])
+        second_vid_filepath = ffmpeg.input(kwargs['input_filename'])
+
+        first_vid_filepath = (
+            first_vid_filepath.video
+            .filter('scale', w=854, h=480)
+            .filter('setsar', r='1:1')
+            .filter('fps', fps=60)
+        )
+
+        second_vid_filepath = (
+            second_vid_filepath.video
+            .filter('scale', w=854, h=480)
+            .filter('setsar', r='1:1')
+            .filter('fps', fps=60)
+        )
+        vstream = (
+            ffmpeg
+            .filter([first_vid_filepath, second_vid_filepath], 'xfade', transition=kwargs['transition'], duration=kwargs['duration'], offset=kwargs['offset'], expr=kwargs['expr'])
+        )
+        return vstream, astream, {}
+    @commands.command()
+    async def fade(self, ctx, transition : str = 'fade', duration=1, offset=0, expr : str = ''):
+        if(transition != 'custom'):
+            expr = None
+        first_vid_filepath, is_yt, result = await media_cache.download_nth_video(ctx, 1)
+        if(not result):
+            return
+        await video_creator.apply_filters_and_send(ctx, self._fade, {'first_vid_filepath':first_vid_filepath, 'transition':transition, 'duration':duration, 'offset':offset, 'expr':expr})
+        if(os.path.isfile(first_vid_filepath)):
+            os.remove(first_vid_filepath)
 
     async def _fps(self, ctx, vstream, astream, kwargs):
         vstream = vstream.filter('fps', fps=kwargs['fps'])
