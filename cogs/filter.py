@@ -658,24 +658,29 @@ class Filter(commands.Cog):
     
     async def _fade(self, ctx, vstream, astream, kwargs):
         first_vid_filepath = ffmpeg.input(kwargs['first_vid_filepath'])
-        second_vid_filepath = ffmpeg.input(kwargs['input_filename'])
+        vfirst = first_vid_filepath.video
+        afirst = first_vid_filepath.audio
 
-        first_vid_filepath = (
-            first_vid_filepath.video
+        vfirst = (
+            vfirst
             .filter('scale', w=854, h=480)
             .filter('setsar', r='1:1')
             .filter('fps', fps=60)
         )
 
-        second_vid_filepath = (
-            second_vid_filepath.video
+        vstream = (
+            vstream
             .filter('scale', w=854, h=480)
             .filter('setsar', r='1:1')
             .filter('fps', fps=60)
         )
         vstream = (
             ffmpeg
-            .filter([first_vid_filepath, second_vid_filepath], 'xfade', transition=kwargs['transition'], duration=kwargs['duration'], offset=kwargs['offset'], expr=kwargs['expr'])
+            .filter([vstream, vfirst], 'xfade', transition=kwargs['transition'], duration=kwargs['duration'], offset=kwargs['offset'], expr=kwargs['expr'])
+        )
+        astream = (
+            ffmpeg
+            .filter([astream, afirst], 'acrossfade', d=kwargs['duration'], c1='tri', c2='tri')
         )
         return vstream, astream, {}
     @commands.command()
