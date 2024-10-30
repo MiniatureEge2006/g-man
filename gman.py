@@ -124,7 +124,7 @@ async def on_command_error(ctx, error):
         await ctx.send("You are blocked from using G-Man.")
         return
     if(str(ctx.message.author.id) not in bot_info.data['owners']):
-        await ctx.send("You do not have permission to run this command. (Are you owner?)")
+        await ctx.send("You do not have permission to run this command.")
         return
     else:
         if(not isinstance(error, commands.CommandNotFound)):
