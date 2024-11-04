@@ -8,7 +8,6 @@ import database as db
 import discord
 from discord import app_commands
 from discord.ext import commands
-from discord.ext.buttons import Paginator
 from discord.ext.commands import CheckFailure
 import media_cache
 import os
@@ -20,13 +19,6 @@ from urllib.parse import urlparse
 
 class Blacklisted(CheckFailure):
     pass
-
-class Pag(Paginator):
-    async def teardown(self):
-        try:
-            await self.page.clear_reactions()
-        except discord.HTTPException:
-            pass
 
 
 # If any videos were not deleted while the bot was last up, remove them
@@ -185,7 +177,7 @@ async def setup(bot):
 async def eval(ctx, *, code):
     code = clean_code(code)
 
-    local_variables = {
+    env = {
         "discord": discord,
         "commands": commands,
         "bot": bot,
@@ -204,24 +196,14 @@ async def eval(ctx, *, code):
     try:
         with contextlib.redirect_stdout(stdout):
                 exec(
-                f"async def func():\n{textwrap.indent(code, '   ')}", local_variables
+                f"async def func():\n{textwrap.indent(code, '  ')}", env
                 )
 
-        obj = await local_variables["func"]()
+        obj = await env["func"]()
         result = f"{stdout.getvalue()}\n-- {obj}\n"
     except Exception as e:
             result = "".join(traceback.format_exception(e, e, e.__traceback__))
-    
-    pager = Pag(
-        timeout=100,
-        entries=[result[i: i + 2000] for i in range(0, len(result), 2000)],
-        length=1,
-        prefix="```py\n",
-        suffix="```",
-        color=discord.Color.random()
-    )
-
-    await pager.start(ctx)
+    await ctx.send(embed=discord.Embed(title="Eval", description=f'```py\n{result}\n```', color=discord.Color.og_blurple()))
 
 def clean_code(content):
     if content.startswith("```") and content.endswith("```"):
