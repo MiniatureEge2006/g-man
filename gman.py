@@ -175,7 +175,8 @@ async def setup(bot):
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @bot_info.is_owner()
 async def eval(ctx, *, code):
-    code = clean_code(code)
+    code = cleanup_code(code)
+    result = None
 
     env = {
         "discord": discord,
@@ -190,26 +191,31 @@ async def eval(ctx, *, code):
         "message": ctx.message
 
     }
-
+    env.update(globals())
     stdout = io.StringIO()
     
+    to_compile = f'async def func():\n{textwrap.indent(code, "  ")}'
+    
+    try:
+        exec(to_compile, env)
+    except Exception as e:
+            await ctx.send(embed=discord.Embed(title="Eval Error", description=f'```py\n{result}{traceback.format_exc()}\n```', color=discord.Color.red()))
+            return
+    func = env['func']
     try:
         with contextlib.redirect_stdout(stdout):
-                exec(
-                f"async def func():\n{textwrap.indent(code, '  ')}", env
-                )
-
-        obj = await env["func"]()
-        result = f"{stdout.getvalue()}\n-- {obj}\n"
+            ret = await func()
     except Exception as e:
-            result = "".join(traceback.format_exception(e, e, e.__traceback__))
-    await ctx.send(embed=discord.Embed(title="Eval", description=f'```py\n{result}\n```', color=discord.Color.og_blurple()))
-
-def clean_code(content):
-    if content.startswith("```") and content.endswith("```"):
-        return "\n".join(content.split("\n")[1:][:-3])
+        result = stdout.getvalue()
+        await ctx.send(embed=discord.Embed(title="Eval Error", description=f'```py\n{result}{traceback.format_exc()}\n```', color=discord.Color.red()))
     else:
-        return content
+        result = stdout.getvalue()
+        await ctx.send(embed=discord.Embed(title="Eval", description=f'```py\n{result}\n-- {ret}```', color=discord.Color.og_blurple()))
+
+def cleanup_code(content: str) -> str:
+    if content.startswith('```') and content.endswith('```'):
+        return '\n'.join(content.split('\n')[1:-1])
+    return content.strip(' \n')
 
 def read_json(filename):
     with open(f"{filename}.json", "r") as file:
