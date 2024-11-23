@@ -199,6 +199,7 @@ async def eval(ctx, *, code):
     try:
         exec(to_compile, env)
     except Exception as e:
+            result = result[:2000]
             await ctx.send(embed=discord.Embed(title="Eval Error", description=f'```py\n{result}{traceback.format_exc()}\n```', color=discord.Color.red()))
             return
     func = env['func']
@@ -207,9 +208,11 @@ async def eval(ctx, *, code):
             ret = await func()
     except Exception as e:
         result = stdout.getvalue()
+        result = result[:2000]
         await ctx.send(embed=discord.Embed(title="Eval Error", description=f'```py\n{result}{traceback.format_exc()}\n```', color=discord.Color.red()))
     else:
         result = stdout.getvalue()
+        result = result[:2000]
         await ctx.send(embed=discord.Embed(title="Eval", description=f'```py\n{result}\n-- {ret}```', color=discord.Color.og_blurple()))
 
 def cleanup_code(content: str) -> str:
