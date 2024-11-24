@@ -73,7 +73,7 @@ class Utility(commands.Cog):
                            .add_field(name='Fun effects', value='`americ` `cartoony/cartoon` `deepfry` `demonize` `harmonize` `harmonizedeep` `histogram` `hypercam` `ifunny` `mahna/mahnamahna` `pingpong` `rainbow` `sequencer` `tetris` `text` `trippy` `tutorial` `vintage`')
                            .add_field(name='Bookmarks', value='`save/store` `load/use` `delete/remove` `bookmarks`')
                            .add_field(name='Utility', value='`download/fix/dl` `img2vid` `gif` `vid2img` `mp3` `swap` `time/timestamp` `undo` `ping`')
-                           .add_field(name='Advanced (power users only!)', value='`filter`')
+                           .add_field(name='Advanced (power users only!)', value='`filter` `yt-dlp/youtube-dl/youtubedl/ytdl/ytdlp`')
                            .add_field(name='Owner only (NO ACCESS)', value='`reload` `eval/exec/code` `block` `unblock` `sync`'))
             return
         if(command_name == 'filter'):
@@ -82,6 +82,11 @@ class Utility(commands.Cog):
                            .add_field(name='Examples', value='`!filter aecho` or `!filter edgedetect low=0.1 mode=wires` or `!filter drawtext text="g_man was here" x="(main_w-tw)/2" y="(main_h-th)/2 + 100*sin(t*6)" fontsize=50`')
                            .add_field(name='Multiple filters', value='`!filter reverse !filter areverse` or `!filter eq contrast=1.2 !filter hue h=60 enable=gte(t,3) !filter negate`')
                            .add_field(name="Info", value='At the moment you **cannot** apply filters requiring multiple inputs.'))
+            return
+        if(command_name == 'yt-dlp' or command_name == 'youtube-dl' or command_name == 'youtubedl' or command_name == 'ytdl' or command_name == 'ytdlp'):
+            await ctx.send(embed=discord.Embed(title='The yt-dlp command', description='The yt-dlp command (also known as youtube-dl, youtubedl, ytdl and ytdlp) is an advanced command that is similar to `!download` but even more advanced and allows you to specify custom yt-dlp options. The formatting is similar to `!filter` so you might get used to this command as well.', color=0xFF0000)
+                           .add_field(name='Format', value='`!yt-dlp <url> [options]`')
+                           .add_field(name='Examples', value='`!yt-dlp url format=bestvideo+bestaudio --simulate`'))
             return
         if(command_name == 'help'):
             await ctx.send('`!help` to get a list of all the commands.\n`!help <command_name>` to get help on a specific command.')
@@ -145,7 +150,7 @@ class Utility(commands.Cog):
                                             .add_field(name="Fun effects", value="`americ` `cartoony/cartoon` `deepfry` `demonize` `harmonize` `harmonizedeep` `histogram` `hypercam` `ifunny` `mahna/mahnamahna` `pingpong` `rainbow` `sequencer` `tetris` `text` `trippy` `tutorial` `vintage`")
                                             .add_field(name="Bookmarks", value="`save/store` `load/use` `delete/remove` `bookmarks`")
                                             .add_field(name="Utility", value="`download/fix/dl` `img2vid` `gif` `vid2img` `mp3` `swap` `time/timestamp` `undo` `ping`")
-                                            .add_field(name="Advanced (power users only!)", value="`filter`")
+                                            .add_field(name="Advanced (power users only!)", value="`filter` `yt-dlp/youtube-dl/youtubedl/ytdl/ytdlp`")
                                             .add_field(name="Owner only (NO ACCESS)", value="`reload` `eval/exec/code` `block` `unblock` `sync`"))
             return
         if(command_name == 'filter'):
@@ -154,6 +159,11 @@ class Utility(commands.Cog):
                            .add_field(name='Examples', value='`!filter aecho` or `!filter edgedetect low=0.1 mode=wires` or `!filter drawtext text="g_man was here" x="(main_w-tw)/2" y="(main_h-th)/2 + 100*sin(t*6)" fontsize=50`')
                            .add_field(name='Multiple filters', value='`!filter reverse !filter areverse` or `!filter eq contrast=1.2 !filter hue h=60 enable=gte(t,3) !filter negate`')
                            .add_field(name="Info", value='At the moment you **cannot** apply filters requiring multiple inputs.'))
+            return
+        if(command_name == 'yt-dlp' or command_name == 'youtube-dl' or command_name == 'youtubedl' or command_name == 'ytdl' or command_name == 'ytdlp'):
+            await ctx.send(embed=discord.Embed(title='The yt-dlp command', description='The yt-dlp command (also known as youtube-dl, youtubedl, ytdl and ytdlp) is an advanced command that is similar to `!download` but even more advanced and allows you to specify custom yt-dlp options. The formatting is similar to `!filter` so you might get used to this command as well.', color=0xFF0000)
+                           .add_field(name='Format', value='`!yt-dlp <url> [options]`')
+                           .add_field(name='Examples', value='`!yt-dlp url format=bestvideo+bestaudio --simulate`'))
             return
         if(command_name == 'help'):
             await ctx.response.send_message("`/help` to get a list of commands.\n`/help <command_name>` to get help on a specific command.")
