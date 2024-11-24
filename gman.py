@@ -27,7 +27,7 @@ for f in vid_files:
     os.remove(f'vids/{f}')
 
 
-extensions = ['cogs.bitrate', 'cogs.filter', 'cogs.fun', 'cogs.corruption', 'cogs.bookmarks', 'cogs.utility']
+extensions = ['cogs.bitrate', 'cogs.filter', 'cogs.fun', 'cogs.corruption', 'cogs.bookmarks', 'cogs.utility', 'cogs.ytdlp']
 bot = commands.Bot(command_prefix=commands.when_mentioned_or('!'), help_command=None, intents=discord.Intents.all())
 
 bot.blacklisted_users = []
