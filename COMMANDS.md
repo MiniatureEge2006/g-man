@@ -130,6 +130,13 @@ EXPERIMENTAL: You can apply almost any filter from FFMPEG using the !filter comm
     * `!filter reverse !filter areverse`
     * `!filter eq contrast=1.2 !filter hue h=60 enable=gte(t,3) !filter negate`
 
+## !yt-dlp command
+Advanced command similar to `!download` that allows you to download off from more websites and also specify custom yt-dlp options.
+* Format: `!yt-dlp <url> [options]`
+* `[options]` are formatted similarly to the `!filter` command.
+* Examples:
+    * `!yt-dlp url format=bestvideo+bestaudio --simulate`
+
 # Owner only
 | Command | Format | Min/Max Values | Description | Examples |
 | --- | --- | --- | --- | --- |
