@@ -161,7 +161,7 @@ class Utility(commands.Cog):
                            .add_field(name="Info", value='At the moment you **cannot** apply filters requiring multiple inputs.'))
             return
         if(command_name == 'yt-dlp' or command_name == 'youtube-dl' or command_name == 'youtubedl' or command_name == 'ytdl' or command_name == 'ytdlp'):
-            await ctx.send(embed=discord.Embed(title='The yt-dlp command', description='The yt-dlp command (also known as youtube-dl, youtubedl, ytdl and ytdlp) is an advanced command that is similar to `!download` but even more advanced and allows you to specify custom yt-dlp options. The formatting is similar to `!filter` so you might get used to this command as well.', color=0xFF0000)
+            await ctx.response.send_message(embed=discord.Embed(title='The yt-dlp command', description='The yt-dlp command (also known as youtube-dl, youtubedl, ytdl and ytdlp) is an advanced command that is similar to `!download` but even more advanced and allows you to specify custom yt-dlp options. The formatting is similar to `!filter` so you might get used to this command as well.', color=0xFF0000)
                            .add_field(name='Format', value='`!yt-dlp <url> [options]`')
                            .add_field(name='Examples', value='`!yt-dlp url format=bestvideo+bestaudio --simulate`'))
             return
