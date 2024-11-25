@@ -1,6 +1,7 @@
 import os
 import discord
 from discord.ext import commands
+from yt_dlp.utils import download_range_func
 import yt_dlp
 
 class Ytdlp(commands.Cog):
@@ -40,7 +41,23 @@ class Ytdlp(commands.Cog):
             os.remove(file_path)
         except Exception as e:
             await ctx.send(f"Download failed: `{e}`")
-        
+
+    def parse_time_to_seconds(self, time_str):
+        time_parts = time_str.split(":")
+        if len(time_parts) == 1: # Seconds only
+            return float(time_parts[0])
+        elif len(time_parts) == 2: # MM:SS
+            minutes = int(time_parts[0])
+            seconds = float(time_parts[1])
+            return minutes * 60 + seconds
+        elif len(time_parts) == 3: # HH:MM:SS
+            hours = int(time_parts[0])
+            minutes = int(time_parts[1])
+            seconds = float(time_parts[2])
+            return hours * 3600 + minutes * 60 + seconds
+        else:
+            raise ValueError(f"Invalid time format: `{time_str}`")
+
     def parse_options(self, options: str) -> dict:
         parsed_opts = {}
         for opt in options.split():
@@ -53,6 +70,22 @@ class Ytdlp(commands.Cog):
                     parsed_opts[key] = True
                 elif value.lower() == 'false':
                     parsed_opts[key] = False
+                # For download_ranges
+                if key == "download_ranges":
+                    try:
+                        ranges = []
+                        for rng in value.split(","):
+                            if "-" in rng:
+                                start, end = rng.split("-", 1)
+                                start = self.parse_time_to_seconds(start.strip())
+                                end = self.parse_time_to_seconds(end.strip()) if end.strip() else None
+                                ranges.append((start, end))
+                            else:
+                                start = self.parse_time_to_seconds(rng.strip())
+                                ranges.append((start, None))
+                        parsed_opts['download_ranges'] = download_range_func(None, ranges)
+                    except ValueError as e:
+                        raise ValueError(f"Invalid range format for download_ranges: `{e}`")
                 else:
                     parsed_opts[key] = value
             elif opt.startswith("--"):
