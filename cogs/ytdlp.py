@@ -10,11 +10,11 @@ class Ytdlp(commands.Cog):
     
     @commands.command(name="yt-dlp", aliases=["youtube-dl", "ytdl", "youtubedl", "ytdlp"])
     async def ytdlp(self, ctx, url: str, *, options: str = ''):
-
-        ydl_opts = {
-            'no_playlist': True,
-            'outtmpl': 'vids/%(extractor)s-%(id)s.%(ext)s'
-        }
+        async with ctx.typing():
+            ydl_opts = {
+                'no_playlist': True,
+                'outtmpl': 'vids/%(extractor)s-%(id)s.%(ext)s'
+            }
 
         if options.strip():
             try:
