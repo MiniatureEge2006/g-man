@@ -1,5 +1,6 @@
 import os
 import discord
+from discord import app_commands
 from discord.ext import commands
 from yt_dlp.utils import download_range_func
 import yt_dlp
@@ -8,13 +9,17 @@ class Ytdlp(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
     
-    @commands.command(name="yt-dlp", aliases=["youtube-dl", "ytdl", "youtubedl", "ytdlp"])
-    async def ytdlp(self, ctx, url: str, *, options: str = ''):
-        async with ctx.typing():
-            ydl_opts = {
-                'no_playlist': True,
-                'outtmpl': 'vids/%(extractor)s-%(id)s.%(ext)s'
-            }
+    @commands.hybrid_command(name="yt-dlp", aliases=["youtube-dl", "ytdl", "youtubedl", "ytdlp"], description="Use yt-dlp!")
+    @app_commands.describe(url="Input URL. (e.g., YouTube, SoundCloud, etc. (DRM protected websites like Spotify are NOT supported.))", options="yt-dlp Options. (e.g., download_ranges=10-15 --force_keyframes_at_cuts)")
+    @app_commands.user_install()
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    async def ytdlp(self, ctx: commands.Context, url: str, *, options: str = ''):
+        if ctx.interaction:
+            await ctx.defer()
+        ydl_opts = {
+            'no_playlist': True,
+            'outtmpl': 'vids/%(extractor)s-%(id)s.%(ext)s'
+        }
 
         if options.strip():
             try:
@@ -31,7 +36,8 @@ class Ytdlp(commands.Cog):
                 file_path = ydl.prepare_filename(info)
             
             file_size = os.path.getsize(file_path)
-            max_size = self.get_max_file_size(ctx.guild.premium_subscription_count)
+            boost_count = ctx.guild.premium_subscription_count if ctx.guild else 0
+            max_size = self.get_max_file_size(boost_count)
 
             if file_size > max_size:
                 await ctx.send(f"File is too large to send via Discord. ({file_size} bytes)")
@@ -40,7 +46,7 @@ class Ytdlp(commands.Cog):
 
             os.remove(file_path)
         except Exception as e:
-            await ctx.send(f"Download failed: `{e}`")
+            await ctx.send(f"Download failed: ```ansi\n{e}```")
 
     def parse_time_to_seconds(self, time_str):
         time_parts = time_str.split(":")
