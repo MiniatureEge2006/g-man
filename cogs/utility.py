@@ -88,6 +88,9 @@ class Utility(commands.Cog):
                            .add_field(name='Format', value='`!yt-dlp <url> [options]`')
                            .add_field(name='Examples', value='`!yt-dlp url format=bestvideo+bestaudio --simulate`'))
             return
+        if(command_name == 'ffmpeg'):
+            await ctx.send("This command is pretty advanced since it utilizes the FFmpeg CLI. See here for more info: https://ffmpeg.org/documentation.html")
+            return
         if(command_name == 'help'):
             await ctx.send('`!help` to get a list of all the commands.\n`!help <command_name>` to get help on a specific command.')
             return
@@ -164,6 +167,9 @@ class Utility(commands.Cog):
             await ctx.response.send_message(embed=discord.Embed(title='The yt-dlp command', description='The yt-dlp command (also known as youtube-dl, youtubedl, ytdl and ytdlp) is an advanced command that is similar to `!download` but even more advanced and allows you to specify custom yt-dlp options. The formatting is similar to `!filter` so you might get used to this command as well.', color=0xFF0000)
                            .add_field(name='Format', value='`!yt-dlp <url> [options]`')
                            .add_field(name='Examples', value='`!yt-dlp url format=bestvideo+bestaudio --simulate`'))
+            return
+        if(command_name == 'ffmpeg'):
+            await ctx.send("This command is pretty advanced since it utilizes the FFmpeg CLI. See here for more info: https://ffmpeg.org/documentation.html")
             return
         if(command_name == 'help'):
             await ctx.response.send_message("`/help` to get a list of commands.\n`/help <command_name>` to get help on a specific command.")
