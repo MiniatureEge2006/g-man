@@ -17,7 +17,7 @@ class Ytdlp(commands.Cog):
         if ctx.interaction:
             await ctx.defer()
         ydl_opts = {
-            'no_playlist': True,
+            'noplaylist': True,
             'outtmpl': 'vids/%(extractor)s-%(id)s.%(ext)s'
         }
 
