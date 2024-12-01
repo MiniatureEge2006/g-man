@@ -91,6 +91,9 @@ class Utility(commands.Cog):
         if(command_name == 'ffmpeg'):
             await ctx.send("This command is pretty advanced since it utilizes the FFmpeg CLI. See here for more info: https://ffmpeg.org/documentation.html")
             return
+        if(command_name == 'imagemagick' or command_name == 'magick'):
+            await ctx.send("https://imagemagick.org/")
+            return
         if(command_name == 'help'):
             await ctx.send('`!help` to get a list of all the commands.\n`!help <command_name>` to get help on a specific command.')
             return
@@ -169,7 +172,10 @@ class Utility(commands.Cog):
                            .add_field(name='Examples', value='`!yt-dlp url format=bestvideo+bestaudio --simulate`'))
             return
         if(command_name == 'ffmpeg'):
-            await ctx.send("This command is pretty advanced since it utilizes the FFmpeg CLI. See here for more info: https://ffmpeg.org/documentation.html")
+            await ctx.response.send_message("This command is pretty advanced since it utilizes the FFmpeg CLI. See here for more info: https://ffmpeg.org/documentation.html")
+            return
+        if(command_name == 'imagemagick' or command_name == 'magick'):
+            await ctx.response.send_message("https://imagemagick.org/")
             return
         if(command_name == 'help'):
             await ctx.response.send_message("`/help` to get a list of commands.\n`/help <command_name>` to get help on a specific command.")
