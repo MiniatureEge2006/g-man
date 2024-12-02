@@ -171,6 +171,7 @@ async def setup(bot):
         print('Failed to load {} because: {}'.format(ex, e))
 
 @bot.hybrid_command(name="eval", description="Evaluate code.", aliases=["exec", "code"])
+@app_commands.describe(code="The code to evaluate.")
 @app_commands.user_install()
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @bot_info.is_owner()
@@ -185,7 +186,11 @@ async def eval(ctx, *, code):
         "client": bot,
         "ctx": ctx,
         "context": ctx,
+        "send": ctx.send,
+        "reply": ctx.reply,
         "channel": ctx.channel,
+        "voice": ctx.voice_client,
+        "vc": ctx.voice_client,
         "author": ctx.author,
         "guild": ctx.guild,
         "message": ctx.message
