@@ -4,6 +4,8 @@ from discord import app_commands
 from discord.ext import commands
 from yt_dlp.utils import download_range_func
 import yt_dlp
+import shlex
+import json
 
 class Ytdlp(commands.Cog):
     def __init__(self, bot):
@@ -33,18 +35,25 @@ class Ytdlp(commands.Cog):
             await ctx.send(f"Downloading from `{url}` with options `{ydl_opts}`...")
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
-                file_path = ydl.prepare_filename(info)
-            
-            file_size = os.path.getsize(file_path)
-            boost_count = ctx.guild.premium_subscription_count if ctx.guild else 0
-            max_size = self.get_max_file_size(boost_count)
+                final_file = (
+                    info.get('requested_downloads', [{}])[0].get('filepath')
+                    or ydl.prepare_filename(info)
+                )
 
-            if file_size > max_size:
-                await ctx.send(f"File is too large to send via Discord. ({file_size} bytes)")
-            else:
-                await ctx.send(file=discord.File(file_path))
+                if not os.path.exists(final_file):
+                    raise FileNotFoundError(f"The file '{final_file}' does not exist.")
+                file_size = os.path.getsize(final_file)
+                boost_count = ctx.guild.premium_subscription_count if ctx.guild else 0
+                max_size = self.get_max_file_size(boost_count)
 
-            os.remove(file_path)
+                if file_size > max_size:
+                    await ctx.send(f"File is too large to send via Discord. ({file_size} bytes)")
+                else:
+                    await ctx.send(file=discord.File(final_file))
+
+            os.remove(final_file)
+        except FileNotFoundError as e:
+            await ctx.send(f"File handling error: `{e}`")
         except Exception as e:
             await ctx.send(f"Download failed: ```ansi\n{e}```")
 
@@ -66,7 +75,7 @@ class Ytdlp(commands.Cog):
 
     def parse_options(self, options: str) -> dict:
         parsed_opts = {}
-        for opt in options.split():
+        for opt in shlex.split(options):
             if "=" in opt:
                 key, value = opt.split("=", 1)
                 key = key.strip()
@@ -76,6 +85,25 @@ class Ytdlp(commands.Cog):
                     parsed_opts[key] = True
                 elif value.lower() == 'false':
                     parsed_opts[key] = False
+                
+                if key == "postprocessors":
+                    try:
+                        parsed_value = json.loads(value)
+                        if not isinstance(parsed_value, list) or not all(isinstance(item, dict) for item in parsed_value):
+                            raise ValueError("Postprocessors must be a JSON-formatted list of dictionaries.")
+                        parsed_opts[key] = parsed_value
+                    except json.JSONDecodeError as e:
+                        raise ValueError(f"Error parsing postprocessors: {e}")
+                    continue
+                if key == "postprocessor_args":
+                    try:
+                        parsed_value = json.loads(value)
+                        if not isinstance(parsed_value, list) or not all(isinstance(item, str) for item in parsed_value):
+                            raise ValueError("postprocessor_args must be a JSON-formatted list of strings.")
+                        parsed_opts[key] = parsed_value
+                    except json.JSONDecodeError as e:
+                        raise ValueError(f"Error parsing postprocessor_args: {e}")
+                    continue
                 # For download_ranges
                 if key == "download_ranges":
                     try:
