@@ -72,7 +72,7 @@ class Utility(commands.Cog):
                            .add_field(name='Corruption', value='`corrupt` `faketime` `mosh` `rearrange` `smear` `stutter`')
                            .add_field(name='Fun effects', value='`americ` `cartoony/cartoon` `deepfry` `demonize` `harmonize` `harmonizedeep` `histogram` `hypercam` `ifunny` `mahna/mahnamahna` `pingpong` `rainbow` `sequencer` `tetris` `text` `trippy` `tutorial` `vintage`')
                            .add_field(name='Bookmarks', value='`save/store` `load/use` `delete/remove` `bookmarks`')
-                           .add_field(name='Utility', value='`download/fix/dl` `img2vid` `gif` `vid2img` `mp3` `swap` `time/timestamp` `undo` `ping`')
+                           .add_field(name='Utility', value='`download/fix/dl` `img2vid` `gif` `vid2img` `mp3` `swap` `time/timestamp` `undo` `ping` `exif/ffprobe`')
                            .add_field(name='Advanced (power users only!)', value='`filter` `yt-dlp/youtube-dl/youtubedl/ytdl/ytdlp` `ffmpeg` `imagemagick/magick`')
                            .add_field(name='Owner only (NO ACCESS)', value='`reload` `eval/exec/code` `block` `unblock` `sync`'))
             return
@@ -155,7 +155,7 @@ class Utility(commands.Cog):
                                             .add_field(name="Corruption", value="`corrupt` `faketime` `mosh` `rearrange` `smear` `stutter`")
                                             .add_field(name="Fun effects", value="`americ` `cartoony/cartoon` `deepfry` `demonize` `harmonize` `harmonizedeep` `histogram` `hypercam` `ifunny` `mahna/mahnamahna` `pingpong` `rainbow` `sequencer` `tetris` `text` `trippy` `tutorial` `vintage`")
                                             .add_field(name="Bookmarks", value="`save/store` `load/use` `delete/remove` `bookmarks`")
-                                            .add_field(name="Utility", value="`download/fix/dl` `img2vid` `gif` `vid2img` `mp3` `swap` `time/timestamp` `undo` `ping`")
+                                            .add_field(name="Utility", value="`download/fix/dl` `img2vid` `gif` `vid2img` `mp3` `swap` `time/timestamp` `undo` `ping` `exif/ffprobe`")
                                             .add_field(name="Advanced (power users only!)", value="`filter` `yt-dlp/youtube-dl/youtubedl/ytdl/ytdlp` `ffmpeg` `imagemagick/magick`")
                                             .add_field(name="Owner only (NO ACCESS)", value="`reload` `eval/exec/code` `block` `unblock` `sync`"))
             return
