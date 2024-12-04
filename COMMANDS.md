@@ -115,6 +115,7 @@ You can bookmark videos and load them in any server with g_man. Bookmark labels 
 | time<br>timestamp | `!time [speed]` | `0.05 to inf` | Draws a timestamp on the video to help you figure out when to `!extract`. You can set a lower `[speed]` for the video to help with precise timing.<br><br>NOTE: The video created by this command is ignored by g_man! This is so you don't have to run `!swap` or `!undo` afterwards in order to `!extract` from the original video. | `!time`<br><br>`!time 0.5` |
 | undo | `!undo` | | Deletes the last video sent. | `!undo` |
 | ping | `!ping` | | Shows bot latency. | `!ping` |
+| exif<br>ffprobe | `!exif` | | Extract metadata from media. | `!exif` |
 
 # Advanced
 ## !filter command
@@ -136,6 +137,12 @@ Advanced command similar to `!download` that allows you to download off from mor
 * `[options]` are formatted similarly to the `!filter` command.
 * Examples:
     * `!yt-dlp url format=bestvideo+bestaudio --simulate`
+
+## !ffmpeg command
+Extremely advanced command that utilizes the FFmpeg CLI.
+
+## !imagemagick command
+Basic (but can be extremely advanced) command that utilizes the ImageMagick CLI.
 
 # Owner only
 | Command | Format | Min/Max Values | Description | Examples |
