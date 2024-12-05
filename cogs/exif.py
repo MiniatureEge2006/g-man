@@ -65,7 +65,7 @@ class Exif(commands.Cog):
             file_path = f"vids/{file_name}"
             await attachment.save(file_path)
         else:
-            raise ValueError("Invalid input: Must be a URL, file path, or attachment")
+            raise ValueError("Invalid input: Malformed URL")
         return file_path
     
     def is_valid_url(self, url: str) -> bool:
