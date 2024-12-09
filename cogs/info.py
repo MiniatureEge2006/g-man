@@ -106,6 +106,54 @@ class Info(commands.Cog):
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
     
+    @commands.command(name="emojiinfo", aliases=["emoji"], description="Displays information about an emoji.")
+    async def emojiinfo(self, ctx: commands.Context, emoji: discord.Emoji):
+        embed = discord.Embed(
+            title=f"Emoji Info - {emoji.name}",
+            color=discord.Color.dark_orange(),
+            timestamp=discord.utils.utcnow()
+        )
+        embed.add_field(name="ID", value=emoji.id, inline=True)
+        embed.add_field(name="Type", value="Animated" if emoji.animated else "Static", inline=True)
+        embed.add_field(name="Created At", value=emoji.created_at.strftime("%Y-%m-%d %H:%M:%S"), inline=True)
+        embed.add_field(name="Guild", value=emoji.guild.name if emoji.guild else "None", inline=False)
+        embed.set_thumbnail(url=emoji.url)
+        embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
+        await ctx.send(embed=embed)
+    
+    @commands.command(name="stickerinfo", aliases=["sticker"], description="Displays information about a sticker.")
+    async def stickerinfo(self, ctx: commands.Context, sticker: discord.GuildSticker):
+        embed = discord.Embed(
+            title=f"Sticker Info - {sticker.name}",
+            color=discord.Color.dark_green(),
+            timestamp=discord.utils.utcnow()
+        )
+
+        embed.add_field(name="ID", value=sticker.id, inline=True)  
+        embed.add_field(name="Guild", value=sticker.guild.name if sticker.guild else "None", inline=True)
+
+        if sticker.description:
+            embed.add_field(name="Description", value=sticker.description, inline=False)
+
+        embed.set_image(url=sticker.url)
+        embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
+
+        await ctx.send(embed=embed)
+    
+    @commands.command(name="inviteinfo", description="Displays information about an invite code.")
+    async def inviteinfo(self, ctx: commands.Context, invite: discord.Invite):
+        embed = discord.Embed(
+            title=f"Invite Info - {invite.code}",
+            color=discord.Color.dark_purple(),
+            timestamp=discord.utils.utcnow()
+        )
+        embed.add_field(name="Guild", value=invite.guild.name if invite.guild else "None", inline=True)
+        embed.add_field(name="Channel", value=invite.channel.name, inline=True)
+        embed.add_field(name="Uses", value=f"{invite.uses}/{invite.max_uses}" if invite.max_uses else "Unlimited", inline=True)
+        embed.add_field(name="Expires At", value=invite.expires_at.strftime("%Y-%m-%d %H:%M:%S") if invite.expires_at else "Never", inline=True)
+        embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
+        await ctx.send(embed=embed)
+    
     @commands.command(name="permissions", aliases=["perms"], description="Displays a user's permissions in a channel.")
     async def permissions(self, ctx: commands.Context, member: discord.Member = None, channel: discord.TextChannel = None):
         member = member or ctx.author
@@ -121,6 +169,22 @@ class Info(commands.Cog):
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
     
+    @commands.command(name="roleinfo", aliases=["role"], description="Displays information about a role.")
+    async def roleinfo(self, ctx: commands.Context, role: discord.Role):
+        embed = discord.Embed(
+            title=f"Role Info - {role.name}",
+            color=role.color,
+            timestamp=discord.utils.utcnow()
+        )
+        embed.add_field(name="ID", value=role.id, inline=True)
+        embed.add_field(name="Name", value=role.name, inline=True)
+        embed.add_field(name="Color", value=str(role.color), inline=True)
+        embed.add_field(name="Mentionable", value="Yes" if role.mentionable else "No", inline=True)
+        embed.add_field(name="Created At", value=role.created_at.strftime("%Y-%m-%d %H:%M:%S"), inline=True)
+        embed.add_field(name="Permissions", value=", ".join(perm[0].replace('_', ' ').title() for perm in role.permissions if perm[1]) or "None", inline=False)
+        embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
+        await ctx.send(embed=embed)
+
     @commands.command(name="baninfo", description="Displays information about a banned user.")
     @commands.has_permissions(ban_members=True)
     async def baninfo(self, ctx: commands.Context, user: discord.User):
