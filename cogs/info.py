@@ -188,19 +188,15 @@ class Info(commands.Cog):
     @commands.command(name="baninfo", description="Displays information about a banned user.")
     @commands.has_permissions(ban_members=True)
     async def baninfo(self, ctx: commands.Context, user: discord.User):
-        try:
-            ban_entry = await ctx.guild.fetch_ban(user)
-            embed = discord.Embed(
-                title=f"Ban Info - {user}",
-                color=discord.Color.dark_red(),
-                timestamp=discord.utils.utcnow()
-            )
-            embed.add_field(name="Reason", value=ban_entry.reason or "None", inline=False)
-            embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
-            await ctx.send(embed=embed)
-        except PermissionError:
-            await ctx.send("You do not have permission to run this command.")
-            return
+        ban_entry = await ctx.guild.fetch_ban(user)
+        embed = discord.Embed(
+            title=f"Ban Info - {user}",
+            color=discord.Color.dark_red(),
+            timestamp=discord.utils.utcnow()
+        )
+        embed.add_field(name="Reason", value=ban_entry.reason or "None", inline=False)
+        embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
+        await ctx.send(embed=embed)
     
     @commands.command(name="botinfo", description="Displays information about the bot.")
     async def botinfo(self, ctx: commands.Context):
