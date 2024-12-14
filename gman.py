@@ -28,7 +28,7 @@ for f in vid_files:
 
 
 extensions = ['cogs.help', 'cogs.ping', 'cogs.bitrate', 'cogs.filter', 'cogs.fun', 'cogs.corruption', 'cogs.bookmarks', 'cogs.utility', 'cogs.exif', 'cogs.ffmpeg', 'cogs.imagemagick', 'cogs.ytdlp', 'cogs.info']
-bot = commands.Bot(command_prefix=commands.when_mentioned_or('!'), help_command=None, intents=discord.Intents.all())
+bot = commands.Bot(command_prefix=commands.when_mentioned_or('!'), status=discord.Status.online, activity=discord.Game(name="!help"), help_command=None, intents=discord.Intents.all())
 
 bot.blacklisted_users = []
 
@@ -37,7 +37,8 @@ async def reload_extensions(exs):
     module_msg = ''
     for ex in exs:
         try:
-            #await bot.unload_extension(ex)
+            if ex in bot.extensions:
+                await bot.unload_extension(ex)
             await bot.load_extension(ex)
             module_msg += 'module "{}" reloaded\n'.format(ex)
         except Exception as e:
@@ -64,9 +65,11 @@ async def on_ready():
     print('------')
     data = read_json("blacklistedusers")
     bot.blacklisted_users = data["blacklistedUsers"]
-    await bot.change_presence(activity=discord.Game(name="!help"))
     global extensions
-    print(await reload_extensions(extensions))
+    try:
+        print(await reload_extensions(extensions))
+    except Exception as e:
+        print(f"Error loading extensions in on_ready: {e}")
 
 # Process commands
 @bot.event
