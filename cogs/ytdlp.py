@@ -18,6 +18,8 @@ class Ytdlp(commands.Cog):
     async def ytdlp(self, ctx: commands.Context, url: str, *, options: str = ''):
         if ctx.interaction:
             await ctx.defer()
+        else:
+            await ctx.typing()
         ydl_opts = {
             'noplaylist': True,
             'outtmpl': 'vids/%(extractor)s-%(id)s.%(ext)s'

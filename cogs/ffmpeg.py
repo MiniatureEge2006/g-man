@@ -22,6 +22,8 @@ class FFmpeg(commands.Cog):
         
         if ctx.interaction:
             await ctx.defer()
+        else:
+            await ctx.typing()
 
         try:
             processing_dir = 'vids'
