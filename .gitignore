@@ -1,6 +1,7 @@
 .vscode
 cache.json
 bot_info.json
+blacklistedusers.json
 
 # These should be downloaded manually
 vids/*

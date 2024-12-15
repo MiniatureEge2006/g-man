@@ -124,6 +124,9 @@ async def on_command_error(ctx, error):
     if(isinstance(error, commands.MissingPermissions)):
         await ctx.send("You do not have enough permissions to run this command.")
         return
+    if(isinstance(error, commands.MissingRequiredArgument)):
+        await ctx.send(f"Error: `{error}`")
+        return
     else:
         if(not isinstance(error, commands.CommandNotFound)):
             await ctx.send('Oops, something is wrong!\n```\n' + repr(error) + '\n```')
@@ -140,9 +143,9 @@ async def sync(ctx):
 
 @bot.command()
 @bot_info.is_owner()
-async def block(ctx, user: discord.User, *, reason):
+async def block(ctx, user: discord.User, *, reason = "No reason provided."):
      if ctx.message.author.id == user.id:
-        await ctx.send("Don't block yourself dummy")
+        await ctx.send("Don't block yourself.")
         return
      bot.blacklisted_users.append(user.id)
      data = read_json("blacklistedusers")
