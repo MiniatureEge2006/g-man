@@ -209,6 +209,7 @@ class Info(commands.Cog):
         embed.add_field(name="Servers", value=len(self.bot.guilds), inline=True)
         embed.add_field(name="Users", value=len(set(self.bot.get_all_members())), inline=True)
         embed.add_field(name="Developers", value="[nkrasn](https://github.com/nkrasn 'Original Developer.'), [MiniatureEge2006](https://github.com/MiniatureEge2006 'Current Developer.')", inline=True)
+        embed.add_field(name="Source Code", value="https://github.com/MiniatureEge2006/g_man-revived", inline=True)
         embed.set_thumbnail(url=self.bot.user.avatar.url)
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
