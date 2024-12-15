@@ -49,7 +49,7 @@ class Ytdlp(commands.Cog):
                 max_size = self.get_max_file_size(boost_count)
 
                 if file_size > max_size:
-                    await ctx.send(f"File is too large to send via Discord. ({file_size} bytes)")
+                    await ctx.send(f"File is too large to send via Discord. ({file_size} bytes/{self.human_readable_size(int(file_size))})")
                 else:
                     await ctx.send(file=discord.File(final_file))
 
@@ -139,6 +139,12 @@ class Ytdlp(commands.Cog):
             return 50 * 1024 * 1024 # 50 MB
         else:
             return 25 * 1024 * 1024 # 25 MB
+    
+    def human_readable_size(self, size: int) -> str:
+        for unit in ["B", "KB", "MB", "GB", "TB"]:
+            if size < 1024:
+                return f"{size:.1f} {unit}"
+            size /= 1024
 
 async def setup(bot):
     await bot.add_cog(Ytdlp(bot))
