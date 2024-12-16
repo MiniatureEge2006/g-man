@@ -11,8 +11,8 @@ class Ytdlp(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
     
-    @commands.hybrid_command(name="yt-dlp", aliases=["youtube-dl", "ytdl", "youtubedl", "ytdlp"], description="Use yt-dlp!")
-    @app_commands.describe(url="Input URL. (e.g., YouTube, SoundCloud, etc. (DRM protected websites like Spotify are NOT supported.))", options="yt-dlp Options. (e.g., download_ranges=10-15 --force_keyframes_at_cuts)")
+    @commands.hybrid_command(name="yt-dlp", aliases=["youtube-dl", "ytdl", "youtubedl", "ytdlp"], description="Use yt-dlp! (for a list of formats use --listformats or listformats=true)")
+    @app_commands.describe(url="Input URL. (e.g., YouTube, SoundCloud. DRM protected websites are NOT supported.)", options="yt-dlp Options. (e.g., download_ranges=10-15 --force_keyframes_at_cuts)")
     @app_commands.user_install()
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def ytdlp(self, ctx: commands.Context, url: str, *, options: str = ''):
@@ -34,26 +34,56 @@ class Ytdlp(commands.Cog):
                 return
         
         try:
-            await ctx.send(f"Downloading from `{url}` with options `{ydl_opts}`...")
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                final_file = (
+            if ydl_opts.get("listformats", False):
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    formats = info.get('formats', [])
+                    if not formats:
+                        await ctx.send("No formats available for this URL.")
+                        return
+                    
+                    format_list = [
+                    (
+                    f"ID: {fmt.get('format_id')} | Ext: {fmt.get('ext')} | "
+                    f"Res: {fmt.get('resolution', 'N/A')} | FPS: {fmt.get('fps', 'N/A')} | "
+                    f"Video Codec: {fmt.get('vcodec', 'N/A')} | Audio Codec: {fmt.get('acodec', 'N/A')} | "
+                    f"Bitrate: {fmt.get('tbr', 'N/A')}k | Size: {self.human_readable_size(fmt.get('filesize', 0)) if fmt.get('filesize') else 'N/A'} | "
+                    f"Protocol: {fmt.get('protocol', 'N/A')}"
+                    )
+                    for fmt in formats
+                ]
+
+                    format_message = "\n".join(format_list)
+                    if len(format_message) > 2000:
+                        file_path = f"vids/formats.txt"
+                        with open(file_path, 'w') as f:
+                            f.write(format_message)
+                        await ctx.send("The available formats are too many to display. See the attached file:", file=discord.File(file_path))
+                        os.remove(file_path)
+                    else:
+                        await ctx.send(f"Available formats:\n```{format_message}```")
+                return
+            else:
+                await ctx.send(f"Downloading from `{url}` with options `{ydl_opts}`...")
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    final_file = (
                     info.get('requested_downloads', [{}])[0].get('filepath')
                     or ydl.prepare_filename(info)
-                )
+                    )
 
-                if not os.path.exists(final_file):
-                    raise FileNotFoundError(f"The file '{final_file}' does not exist.")
-                file_size = os.path.getsize(final_file)
-                boost_count = ctx.guild.premium_subscription_count if ctx.guild else 0
-                max_size = self.get_max_file_size(boost_count)
+                    if not os.path.exists(final_file):
+                        raise FileNotFoundError(f"The file '{final_file}' does not exist.")
+                    file_size = os.path.getsize(final_file)
+                    boost_count = ctx.guild.premium_subscription_count if ctx.guild else 0
+                    max_size = self.get_max_file_size(boost_count)
 
-                if file_size > max_size:
-                    await ctx.send(f"File is too large to send via Discord. ({file_size} bytes/{self.human_readable_size(int(file_size))})")
-                else:
-                    await ctx.send(file=discord.File(final_file))
+                    if file_size > max_size:
+                        await ctx.send(f"File is too large to send via Discord. ({file_size} bytes/{self.human_readable_size(int(file_size))})")
+                    else:
+                        await ctx.send(file=discord.File(final_file))
 
-            os.remove(final_file)
+                os.remove(final_file)
         except FileNotFoundError as e:
             await ctx.send(f"File handling error: `{e}`")
         except Exception as e:
