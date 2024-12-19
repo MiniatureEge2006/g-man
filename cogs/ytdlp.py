@@ -1,4 +1,5 @@
 import os
+import time
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -6,6 +7,7 @@ from yt_dlp.utils import download_range_func
 import yt_dlp
 import shlex
 import json
+from datetime import timedelta
 
 class Ytdlp(commands.Cog):
     def __init__(self, bot):
@@ -34,6 +36,8 @@ class Ytdlp(commands.Cog):
                 return
         
         try:
+            start_time = time.time()
+
             if ydl_opts.get("listformats", False):
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=False)
@@ -81,7 +85,13 @@ class Ytdlp(commands.Cog):
                     if file_size > max_size:
                         await ctx.send(f"File is too large to send via Discord. ({file_size} bytes/{self.human_readable_size(int(file_size))})")
                     else:
-                        await ctx.send(file=discord.File(final_file))
+                        elapsed_time = time.time() - start_time
+                        width = info.get('width', 'Unknown')
+                        height = info.get('height', 'Unknown')
+                        resolution = f"{width}x{height}"
+                        duration = info.get('duration', 'Unknown')
+                        duration_formatted = str(timedelta(seconds=duration)) if isinstance(duration, (int, float)) else duration
+                        await ctx.send(f"-# {os.path.basename(final_file)}, {resolution}, {duration_formatted if isinstance(duration, (int, float)) else duration} Duration, {file_size} bytes ({self.human_readable_size(file_size)}), took {elapsed_time:.2f} seconds", file=discord.File(final_file))
 
                 os.remove(final_file)
         except FileNotFoundError as e:
