@@ -59,16 +59,16 @@ class Ytdlp(commands.Cog):
 
                     format_message = "\n".join(format_list)
                     if len(format_message) > 2000:
-                        file_path = f"vids/formats.txt"
+                        file_path = "vids/formats.txt"
                         with open(file_path, 'w') as f:
                             f.write(format_message)
-                        await ctx.send("The available formats are too many to display. See the attached file:", file=discord.File(file_path))
+                        await ctx.send("Available formats:", file=discord.File(file_path))
                         os.remove(file_path)
                     else:
                         await ctx.send(f"Available formats:\n```{format_message}```")
                 return
             else:
-                await ctx.send(f"Downloading from `{url}` with options `{ydl_opts}`...")
+                await ctx.send(f"-# Downloading from `{url}` with options `{ydl_opts}`...")
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=True)
                     final_file = (
@@ -83,7 +83,7 @@ class Ytdlp(commands.Cog):
                     max_size = self.get_max_file_size(boost_count)
 
                     if file_size > max_size:
-                        await ctx.send(f"File is too large to send via Discord. ({file_size} bytes/{self.human_readable_size(int(file_size))})")
+                        await ctx.send(f"File is too large to send. ({file_size} bytes/{self.human_readable_size(int(file_size))})")
                     else:
                         elapsed_time = time.time() - start_time
                         width = info.get('width', 'Unknown')
@@ -141,7 +141,7 @@ class Ytdlp(commands.Cog):
                     try:
                         parsed_value = json.loads(value)
                         if not isinstance(parsed_value, list) or not all(isinstance(item, str) for item in parsed_value):
-                            raise ValueError("postprocessor_args must be a JSON-formatted list of strings.")
+                            raise ValueError("postprocessor_args must be a list of strings.")
                         parsed_opts[key] = parsed_value
                     except json.JSONDecodeError as e:
                         raise ValueError(f"Error parsing postprocessor_args: {e}")
