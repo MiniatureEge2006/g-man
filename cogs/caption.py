@@ -7,7 +7,7 @@ import aiohttp
 from urllib.parse import urlparse
 
 DEFAULTS = {
-    "font": "impact",
+    "font": "Futura Condensed Extra Bold.otf",
     "font_color": "#000000",
     "font_size": 24,
     "padding_color": "#FFFFFF",
@@ -58,7 +58,7 @@ class Caption(commands.Cog):
             raise ValueError("Invalid horizontal position: must be 'left', 'center', or 'right'.")
         
         pad_filter = f"pad=width=iw:height=ih+{padding_size}:x=0:y={padding_size}:color={padding_color}"
-        drawtext_filter = f"drawtext=text='{text}':fontfile=fonts/{font}.ttf:fontcolor={font_color}:fontsize={font_size}:x={x}:y={y}"
+        drawtext_filter = f"drawtext=text='{text}':fontfile=fonts/{font}:fontcolor={font_color}:fontsize={font_size}:x={x}:y={y}"
 
         return f"{pad_filter},{drawtext_filter}"
     
@@ -74,7 +74,7 @@ class Caption(commands.Cog):
             raise RuntimeError(f"FFmpeg Error: {result.stderr}")
     
     @commands.hybrid_command(name="caption", description="Caption media.")
-    @app_commands.describe(url="Input URL to caption.", text="Text to caption the media with.", font="The font to use. (Default Impact)", font_color="The font color to use. (Default #000000)", font_size="The font size to use. (Default 24)", padding_color="The padding color to use. (Default #FFFFFF)", padding_size="The padding size to use. (Default 24)", position="The position to use. (Default center)")
+    @app_commands.describe(url="Input URL to caption.", text="Text to caption the media with.", font="The font to use. (Default Futura Condensed Extra Bold.otf)", font_color="The font color to use. (Default #000000)", font_size="The font size to use. (Default 24)", padding_color="The padding color to use. (Default #FFFFFF)", padding_size="The padding size to use. (Default 24)", position="The position to use. (Default center)")
     @app_commands.user_install()
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def caption(self, ctx: commands.Context, url: str, text: str, font: str = DEFAULTS["font"], font_color: str = DEFAULTS["font_color"], font_size: int = DEFAULTS["font_size"], padding_color: str = DEFAULTS["padding_color"], padding_size: int = DEFAULTS["padding_size"], position: str = DEFAULTS["position"]):
