@@ -146,7 +146,15 @@ class Ytdlp(commands.Cog):
                     except json.JSONDecodeError as e:
                         raise ValueError(f"Error parsing postprocessor_args: {e}")
                     continue
-                # For download_ranges
+                if key == "format_sort":
+                    try:
+                        parsed_value = json.loads(value)
+                        if not isinstance(parsed_value, list) or not all(isinstance(item, str) for item in parsed_value):
+                            raise ValueError("format_sort must be a list of strings.")
+                        parsed_opts[key] = parsed_value
+                    except json.JSONDecodeError as e:
+                        raise ValueError(f"Error parsing format_sort: {e}")
+                    continue
                 if key == "download_ranges":
                     try:
                         ranges = []
