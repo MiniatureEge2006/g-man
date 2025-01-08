@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import subprocess
+import time
 import os
 import aiohttp
 import shlex
@@ -26,6 +27,8 @@ class FFmpeg(commands.Cog):
             await ctx.typing()
 
         try:
+            start_time = time.time()
+
             processing_dir = 'vids'
             
             input_files = []
@@ -85,7 +88,8 @@ class FFmpeg(commands.Cog):
 
             output_file = [arg for arg in split_args if not arg.startswith("-")][-1]
             if os.path.exists(output_file):
-                await ctx.send(file=discord.File(output_file))
+                elapsed_time = time.time() - start_time
+                await ctx.send(f"-# FFmpeg processing completed in {elapsed_time:.2f} seconds.", file=discord.File(output_file))
                 os.remove(output_file)
             else:
                 await ctx.send("FFmpeg processing completed, but the output file could not be found.")

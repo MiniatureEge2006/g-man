@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import os
+import time
 import subprocess
 import shlex
 import aiohttp
@@ -24,6 +25,8 @@ class ImageMagick(commands.Cog):
         
 
         try:
+            start_time = time.time()
+
             processing_dir = 'vids'
 
             split_args = shlex.split(args)
@@ -59,7 +62,8 @@ class ImageMagick(commands.Cog):
                 return
             
             if os.path.exists(output_file):
-                await ctx.send(file=discord.File(output_file))
+                elapsed_time = time.time() - start_time
+                await ctx.send(f"-# ImageMagick completed in {elapsed_time:.2f} seconds.", file=discord.File(output_file))
                 os.remove(output_file)
             else:
                 await ctx.send("ImageMagick completed, but no output file was created.")
