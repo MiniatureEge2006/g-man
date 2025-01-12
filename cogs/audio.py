@@ -10,7 +10,6 @@ YDL_OPTIONS = {'format': 'bestaudio/best', 'noplaylist': True, 'outtmpl': 'vids/
 class Audio(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.voice_clients = {}
     
     async def connect_to_channel(self, ctx: commands.Context):
         if ctx.author.voice:
@@ -52,12 +51,21 @@ class Audio(commands.Cog):
     
     @commands.hybrid_command(name="join", description="Join a voice channel.")
     async def join(self, ctx: commands.Context):
+        if ctx.interaction:
+            await ctx.defer()
+        
         await self.connect_to_channel(ctx)
     
     @commands.hybrid_command(name="leave", description="Leave the current voice channel.")
     async def leave(self, ctx: commands.Context):
+        if ctx.interaction:
+            await ctx.defer()
+        if ctx.author.voice is None:
+            await ctx.send("You are not connected to a voice channel.")
+            return
         if ctx.voice_client:
             await ctx.voice_client.disconnect()
+            await ctx.send(f"Disconnected from {ctx.author.voice.channel}.")
         else:
             await ctx.send("I am not connected to a voice channel.")
     
@@ -65,11 +73,17 @@ class Audio(commands.Cog):
     @app_commands.describe(url="The URL of the audio/song to play.")
     @app_commands.describe(filters="A comma-separated list of filters to apply to the audio.")
     async def play(self, ctx: commands.Context, url: str, *, filters: str = None):
+        if ctx.interaction:
+            await ctx.defer()
+        
         filters_list = filters.split(',') if filters else []
         await self.play_audio(ctx, url, filters=filters_list)
     
     @commands.hybrid_command(name="stop", description="Stop the currently playing audio.")
     async def stop(self, ctx: commands.Context):
+        if ctx.interaction:
+            await ctx.defer()
+        
         if ctx.voice_client:
             ctx.voice_client.stop()
             await ctx.send("Stopped playback.")
@@ -78,6 +92,9 @@ class Audio(commands.Cog):
     
     @commands.hybrid_command(name="pause", description="Pause the currently playing audio.")
     async def pause(self, ctx: commands.Context):
+        if ctx.interaction:
+            await ctx.defer()
+        
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.pause()
             await ctx.send("Paused playback.")
@@ -86,6 +103,9 @@ class Audio(commands.Cog):
     
     @commands.hybrid_command(name="resume", description="Resume the currently paused audio.")
     async def resume(self, ctx: commands.Context):
+        if ctx.interaction:
+            await ctx.defer()
+        
         if ctx.voice_client and ctx.voice_client.is_paused():
             ctx.voice_client.resume()
             await ctx.send("Resumed playback.")
