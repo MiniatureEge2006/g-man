@@ -39,7 +39,7 @@ class Audio(commands.Cog):
             
             source = discord.FFmpegPCMAudio(file_path, **ffmpeg_options)
             voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.cleanup_file(ctx, file_path), self.bot.loop))
-            await ctx.send(f"Playing: {info['title']}")
+            await ctx.send(f"Playing: [{info['title']} ({info['id']})](<{info['webpage_url'] if 'webpage_url' in info else 'Unknown URL'}>) by [{info['uploader'] if 'uploader' in info else 'Unknown Uploader'}](<{info['uploader_url'] if 'uploader_url' in info else 'Unknown URL'}> '{info['uploader_id'] if 'uploader_id' in info else 'Unknown ID'}') from {info['extractor']} with a duration of {info['duration_string'] if 'duration_string' in info else 'Unknown Duration'} ({info['duration'] if 'duration' in info else 'Unknown Duration'} seconds).")
     
     async def cleanup_file(self, ctx, file_path):
         if os.path.exists(file_path):

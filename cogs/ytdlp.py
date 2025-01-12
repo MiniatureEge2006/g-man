@@ -86,12 +86,19 @@ class Ytdlp(commands.Cog):
                         await ctx.send(f"File is too large to send. ({file_size} bytes/{self.human_readable_size(int(file_size))})")
                     else:
                         elapsed_time = time.time() - start_time
-                        width = info.get('width', 'Unknown')
-                        height = info.get('height', 'Unknown')
+                        video_url = info.get('webpage_url', 'Unknown URL')
+                        title = info.get('title', 'Unknown Title')
+                        id = info.get('id', 'Unknown Video ID')
+                        width = info.get('width', 'Unknown Width')
+                        height = info.get('height', 'Unknown Height')
                         resolution = f"{width}x{height}"
-                        duration = info.get('duration', 'Unknown')
-                        duration_formatted = str(timedelta(seconds=duration)) if isinstance(duration, (int, float)) else duration
-                        await ctx.send(f"-# {os.path.basename(final_file)}, {resolution}, {duration_formatted if isinstance(duration, (int, float)) else duration} Duration, {file_size} bytes ({self.human_readable_size(file_size)}), took {elapsed_time:.2f} seconds", file=discord.File(final_file))
+                        uploader = info.get('uploader', 'Unknown Uploader')
+                        uploader_url = info.get('uploader_url', 'Unknown URL')
+                        uploader_id = info.get('uploader_id', 'Unknown ID')
+                        duration = info.get('duration_string', 'Unknown')
+                        duration_seconds = info.get('duration', 'Unknown')
+                        format_id = info.get('format_id', 'Unknown Format IDs')
+                        await ctx.send(f"-# [{title} ({id})](<{video_url}> '{os.path.basename(final_file)}') by [{uploader}](<{uploader_url}> '{uploader_id}'), {resolution}, {duration} ({duration_seconds} seconds) Duration, Format IDs: `{format_id}`, {file_size} bytes ({self.human_readable_size(file_size)}), took {elapsed_time:.2f} seconds", file=discord.File(final_file))
 
                 os.remove(final_file)
         except FileNotFoundError as e:
