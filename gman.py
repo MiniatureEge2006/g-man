@@ -231,8 +231,18 @@ async def eval(ctx, *, code):
 
 def cleanup_code(content: str) -> str:
     if content.startswith('```') and content.endswith('```'):
-        return '\n'.join(content.split('\n')[1:-1])
-    return content.strip(' \n')
+        content = content[3:-3].strip()
+
+        if ' ' in content or '\n' in content:
+            first_space_or_newline = content.find(' ')
+            first_newline = content.find('\n')
+            if first_space_or_newline == -1 or (0 <= first_newline < first_space_or_newline):
+                first_space_or_newline = first_newline
+            if first_space_or_newline > -1:
+                content = content[first_space_or_newline:].strip()
+        else:
+            content = content.lstrip("abcdefghijklmnopqrstuvwxyz")
+    return content.strip()
 
 def read_json(filename):
     with open(f"{filename}.json", "r") as file:
