@@ -40,7 +40,7 @@ class Exif(commands.Cog):
                     await ctx.send("Metadata is too large to display, sent as a file:", file=discord.File(metadata_file))
                     os.remove(metadata_file)
                 else:
-                    await ctx.send(f"**Metadata:**\n{formatted_metadata}")
+                    await ctx.send(f"# Metadata:\n{formatted_metadata}")
             else:
                 await ctx.send("No metadata found in the file.")
             
@@ -81,7 +81,7 @@ class Exif(commands.Cog):
                 "ffprobe",
                 "-v", "error",
                 "-show_entries",
-                "format=duration,size,format_name,bit_rate:stream=codec_name,codec_type,width,height,duration,bit_rate",
+                "format=duration,size,format_name,format_long_name,bit_rate,format_tags:stream=codec_name,codec_type,codec_tag_string,codec_tag,codec_long_name,width,height,duration,bit_rate:side_data_list:format_tags:stream_tags",
                 "-print_format", "json",
                 file_path
             ]
@@ -107,16 +107,26 @@ class Exif(commands.Cog):
                     elif key == "duration":
                         duration_seconds = float(value)
                         flat_metadata["Total Duration"] = f"{duration_seconds} seconds ({self.format_duration(duration_seconds)})"
+                    elif key == "tags":
+                        for tag_key, tag_value in value.items():
+                            flat_metadata[f"Tag {tag_key.capitalize()}"] = tag_value
                     else:
                         flat_metadata[f"Format {key.capitalize()}"] = value
                         
             if "streams" in metadata:
                 for idx, stream in enumerate(metadata["streams"]):
+                    codec_name = stream.get("codec_name", "Unknown")
+                    codec_long_name = stream.get("codec_long_name", "Unknown")
+                    codec_tag_string = stream.get("codec_tag_string", "Unknown")
+                    flat_metadata[f"Stream {idx + 1} Codec"] = f"{codec_name} ({codec_tag_string}, {codec_long_name})"
                     for key, value in stream.items():
                         if key == "duration":
                             duration_seconds = float(value)
                             flat_metadata[f"Stream {idx + 1} Duration"] = f"{duration_seconds} seconds ({self.format_duration(duration_seconds)})"
-                        else:
+                        elif key == "tags":
+                            for tag_key, tag_value in value.items():
+                                flat_metadata[f"Stream {idx + 1} Tag {tag_key.capitalize()}"] = tag_value
+                        elif key not in ["codec_name", "codec_long_name", "codec_tag_string"]:
                             flat_metadata[f"Stream {idx + 1} {key.capitalize()}"] = value
             return flat_metadata
         
