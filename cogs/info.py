@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+from discord import app_commands
 
 class Info(commands.Cog):
     def __init__(self, bot):
@@ -198,7 +199,9 @@ class Info(commands.Cog):
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
     
-    @commands.command(name="botinfo", description="Displays information about the bot.")
+    @commands.hybrid_command(name="botinfo", description="Displays information about the bot.")
+    @app_commands.user_install()
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def botinfo(self, ctx: commands.Context):
         embed = discord.Embed(
             title=f"Bot Info - {self.bot.user.name}",
