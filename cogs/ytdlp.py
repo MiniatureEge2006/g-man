@@ -22,10 +22,10 @@ class Ytdlp(commands.Cog):
             await ctx.defer()
         else:
             await ctx.typing()
-        extractor = '%(extractor_key)s'.lower()
+        extractor = '%(extractor_key)s'
         ydl_opts = {
             'noplaylist': True,
-            'outtmpl': f'vids/{extractor}-%(id)s.%(ext)s'
+            'outtmpl': f'vids/{extractor.lower()}-%(id)s.%(ext)s'
         }
 
         if options.strip():
