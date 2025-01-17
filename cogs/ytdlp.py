@@ -22,9 +22,10 @@ class Ytdlp(commands.Cog):
             await ctx.defer()
         else:
             await ctx.typing()
+        extractor = '%(extractor_key)s'.lower()
         ydl_opts = {
             'noplaylist': True,
-            'outtmpl': 'vids/%(extractor)s-%(id)s.%(ext)s'
+            'outtmpl': f'vids/{extractor}-%(id)s.%(ext)s'
         }
 
         if options.strip():
@@ -193,7 +194,7 @@ class Ytdlp(commands.Cog):
         elif boost_count >= 7:
             return 50 * 1024 * 1024 # 50 MB
         else:
-            return 25 * 1024 * 1024 # 25 MB
+            return 10 * 1024 * 1024 # 10 MB
     
     def human_readable_size(self, size: int) -> str:
         for unit in ["B", "KB", "MB", "GB", "TB"]:
