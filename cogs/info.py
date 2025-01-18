@@ -1,11 +1,76 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
+import aiohttp
+import bot_info
+from datetime import datetime, timezone
+from webcolors import hex_to_name, name_to_hex
+from PIL import Image
+import io
+import re
+from math import fmod
 
 class Info(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
     
+
+    @staticmethod
+    def hex_to_rgba(hex_color: str):
+        hex_color = hex_color.lstrip("#")
+        r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+        return r, g, b, 1.0
+    
+    @staticmethod
+    def rgba_to_cmyk(r: int, g: int, b: int, a: float):
+        if (r, g, b) == (0, 0, 0):
+            return 0, 0, 0, 100
+        c = 1 - r / 255
+        m = 1 - g / 255
+        y = 1 - b / 255
+        k = min(c, m, y)
+        c = (c - k) / (1 - k)
+        m = (m - k) / (1 - k)
+        y = (y - k) / (1 - k)
+        return round(c * 100), round(m * 100), round(y * 100), round(k * 100)
+    
+    @staticmethod
+    def rgba_to_hsl(r: int, g: int, b: int, a: float):
+        r, g, b = r / 255, g / 255, b / 255
+        max_val, min_val = max(r, g, b), min(r, g, b)
+        l = (max_val + min_val) / 2
+        if max_val == min_val:
+            h = s = 0
+        else:
+            d = max_val - min_val
+            s = d / (2 - max_val - min_val) if l > 0.5 else d / (max_val + min_val)
+            if max_val == r:
+                h = (g - b) / d + (6 if g < b else 0)
+            elif max_val == g:
+                h = (b - r) / d + 2
+            elif max_val == b:
+                h = (r - g) / d + 4
+            h = fmod(h * 60, 360)
+        return round(h), round(s * 100), round(l * 100), round(a * 100)
+    
+    @staticmethod
+    def rgba_to_hsv(r: int, g: int, b: int, a: float):
+        r, g, b = r / 255, g / 255, b / 255
+        max_val, min_val = max(r, g, b), min(r, g, b)
+        v = max_val
+        d = max_val - min_val
+        s = 0 if max_val == 0 else d / max_val
+        if max_val == min_val:
+            h = 0
+        else:
+            if max_val == r:
+                h = (g - b) / d + (6 if g < b else 0)
+            elif max_val == g:
+                h = (b - r) / d + 2
+            elif max_val == b:
+                h = (r - g) / d + 4
+            h = fmod(h * 60, 360)
+        return round(h), round(s * 100), round(v * 100), round(a * 100)
 
     @commands.command(name="userinfo", aliases=["user", "member", "memberinfo"], description="Displays information about a user.")
     async def userinfo(self, ctx: commands.Context, member: discord.Member = None):
@@ -216,6 +281,114 @@ class Info(commands.Cog):
         embed.set_thumbnail(url=self.bot.user.avatar.url)
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
+    
+    @commands.hybrid_command(name="weatherinfo", description="Displays information about the weather in a location.", aliases=["weather"])
+    @app_commands.describe(location="The location for which you want to know the weather.")
+    @app_commands.user_install()
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    async def weatherinfo(self, ctx: commands.Context, *, location: str):
+        if ctx.interaction:
+            await ctx.defer()
+        else:
+            await ctx.typing()
+        api_key = bot_info.data['openweather_api_key']
+        base_url = "https://api.openweathermap.org/data/2.5/weather"
+        params = {"q": location, "appid": api_key, "units": "metric"}
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(base_url, params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    city = data["name"]
+                    country = data["sys"]["country"]
+                    temperature = data["main"]["temp"]
+                    feels_like = data["main"]["feels_like"]
+                    humidity = data["main"]["humidity"]
+                    pressure = data["main"]["pressure"]
+                    wind_speed = data["wind"]["speed"]
+                    wind_direction = data["wind"]["deg"]
+                    coordinates_lat = data["coord"]["lat"]
+                    coordinates_lon = data["coord"]["lon"]
+                    visibility = data["visibility"] / 1000
+                    weather_description = data["weather"][0]["description"].capitalize()
+                    icon = data["weather"][0]["icon"]
+                    icon_url = f"http://openweathermap.org/img/w/{icon}.png"
+                    sunrise = datetime.fromtimestamp(data["sys"]["sunrise"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+                    sunset = datetime.fromtimestamp(data["sys"]["sunset"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+                    embed = discord.Embed(
+                        title=f"Weather Info - {city}, {country}",
+                        description=f"**{weather_description}**\nSunrise: {sunrise}\nSunset: {sunset}",
+                        color=discord.Color.light_gray()
+                    )
+                    embed.add_field(name="Temperature", value=f"{temperature}°C (feels like {feels_like}°C)", inline=True)
+                    embed.add_field(name="Humidity", value=f"{humidity}%", inline=True)
+                    embed.add_field(name="Pressure", value=f"{pressure} hPa", inline=True)
+                    embed.add_field(name="Wind", value=f"{wind_speed} m/s at {wind_direction}°", inline=True)
+                    embed.add_field(name="Visibility", value=f"{visibility} km", inline=True)
+                    embed.add_field(name="Coordinates", value=f"{coordinates_lat}, {coordinates_lon}", inline=True)
+                    embed.set_thumbnail(url=icon_url)
+                    embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
+                    await ctx.send(embed=embed)
+                else:
+                    await ctx.send("Could not find weather data for the specified location.")
+    
+    @commands.hybrid_command(name="colorinfo", description="Displays information about a color.", aliases=["color"])
+    @app_commands.describe(color="The color name or color code (HEX, RGB/A, HSL/A, HSV/A or CMYK)")
+    @app_commands.user_install()
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    async def colorinfo(self, ctx: commands.Context, color: str):
+        if ctx.interaction:
+            await ctx.defer()
+        else:
+            await ctx.typing()
+        try:
+            if color.startswith("#"):
+                hex_color = color
+                r, g, b, a = self.hex_to_rgba(hex_color)
+            elif "rgba" in color:
+                rgba_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
+                r, g, b, a = rgba_values
+                hex_color = f"#{int(r):02x}{int(g):02x}{int(b):02x}"
+            elif "," in color:
+                rgb_values = list(map(int, re.findall(r"\d+", color)))
+                r, g, b = rgb_values
+                a = 1.0
+                hex_color = f"#{r:02x}{g:02x}{b:02x}"
+            else:
+                hex_color = name_to_hex(color)
+                r, g, b, a = self.hex_to_rgba(hex_color)
+            
+            cmyk = self.rgba_to_cmyk(r, g, b, a)
+            hsl = self.rgba_to_hsl(r, g, b, a)
+            hsv = self.rgba_to_hsv(r, g, b, a)
+            closest_name = None
+            try:
+                closest_name = hex_to_name(hex_color)
+            except ValueError:
+                closest_name = "Unknown"
+            
+            img = Image.new("RGBA", (100, 100), (int(r), int(g), int(b), int(a * 255)))
+            buffer = io.BytesIO()
+            img.save(buffer, "PNG")
+            buffer.seek(0)
+
+            embed = discord.Embed(
+                title=f"Color Info - {closest_name.capitalize()}",
+                description=f"Details for the color `{color}`",
+                color=int(hex_color.lstrip("#"), 16)
+            )
+            embed.add_field(name="HEX", value=hex_color.upper(), inline=True)
+            embed.add_field(name="RGB/A", value=f"({r}, {g}, {b}, {a:.2f})", inline=True)
+            embed.add_field(name="CMYK", value=f"{cmyk[0]}%, {cmyk[1]}%, {cmyk[2]}%, {cmyk[3]}%", inline=True)
+            embed.add_field(name="HSL/A", value=f"{hsl[0]}°, {hsl[1]}%, {hsl[2]}%, {hsl[3]}%", inline=True)
+            embed.add_field(name="HSV/A", value=f"{hsv[0]}°, {hsv[1]}%, {hsv[2]}%, {hsv[3]}%", inline=True)
+            embed.set_thumbnail(url="attachment://color.png")
+            embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
+            await ctx.send(embed=embed, file=discord.File(buffer, "color.png"))
+        except Exception as e:
+            await ctx.send(f"Invalid color format. Please provide a valid color name or color code (HEX, RGB/A, HSL/A, HSV/A or CMYK).\nError: {e}")
+
 
 
 async def setup(bot):

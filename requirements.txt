@@ -10,6 +10,9 @@ discord.py==2.4.0
 dnspython==2.1.0
 ffmpeg-python==0.2.0
 ffprobe-python==1.0.3
+Pillow
+webcolors
+psutil
 future==0.18.2
 idna==3.3
 multidict==5.2.0
