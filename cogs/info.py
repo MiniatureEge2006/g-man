@@ -16,6 +16,65 @@ class Info(commands.Cog):
     
 
     @staticmethod
+    def hsl_to_rgb(h, s, l):
+        s /= 100
+        l /= 100
+        c = (1 - abs(2 * l - 1)) * s
+        x = c * (1 - abs((h / 60) % 2 - 1))
+        m = l - c / 2
+
+        if 0 <= h < 60:
+            r, g, b = c, x, 0
+        elif 60 <= h < 120:
+            r, g, b = x, c, 0
+        elif 120 <= h < 180:
+            r, g, b = 0, c, x
+        elif 180 <= h < 240:
+            r, g, b = 0, x, c
+        elif 240 <= h < 300:
+            r, g, b = x, 0, c
+        else:
+            r, g, b = c, 0, x
+        
+        r = round((r + m) * 255)
+        g = round((g + m) * 255)
+        b = round((b + m) * 255)
+        return r, g, b
+    
+    @staticmethod
+    def hsv_to_rgb(h, s, v):
+        s /= 100
+        v /= 100
+        c = v * s
+        x = c * (1 - abs((h / 60) % 2 - 1))
+        m = v - c
+
+        if 0 <= h < 60:
+            r, g, b = c, x, 0
+        elif 60 <= h < 120:
+            r, g, b = x, c, 0
+        elif 120 <= h < 180:
+            r, g, b = 0, c, x
+        elif 180 <= h < 240:
+            r, g, b = 0, x, c
+        elif 240 <= h < 300:
+            r, g, b = x, 0, c
+        else:
+            r, g, b = c, 0, x
+        
+        r = round((r + m) * 255)
+        g = round((g + m) * 255)
+        b = round((b + m) * 255)
+        return r, g, b
+    
+    @staticmethod
+    def cmyk_to_rgb(c, m, y, k):
+        r = round((1 - c / 100) * (1 - k / 100) * 255)
+        g = round((1 - m / 100) * (1 - k / 100) * 255)
+        b = round((1 - y / 100) * (1 - k / 100) * 255)
+        return r, g, b
+
+    @staticmethod
     def hex_to_rgba(hex_color: str):
         hex_color = hex_color.lstrip("#")
         r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
@@ -346,13 +405,46 @@ class Info(commands.Cog):
             if color.startswith("#"):
                 hex_color = color
                 r, g, b, a = self.hex_to_rgba(hex_color)
-            elif "rgba" in color:
+            elif color.lower().startswith("rgba("):
                 rgba_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
                 r, g, b, a = rgba_values
                 hex_color = f"#{int(r):02x}{int(g):02x}{int(b):02x}"
-            elif "," in color:
+            elif color.lower().startswith("rgb("):
                 rgb_values = list(map(int, re.findall(r"\d+", color)))
                 r, g, b = rgb_values
+                a = 1.0
+                hex_color = f"#{r:02x}{g:02x}{b:02x}"
+            elif color.lower().startswith("hsla("):
+                hsla_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
+                h, s, l, a = hsla_values
+                r, g, b = self.hsl_to_rgb(h, s, l)
+                hex_color = f"#{r:02x}{g:02x}{b:02x}"
+            elif color.lower().startswith("hsl("):
+                hsl_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
+                h, s, l = hsl_values
+                a = 1.0
+                r, g, b = self.hsl_to_rgb(h, s, l)
+                hex_color = f"#{r:02x}{g:02x}{b:02x}"
+            elif color.lower().startswith("hsva("):
+                hsva_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
+                h, s, v, a = hsva_values
+                r, g, b = self.hsv_to_rgb(h, s, v)
+                hex_color = f"#{r:02x}{g:02x}{b:02x}"
+            elif color.lower().startswith("hsv("):
+                hsv_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
+                h, s, v = hsv_values
+                a = 1.0
+                r, g, b = self.hsv_to_rgb(h, s, v)
+                hex_color = f"#{r:02x}{g:02x}{b:02x}"
+            elif color.lower().startswith("cmyka("):
+                cmyka_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
+                c, m, y, k, a = cmyka_values
+                r, g, b = self.cmyk_to_rgb(c, m, y, k)
+                hex_color = f"#{r:02x}{g:02x}{b:02x}"
+            elif color.lower().startswith("cmyk("):
+                cmyk_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
+                c, m, y, k = cmyk_values
+                r, g, b = self.cmyk_to_rgb(c, m, y, k)
                 a = 1.0
                 hex_color = f"#{r:02x}{g:02x}{b:02x}"
             else:
