@@ -5,7 +5,7 @@ import aiohttp
 import bot_info
 from datetime import datetime, timezone
 from webcolors import hex_to_name, name_to_hex
-from PIL import Image
+from PIL import Image, ImageDraw
 import io
 import re
 from math import fmod
@@ -14,6 +14,64 @@ class Info(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
     
+    @staticmethod
+    def parse_gradient_input(gradient_input):
+        colors = []
+        positions = []
+        gradient_parts = gradient_input.split(",")
+        for part in gradient_parts:
+            match = re.match(r"(.+)\s+(\d+)%?", part.strip())
+            if match:
+                color, position = match.groups()
+                colors.append(color.strip())
+                positions.append(int(position))
+            else:
+                colors.append(part.strip())
+                positions.append(None)
+        
+        total_colors = len(colors)
+        if any(pos is None for pos in positions):
+            auto_positions = [round(i * 100 / (total_colors - 1)) for i in range(total_colors)]
+            for i, pos in enumerate(positions):
+                if pos is None:
+                    positions[i] = auto_positions[i]
+        
+        return colors, positions
+    
+    def generate_gradient_image(self, colors, positions, width=800, height=100, background=(255, 255, 255)):
+        gradient = Image.new("RGBA", (width, height))
+        draw = ImageDraw.Draw(gradient)
+        positions = [round(pos * width / 100) for pos in positions]
+        for i in range(len(colors) - 1):
+            start_color = self.parse_color(colors[i])
+            end_color = self.parse_color(colors[i + 1])
+            start_x = positions[i]
+            end_x = positions[i + 1]
+            for x in range(start_x, end_x):
+                factor = (x - start_x) / (end_x - start_x)
+                r = round(start_color[0] + factor * (end_color[0] - start_color[0]))
+                g = round(start_color[1] + factor * (end_color[1] - start_color[1]))
+                b = round(start_color[2] + factor * (end_color[2] - start_color[2]))
+                a = round(start_color[3] + factor * (end_color[3] - start_color[3]))
+                blended_r = round(r * (a / 255) + background[0] * (1 - a / 255))
+                blended_g = round(g * (a / 255) + background[1] * (1 - a / 255))
+                blended_b = round(b * (a / 255) + background[2] * (1 - a / 255))
+                draw.line([(x, 0), (x, height)], (blended_r, blended_g, blended_b, a))
+        return gradient.convert("RGB")
+    
+    @staticmethod
+    def parse_color(color_input):
+        if color_input.startswith("#"):
+            color_input = color_input.lstrip("#")
+            if len(color_input) == 6:
+                r, g, b = int(color_input[0:2], 16), int(color_input[2:4], 16), int(color_input[4:6], 16)
+                return r, g, b, 255
+            elif len(color_input) == 8:
+                r, g, b = int(color_input[0:2], 16), int(color_input[2:4], 16), int(color_input[4:6], 16)
+                a = int(color_input[6:8], 16)
+                return r, g, b, a
+        else:
+            raise ValueError(f"Invalid color format: {color_input}")
 
     @staticmethod
     def hsl_to_rgb(h, s, l):
@@ -480,6 +538,38 @@ class Info(commands.Cog):
             await ctx.send(embed=embed, file=discord.File(buffer, "color.png"))
         except Exception as e:
             await ctx.send(f"Invalid color format. Please provide a valid color name or color code (HEX, RGB/A, HSL/A, HSV/A or CMYK).\nError: {e}")
+    
+    @commands.hybrid_command(name="gradientinfo", description="Displays information about a gradient.", aliases=["gradient"])
+    @app_commands.describe(colors="Comma-separated list of colors in HEX format with optional positions (e.g., '#FF0000 0%, #00FF00 50%, #0000FF 100%')")
+    @app_commands.user_install()
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    async def gradientinfo(self, ctx: commands.Context, *, colors: str):
+        if ctx.interaction:
+            await ctx.defer()
+        else:
+            await ctx.typing()
+        try:
+            colors, positions = self.parse_gradient_input(colors)
+            if len(colors) > 10:
+                await ctx.send("You can only create a gradient with up to 10 colors.")
+                return
+            gradient = self.generate_gradient_image(colors, positions)
+            buffer = io.BytesIO()
+            gradient.save(buffer, "PNG")
+            buffer.seek(0)
+
+            embed = discord.Embed(
+                title="Gradient Info",
+                description="Details for the gradient",
+                color=discord.Color.light_gray()
+            )
+            embed.add_field(name="Colors", value="\n".join(colors), inline=True)
+            embed.add_field(name="Positions", value="\n".join(f"{pos}%" for pos in positions), inline=True)
+            embed.set_image(url="attachment://gradient.png")
+            embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
+            await ctx.send(embed=embed, file=discord.File(buffer, "gradient.png"))
+        except Exception as e:
+            await ctx.send(f"Invalid color format. Please provide a valid HEX/A color code.\nError: {e}")
 
 
 
