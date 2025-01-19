@@ -7,7 +7,6 @@ from yt_dlp.utils import download_range_func
 import yt_dlp
 import shlex
 import json
-from datetime import timedelta
 
 class Ytdlp(commands.Cog):
     def __init__(self, bot):
@@ -51,22 +50,35 @@ class Ytdlp(commands.Cog):
                     f"ID: {fmt.get('format_id')} | Ext: {fmt.get('ext')} | "
                     f"Res: {fmt.get('resolution', 'N/A')} | FPS: {fmt.get('fps', 'N/A')} | "
                     f"Video Codec: {fmt.get('vcodec', 'N/A')} | Audio Codec: {fmt.get('acodec', 'N/A')} | "
-                    f"Bitrate: {fmt.get('tbr', 'N/A')}k | Size: {self.human_readable_size(fmt.get('filesize', 0)) if fmt.get('filesize') else 'N/A'} | "
-                    f"Protocol: {fmt.get('protocol', 'N/A')}"
+                    f"Bitrate: {fmt.get('tbr', 'N/A')}k | Size: {self.human_readable_size(fmt.get('filesize') or fmt.get('filesize_approx') or 0)} | "
+                    f"Protocol: {fmt.get('protocol', 'N/A')} | "
+                    f"Notes: {fmt.get('format_note', 'N/A')} | "
+                    f"Container: {fmt.get('container', 'N/A')}"
                     )
                     for fmt in formats
                 ]
 
                     format_message = "\n".join(format_list)
                     if len(format_message) > 2000:
-                        file_path = "vids/formats.txt"
+                        file_path = f"vids/formats-{info.get('id', 'Unknown ID')}.txt"
                         with open(file_path, 'w') as f:
                             f.write(format_message)
-                        await ctx.send("Available formats:", file=discord.File(file_path))
+                        await ctx.send(f"Available formats for {info.get('title', 'Unknown Title')}:", file=discord.File(file_path))
                         os.remove(file_path)
                     else:
-                        await ctx.send(f"Available formats:\n```{format_message}```")
+                        await ctx.send(f"Available formats for {info.get('title', 'Unknown Title')}:\n```{format_message}```")
                 return
+            if ydl_opts.get("json", False):
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    json_file_path = f"vids/info-{info.get('id', 'Unknown ID')}.json"
+                    try:
+                        with open(json_file_path, 'w', encoding='utf-8') as json_file:
+                            json.dump(info, json_file, indent=4)
+                        await ctx.send(f"JSON info extracted for {info.get('title', 'Unknown Title')}:", file=discord.File(json_file_path))
+                    except Exception as e:
+                        await ctx.send(f"Error extracting JSON info: {e}")
+                    os.remove(json_file_path)
             else:
                 await ctx.send(f"-# Downloading from `{url}` with options `{ydl_opts}`...")
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
