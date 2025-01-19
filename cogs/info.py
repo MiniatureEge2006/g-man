@@ -57,7 +57,7 @@ class Info(commands.Cog):
                 blended_g = round(g * (a / 255) + background[1] * (1 - a / 255))
                 blended_b = round(b * (a / 255) + background[2] * (1 - a / 255))
                 draw.line([(x, 0), (x, height)], (blended_r, blended_g, blended_b, a))
-        return gradient.convert("RGB")
+        return gradient
     
     @staticmethod
     def parse_color(color_input):
