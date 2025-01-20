@@ -16,6 +16,7 @@ class ImageMagick(commands.Cog):
     @commands.hybrid_command(name="imagemagick", description="Use ImageMagick as if its a CLI!", aliases=["magick"])
     @app_commands.describe(args="ImageMagick arguments.")
     @app_commands.user_install()
+    @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def imagemagick(self, ctx: commands.Context, *, args: str):
         if ctx.interaction:

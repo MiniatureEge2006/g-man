@@ -15,6 +15,7 @@ class Ytdlp(commands.Cog):
     @commands.hybrid_command(name="yt-dlp", aliases=["youtube-dl", "ytdl", "youtubedl", "ytdlp"], description="Use yt-dlp! (for a list of formats use --listformats or listformats=true)")
     @app_commands.describe(url="Input URL. (e.g., YouTube, SoundCloud. DRM protected websites are NOT supported.)", options="yt-dlp Options. (e.g., download_ranges=10-15 --force_keyframes_at_cuts)")
     @app_commands.user_install()
+    @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def ytdlp(self, ctx: commands.Context, url: str, *, options: str = ''):
         if ctx.interaction:

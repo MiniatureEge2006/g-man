@@ -18,6 +18,7 @@ class FFmpeg(commands.Cog):
     @commands.hybrid_command(name="ffmpeg", description="Use FFmpeg as if its a CLI!")
     @app_commands.describe(args="FFmpeg arguments.")
     @app_commands.user_install()
+    @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def ffmpeg_command(self, ctx: commands.Context, *, args: str):
         
