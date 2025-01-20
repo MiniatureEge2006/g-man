@@ -4,6 +4,7 @@ import io
 import textwrap
 import bot_info
 import json
+import datetime
 import database as db
 import discord
 from discord import app_commands
@@ -97,10 +98,23 @@ async def on_message(message):
 
 @bot.event
 async def on_command(ctx):
-    if isinstance(ctx.message.channel, discord.DMChannel):
-        print(f'User {ctx.message.author} ({ctx.message.author.id}) used command {ctx.command} in {bot.user.name}\'s ({bot.user.id}) DMs')
-    else:
-        print(f'User {ctx.message.author} ({ctx.message.author.id}) used command {ctx.command} in guild {ctx.guild} ({ctx.guild.id}) at #{ctx.channel} ({ctx.channel.id})')
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    user = f"{ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
+    guild = f"{ctx.guild.name} (ID: {ctx.guild.id})" if ctx.guild else "DMs"
+    channel = f"{ctx.channel.name} (ID: {ctx.channel.id})" if ctx.guild else f"DMs with {ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
+    command_name = ctx.command.qualified_name
+    command_content = ctx.message.content
+    log_message = (
+        f"--- Command Log ---\n"
+        f"Timestamp: {timestamp}\n"
+        f"User: {user}\n"
+        f"Guild: {guild}\n"
+        f"Channel: {channel}\n"
+        f"Command: {command_name}\n"
+        f"Command Content: {command_content}\n"
+        f"--- End Command Log ---"
+    )
+    print(log_message)
 
 # Forgetting videos that get deleted
 @bot.event
