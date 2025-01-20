@@ -5,6 +5,8 @@ import textwrap
 import bot_info
 import json
 import datetime
+import logging
+import colorlog
 import database as db
 import discord
 from discord import app_commands
@@ -33,6 +35,15 @@ bot = commands.Bot(command_prefix=commands.when_mentioned_or('!'), status=discor
 
 bot.blacklisted_users = []
 
+def setup_logger():
+    log_format = "%(log_color)s%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+    logger = logging.getLogger()
+    handler = logging.StreamHandler()
+    formatter = colorlog.ColoredFormatter(log_format)
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
 # Loads extensions, returns string saying what reloaded
 async def reload_extensions(exs):
     module_msg = ''
@@ -60,17 +71,18 @@ async def blacklist_detector(ctx):
 # Set up stuff
 @bot.event
 async def on_ready():
-    print('Logged in as')
-    print(bot.user.name)
-    print(bot.user.id)
-    print('------')
-    data = read_json("blacklistedusers")
-    bot.blacklisted_users = data["blacklistedUsers"]
+    logger = logging.getLogger()
     global extensions
     try:
-        print(await reload_extensions(extensions))
+        logger.info(await reload_extensions(extensions))
     except Exception as e:
-        print(f"Error loading extensions in on_ready: {e}")
+        logger.error(f"Error reloading extensions: {e}")
+    logger.info(f"Bot {bot.user.name} has successfully logged in via Token {bot_info.data['login']}. ID: {bot.user.id}")
+    logger.info(f"Bot {bot.user.name} is in {len(bot.guilds)} guilds. ({', '.join([guild.name for guild in bot.guilds])})")
+    logger.info(f"Bot {bot.user.name} has a total of {len(bot.commands)} commands with {len(bot.cogs)} cogs.")
+    logger.info(f"Bot {bot.user.name} has cached a number of {len(bot.users)} users.")
+    data = read_json("blacklistedusers")
+    bot.blacklisted_users = data["blacklistedUsers"]
 
 # Process commands
 @bot.event
@@ -98,6 +110,7 @@ async def on_message(message):
 
 @bot.event
 async def on_command(ctx):
+    logger = logging.getLogger()
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     user = f"{ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
     guild = f"{ctx.guild.name} (ID: {ctx.guild.id})" if ctx.guild else "DMs"
@@ -114,7 +127,7 @@ async def on_command(ctx):
         f"Command Content: {command_content}\n"
         f"--- End Command Log ---"
     )
-    print(log_message)
+    logger.info(log_message)
 
 # Forgetting videos that get deleted
 @bot.event
@@ -124,40 +137,71 @@ async def on_message_delete(message):
 # Command error
 @bot.event
 async def on_command_error(ctx, error):
-    if(isinstance(error, commands.CommandInvokeError)):
-        print(error)
+    logger = logging.getLogger()
+    logger.error(f"Error in command {ctx.command.qualified_name} with args {ctx.message.content} by {ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id}) in {ctx.guild.name} (ID: {ctx.guild.id}) in {ctx.channel.name} (ID: {ctx.channel.id})")
+    if isinstance(error, commands.CommandNotFound):
+        logger.warning(f"Command not found: {ctx.message.content}")
         return
-    if(isinstance(error, commands.CommandNotFound)):
+    if isinstance(error, commands.MissingRequiredArgument):
+        logger.warning(f"Missing required argument for command {ctx.command.qualified_name}: {ctx.message.content}")
+    if isinstance(error, commands.BadArgument):
+        logger.warning(f"Bad argument for command {ctx.command.qualified_name}: {ctx.message.content}")
+    if ctx.author.id in bot.blacklisted_users:
+        logger.warning(f"User has been blocked from using the bot: {ctx.message.content}")
+        await ctx.send("You are blocked from using G-Man. Please contact the bot owner if you think this is a mistake.")
         return
-    if(ctx.message.author.id in bot.blacklisted_users):
-        await ctx.send("You are blocked from using G-Man.")
-        return
-    if(str(ctx.message.author.id) not in bot_info.data['owners']):
-        await ctx.send("You cannot run this command because this command is an owner only command.")
-        return
-    if(isinstance(error, commands.MissingPermissions)):
-        await ctx.send("You do not have enough permissions to run this command.")
-        return
-    if(isinstance(error, commands.MissingRequiredArgument)):
-        await ctx.send(f"Error: `{error}`")
+    if str(ctx.author.id) not in bot_info.data['owners']:
+        logger.warning(f"User is not a bot owner: {ctx.message.content}")
+        await ctx.send("You are not a bot owner.")
         return
     else:
-        if(not isinstance(error, commands.CommandNotFound)):
-            await ctx.send('Oops, something is wrong!\n```\n' + repr(error) + '\n```')
-        #print(error)
-        traceback.print_exception(type(error), error, error.__traceback__, file=sys.stderr)
+        logger.critical(f"An unexpected error occurred: {error}")
+    
+    await ctx.send(f"An error occurred while processing your command. ```\n{error}```")
+    
+@bot.event
+async def on_guild_join(guild):
+    logger = logging.getLogger()
+    logger.info(f"Joined guild {guild.name} (ID: {guild.id})")
+
+@bot.event
+async def on_guild_remove(guild):
+    logger = logging.getLogger()
+    logger.info(f"Removed from guild {guild.name} (ID: {guild.id})")
+
+@bot.event
+async def on_guild_update(before, after):
+    logger = logging.getLogger()
+    logger.info(f"Guild updated: {before} -> {after}")
+
+@bot.event
+async def on_guild_unavailable(guild):
+    logger = logging.getLogger()
+    logger.info(f"Guild unavailable: {guild.name} (ID: {guild.id})")
+
+@bot.event
+async def on_guild_available(guild):
+    logger = logging.getLogger()
+    logger.info(f"Guild available: {guild.name} (ID: {guild.id})")
+
 
 @bot.command()
 @bot_info.is_owner()
-async def sync(ctx):
-    await ctx.send("ok")
-    await bot.tree.sync()
-    print("Commands synced!")
+async def sync(ctx: commands.Context):
+    logger = logging.getLogger()
+    message = await ctx.send("Syncing slash commands...")
+    try:
+        await bot.tree.sync()
+    except Exception as e:
+        logger.error(f"Error syncing slash commands: {e}")
+        await message.edit(content=f"Error syncing slash commands: {e}")
+    await message.edit(content="Slash commands synced.")
+    logger.info("Slash commands synced.")
 
 
 @bot.command()
 @bot_info.is_owner()
-async def block(ctx, user: discord.User, *, reason = "No reason provided."):
+async def block(ctx: commands.Context, user: discord.User, *, reason = "No reason provided."):
      if ctx.message.author.id == user.id:
         await ctx.send("Don't block yourself.")
         return
@@ -169,7 +213,7 @@ async def block(ctx, user: discord.User, *, reason = "No reason provided."):
 
 @bot.command()
 @bot_info.is_owner()
-async def unblock(ctx, user: discord.User):
+async def unblock(ctx: commands.Context, user: discord.User):
      bot.blacklisted_users.remove(user.id)
      data = read_json("blacklistedusers")
      data["blacklistedUsers"].remove(user.id)
@@ -267,6 +311,7 @@ def write_json(data, filename):
     with open(f"{filename}.json", "w") as file:
         json.dump(data, file)
 
+setup_logger()
 
 # Start the bot
-bot.run(bot_info.data['login'])
+bot.run(bot_info.data['login'], log_handler=None)

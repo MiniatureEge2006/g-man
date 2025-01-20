@@ -13,6 +13,7 @@ ffprobe-python==1.0.3
 Pillow
 webcolors
 psutil
+colorlog
 future==0.18.2
 idna==3.3
 multidict==5.2.0
