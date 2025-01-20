@@ -143,16 +143,20 @@ async def on_command_error(ctx, error):
     user = f"{ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
     guild = f"{ctx.guild.name} (ID: {ctx.guild.id})" if ctx.guild else "DMs"
     channel = f"{ctx.channel.name} (ID: {ctx.channel.id})" if ctx.guild else f"DMs with {ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
-    command_name = ctx.command
+    command_name = ctx.command.qualified_name if ctx.command else "Unknown"
     command_content = ctx.message.content
     logger.error(f"\n--- Command Error Log ---\nTimestamp: {timestamp}\nUser: {user}\nGuild: {guild}\nChannel: {channel}\nCommand: {command_name}\nCommand Content: {command_content}\nError: {error}\n--- End Command Error Log ---")
     if isinstance(error, commands.CommandNotFound):
         logger.warning(f"Command not found: {ctx.message.content}")
         return
     if isinstance(error, commands.MissingRequiredArgument):
-        logger.warning(f"Missing required argument for command {ctx.command.qualified_name}: {ctx.message.content}")
+        logger.warning(f"Missing required argument for command {ctx.command.qualified_name}: {ctx.message.content} ({error.param.name} is required)")
+        await ctx.send(f"Missing required argument for command {ctx.command.qualified_name}. ({error.param.name} is required)")
+        return
     if isinstance(error, commands.BadArgument):
-        logger.warning(f"Bad argument for command {ctx.command.qualified_name}: {ctx.message.content}")
+        logger.warning(f"Bad argument for command {ctx.command.qualified_name}: {ctx.message.content} ({error})")
+        await ctx.send(f"Bad argument for command {ctx.command.qualified_name}. ({error})")
+        return
     if ctx.author.id in bot.blacklisted_users:
         logger.warning(f"User has been blocked from using the bot: {ctx.message.content}")
         await ctx.send("You are blocked from using G-Man. Please contact the bot owner if you think this is a mistake.")
