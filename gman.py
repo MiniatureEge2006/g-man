@@ -78,7 +78,7 @@ async def on_ready():
     except Exception as e:
         logger.error(f"Error reloading extensions: {e}")
     logger.info(f"Bot {bot.user.name} has successfully logged in via Token {bot_info.data['login']}. ID: {bot.user.id}")
-    logger.info(f"Bot {bot.user.name} is in {len(bot.guilds)} guilds. ({', '.join([guild.name for guild in bot.guilds])})")
+    logger.info(f"Bot {bot.user.name} is in {len(bot.guilds)} guilds.")
     logger.info(f"Bot {bot.user.name} has a total of {len(bot.commands)} commands with {len(bot.cogs)} cogs.")
     logger.info(f"Bot {bot.user.name} has cached a number of {len(bot.users)} users.")
     data = read_json("blacklistedusers")
@@ -87,24 +87,25 @@ async def on_ready():
 # Process commands
 @bot.event
 async def on_message(message):
+    logger = logging.getLogger()
     # Adding URLs to the cache
     if(len(message.attachments) > 0):
-        print(message.attachments[0].url)
+        logger.info(message.attachments[0].url)
         msg_url = message.attachments[0].url
         parsed_url = urlparse(msg_url)
         url_path = parsed_url.path
         if(not url_path.endswith('_ignore.mp4') and url_path.split('.')[-1].lower() in media_cache.approved_filetypes):
             media_cache.add_to_cache(message, msg_url)
-            print("Added file!")
+            logger.info("Added file!")
     elif(re.match(media_cache.discord_cdn_regex, message.content) or re.match(media_cache.hosted_file_regex, message.content)):
         media_cache.add_to_cache(message, message.content)
-        print("Added discord cdn/hosted file url!")
+        logger.info("Added discord cdn/hosted file url!")
     elif(re.match(media_cache.yt_regex, message.content) or re.match(media_cache.twitter_regex, message.content) or re.match(media_cache.tumblr_regex, message.content) or re.match(media_cache.medaltv_regex, message.content) or re.match(media_cache.archive_regex, message.content)):
         media_cache.add_to_cache(message, message.content)
-        print("Added yt/twitter/tumblr url! " + message.content)
+        logger.info("Added yt/twitter/tumblr url! " + message.content)
     elif(re.match(media_cache.soundcloud_regex, message.content) or re.match(media_cache.bandcamp_regex, message.content)):
         media_cache.add_to_cache(message, message.content)
-        print("Added soundcloud/bandcamp url! " + message.content)
+        logger.info("Added soundcloud/bandcamp url! " + message.content)
 
     await bot.process_commands(message)
 
@@ -118,7 +119,7 @@ async def on_command(ctx):
     command_name = ctx.command.qualified_name
     command_content = ctx.message.content
     log_message = (
-        f"--- Command Log ---\n"
+        f"\n--- Command Log ---\n"
         f"Timestamp: {timestamp}\n"
         f"User: {user}\n"
         f"Guild: {guild}\n"
@@ -138,7 +139,13 @@ async def on_message_delete(message):
 @bot.event
 async def on_command_error(ctx, error):
     logger = logging.getLogger()
-    logger.error(f"Error in command {ctx.command.qualified_name} with args {ctx.message.content} by {ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id}) in {ctx.guild.name} (ID: {ctx.guild.id}) in {ctx.channel.name} (ID: {ctx.channel.id})")
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    user = f"{ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
+    guild = f"{ctx.guild.name} (ID: {ctx.guild.id})" if ctx.guild else "DMs"
+    channel = f"{ctx.channel.name} (ID: {ctx.channel.id})" if ctx.guild else f"DMs with {ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
+    command_name = ctx.command
+    command_content = ctx.message.content
+    logger.error(f"\n--- Command Error Log ---\nTimestamp: {timestamp}\nUser: {user}\nGuild: {guild}\nChannel: {channel}\nCommand: {command_name}\nCommand Content: {command_content}\nError: {error}\n--- End Command Error Log ---")
     if isinstance(error, commands.CommandNotFound):
         logger.warning(f"Command not found: {ctx.message.content}")
         return
@@ -159,6 +166,17 @@ async def on_command_error(ctx, error):
     
     await ctx.send(f"An error occurred while processing your command. ```\n{error}```")
     
+@bot.event
+async def on_command_completion(ctx):
+    logger = logging.getLogger()
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    user = f"{ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
+    guild = f"{ctx.guild.name} (ID: {ctx.guild.id})" if ctx.guild else "DMs"
+    channel = f"{ctx.channel.name} (ID: {ctx.channel.id})" if ctx.guild else f"DMs with {ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
+    command_name = ctx.command.qualified_name
+    command_content = ctx.message.content
+    logger.info(f"\n--- Command Success ---\nTimestamp: {timestamp}\nUser: {user}\nGuild: {guild}\nChannel: {channel}\nCommand: {command_name}\nCommand Content: {command_content}\n--- End Command Success ---")
+
 @bot.event
 async def on_guild_join(guild):
     logger = logging.getLogger()
@@ -243,6 +261,7 @@ async def setup(bot):
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @bot_info.is_owner()
 async def eval(ctx, *, code):
+    logger = logging.getLogger()
     code = cleanup_code(code)
     result = None
 
@@ -273,6 +292,7 @@ async def eval(ctx, *, code):
     except Exception as e:
             result = result[:2000]
             await ctx.send(embed=discord.Embed(title="Eval Error", description=f'```py\n{result}{traceback.format_exc()}\n```', color=discord.Color.red()))
+            logger.error(f"Error evaluating code: {e}")
             return
     func = env['func']
     try:
@@ -282,10 +302,12 @@ async def eval(ctx, *, code):
         result = stdout.getvalue()
         result = result[:2000]
         await ctx.send(embed=discord.Embed(title="Eval Error", description=f'```py\n{result}{traceback.format_exc()}\n```', color=discord.Color.red()))
+        logger.error(f"Error evaluating code: {e}")
     else:
         result = stdout.getvalue()
         result = result[:2000]
         await ctx.send(embed=discord.Embed(title="Eval", description=f'```py\n{result}\n-- {ret}```', color=discord.Color.og_blurple()))
+        logger.info(f"Evaluated code: {code}")
 
 def cleanup_code(content: str) -> str:
     if content.startswith('```') and content.endswith('```'):
