@@ -33,15 +33,63 @@ class Exif(commands.Cog):
             metadata = self.get_metadata(file_path)
 
             if metadata:
-                formatted_metadata = "\n".join([f"**{key}:** {value}" for key, value in metadata.items()])
-                if len(formatted_metadata) > 2000:
-                    metadata_file = f"{file_path}.txt"
-                    with open(metadata_file, 'w') as f:
-                        f.write(formatted_metadata)
-                    await ctx.send("Metadata is too large to display, sent as a file:", file=discord.File(metadata_file))
-                    os.remove(metadata_file)
-                else:
-                    await ctx.send(f"# Metadata:\n{formatted_metadata}")
+                mime_type = metadata.get("MIME Type", "unknown").lower()
+                color = discord.Color.light_gray()
+                thumbnail_url = None
+                thumbnail_file = None
+                if "image" in mime_type:
+                    color = discord.Color.green()
+                    if url and self.is_valid_url(url):
+                        thumbnail_url = url
+                    elif ctx.message.attachments:
+                        thumbnail_file = discord.File(file_path, filename=os.path.basename(file_path))
+                        thumbnail_url = f"attachment://{os.path.basename(file_path)}"
+                elif "video" in mime_type:
+                    color = discord.Color.red()
+                    thumbnail_file = discord.File("assets/video.png", filename="video.png")
+                    thumbnail_url = f"attachment://video.png"
+                elif "audio" in mime_type:
+                    color = discord.Color.blue()
+                    thumbnail_file = discord.File("assets/audio.png", filename="audio.png")
+                    thumbnail_url = f"attachment://audio.png"
+                base_embed = discord.Embed(
+                    title="EXIF Metadata",
+                    url=url if url else None,
+                    description="Metadata extracted using FFprobe.",
+                    color=color,
+                    timestamp=discord.utils.utcnow()
+                )
+                base_embed.set_footer(text="Powered by FFprobe", icon_url="https://img.icons8.com/?size=100&id=32418&format=png&color=000000")
+                if thumbnail_url:
+                    base_embed.set_thumbnail(url=thumbnail_url)
+                base_embed.add_field(
+                    name="Summary",
+                    value=(
+                        f"**Filename:** {metadata.get('Filename', 'Unknown')}\n"
+                        f"**MIME Type:** {mime_type}\n"
+                        f"**File Size:** {metadata.get('File Size', 'Unknown')}\n"
+                        f"**Duration:** {metadata.get('Total Duration', 'Unknown')}\n"
+                    ),
+                    inline=False
+                )
+                metadata_items = list(metadata.items())
+                embeds = [base_embed]
+                current_embed = base_embed
+                for i, (key, value) in enumerate(metadata_items):
+                    if key not in ["Filename", "MIME Type", "File Size", "Total Duration"]:
+                        if len(current_embed.fields) >= 25:
+                            current_embed = discord.Embed(
+                                title="More EXIF Metadata",
+                                color=color,
+                                timestamp=discord.utils.utcnow()
+                            )
+                            embeds.append(current_embed)
+                        current_embed.add_field(name=key, value=value, inline=False)
+                for embed in embeds:
+                    if thumbnail_file and embed == base_embed:
+                        await ctx.send(embed=embed, file=thumbnail_file)
+                    else:
+                        await ctx.send(embed=embed)
             else:
                 await ctx.send("No metadata found in the file.")
             
