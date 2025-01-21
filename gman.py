@@ -33,7 +33,7 @@ for f in vid_files:
 extensions = ['cogs.audio', 'cogs.help', 'cogs.ping', 'cogs.bitrate', 'cogs.filter', 'cogs.fun', 'cogs.corruption', 'cogs.bookmarks', 'cogs.utility', 'cogs.caption', 'cogs.exif', 'cogs.ffmpeg', 'cogs.imagemagick', 'cogs.ytdlp', 'cogs.info']
 bot = commands.Bot(command_prefix=commands.when_mentioned_or('!'), status=discord.Status.online, activity=discord.Game(name="!help"), help_command=None, intents=discord.Intents.all())
 
-bot.blacklisted_users = []
+bot.blacklisted_users = {}
 
 def setup_logger():
     log_format = "%(log_color)s%(asctime)s - %(levelname)s - %(name)s - %(message)s"
@@ -78,9 +78,8 @@ async def on_ready():
     except Exception as e:
         logger.error(f"Error reloading extensions: {e}")
     logger.info(f"Bot {bot.user.name} has successfully logged in via Token {bot_info.data['login']}. ID: {bot.user.id}")
-    logger.info(f"Bot {bot.user.name} is in {len(bot.guilds)} guilds.")
+    logger.info(f"Bot {bot.user.name} is in {len(bot.guilds)} guilds, caching a total of {sum(1 for _ in bot.get_all_channels())} channels and {len(bot.users)} users.")
     logger.info(f"Bot {bot.user.name} has a total of {len(bot.commands)} commands with {len(bot.cogs)} cogs.")
-    logger.info(f"Bot {bot.user.name} has cached a number of {len(bot.users)} users.")
     data = read_json("blacklistedusers")
     bot.blacklisted_users = data["blacklistedUsers"]
 
@@ -157,12 +156,13 @@ async def on_command_error(ctx, error):
         logger.warning(f"Bad argument for command {ctx.command.qualified_name}: {ctx.message.content} ({error})")
         await ctx.send(f"Bad argument for command {ctx.command.qualified_name}. ({error})")
         return
-    if ctx.author.id in bot.blacklisted_users:
-        logger.warning(f"User has been blocked from using the bot: {ctx.message.content}")
-        await ctx.send("You are blocked from using G-Man. Please contact the bot owner if you think this is a mistake.")
+    if isinstance(error, Blacklisted):
+        reason = bot.blacklisted_users.get(str(ctx.author.id), "No reason provided.")
+        logger.warning(f"{ctx.author.name} has been blocked from using the bot. Reason: {reason}. Command: {ctx.message.content}")
+        await ctx.send(f"You are blocked from using G-Man. Reason: `{reason}`")
         return
     if str(ctx.author.id) not in bot_info.data['owners']:
-        logger.warning(f"User is not a bot owner: {ctx.message.content}")
+        logger.warning(f"{ctx.author.name} is not a bot owner: {ctx.message.content}")
         await ctx.send("You are not a bot owner.")
         return
     else:
@@ -191,10 +191,6 @@ async def on_guild_remove(guild):
     logger = logging.getLogger()
     logger.info(f"Removed from guild {guild.name} (ID: {guild.id})")
 
-@bot.event
-async def on_guild_update(before, after):
-    logger = logging.getLogger()
-    logger.info(f"Guild updated: {before} -> {after}")
 
 @bot.event
 async def on_guild_unavailable(guild):
@@ -227,18 +223,24 @@ async def block(ctx: commands.Context, user: discord.User, *, reason = "No reaso
      if ctx.message.author.id == user.id:
         await ctx.send("Don't block yourself.")
         return
-     bot.blacklisted_users.append(user.id)
+     if user.id in bot.blacklisted_users:
+        await ctx.send(f"{user.name} is already blocked.")
+        return
+     bot.blacklisted_users[user.id] = reason
      data = read_json("blacklistedusers")
-     data["blacklistedUsers"].append(user.id)
+     data["blacklistedUsers"][str(user.id)] = reason
      write_json(data, "blacklistedusers")
-     await ctx.send(f"Blocked {user.name}. Reason: `{reason}`")
+     await ctx.send(f"Successfully blocked {user.name}. Reason: `{reason}`")
 
 @bot.command()
 @bot_info.is_owner()
 async def unblock(ctx: commands.Context, user: discord.User):
-     bot.blacklisted_users.remove(user.id)
+     if user.id not in bot.blacklisted_users:
+        await ctx.send(f"{user.name} is not blocked.")
+        return
+     bot.blacklisted_users.pop(user.id)
      data = read_json("blacklistedusers")
-     data["blacklistedUsers"].remove(user.id)
+     data["blacklistedUsers"].pop(str(user.id), None)
      write_json(data, "blacklistedusers")
      await ctx.send(f"Unblocked {user.name}.")
 
