@@ -12,6 +12,8 @@ DEFAULTS = {
     "font_size": 24,
     "padding_color": "#FFFFFF",
     "padding_size": 24,
+    "border_width": 0,
+    "border_color": "#000000",
     "position": "center"
 }
 
@@ -29,7 +31,7 @@ class Caption(commands.Cog):
                 else:
                     raise ValueError("Failed to download the file.")
     
-    def construct_filter_graph(self, text: str, font: str, font_color: str, font_size: int, padding_color: str, padding_size: int, position: str = "center"):
+    def construct_filter_graph(self, text: str, font: str, font_color: str, font_size: int, padding_color: str, padding_size: int, border_width: int, border_color: str, position: str = "center"):
         horizontal, vertical = "center", "center"
         if position in {"top", "bottom", "center", "left", "right"}:
             vertical = position
@@ -58,7 +60,7 @@ class Caption(commands.Cog):
             raise ValueError("Invalid horizontal position: must be 'left', 'center', or 'right'.")
         
         pad_filter = f"pad=width=iw:height=ih+{padding_size}:x=0:y={padding_size}:color={padding_color}"
-        drawtext_filter = f"drawtext=text='{text}':fontfile=fonts/{font}:fontcolor={font_color}:fontsize={font_size}:x={x}:y={y}"
+        drawtext_filter = f"drawtext=text='{text}':fontfile=fonts/{font}:fontcolor={font_color}:fontsize={font_size}:x={x}:y={y}:borderw={border_width}:bordercolor={border_color}"
 
         return f"{pad_filter},{drawtext_filter}"
     
@@ -74,11 +76,11 @@ class Caption(commands.Cog):
             raise RuntimeError(f"FFmpeg Error: {result.stderr}")
     
     @commands.hybrid_command(name="caption", description="Caption media.")
-    @app_commands.describe(url="Input URL to caption.", text="Text to caption the media with.", font="The font to use. (Default Futura Condensed Extra Bold.otf)", font_color="The font color to use. (Default #000000)", font_size="The font size to use. (Default 24)", padding_color="The padding color to use. (Default #FFFFFF)", padding_size="The padding size to use. (Default 24)", position="The position to use. (Default center)")
+    @app_commands.describe(url="Input URL to caption.", text="Text to caption the media with.", font="The font to use. (Default Futura Condensed Extra Bold.otf)", font_color="The font color to use. (Default #000000)", font_size="The font size to use. (Default 24)", padding_color="The padding color to use. (Default #FFFFFF)", padding_size="The padding size to use. (Default 24)", border_width="The border width to use. (Default 0)", border_color="The border color to use. (Default #000000)", position="The position to use. (Default center)")
     @app_commands.user_install()
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    async def caption(self, ctx: commands.Context, url: str, text: str, font: str = DEFAULTS["font"], font_color: str = DEFAULTS["font_color"], font_size: int = DEFAULTS["font_size"], padding_color: str = DEFAULTS["padding_color"], padding_size: int = DEFAULTS["padding_size"], position: str = DEFAULTS["position"]):
+    async def caption(self, ctx: commands.Context, url: str, text: str, font: str = DEFAULTS["font"], font_color: str = DEFAULTS["font_color"], font_size: int = DEFAULTS["font_size"], padding_color: str = DEFAULTS["padding_color"], padding_size: int = DEFAULTS["padding_size"], border_width: int = DEFAULTS["border_width"], border_color: str = DEFAULTS["border_color"], position: str = DEFAULTS["position"]):
         if ctx.interaction:
             await ctx.defer()
         else:
@@ -92,7 +94,7 @@ class Caption(commands.Cog):
             await self.download_file(url, input_path)
 
             filter_graph = self.construct_filter_graph(
-                text, font, font_color, font_size, padding_color, padding_size, position
+                text, font, font_color, font_size, padding_color, padding_size, border_width, border_color, position
             )
 
             self.apply_caption(input_path, output_path, filter_graph)
