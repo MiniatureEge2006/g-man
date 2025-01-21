@@ -157,7 +157,7 @@ async def on_command_error(ctx, error):
         await ctx.send(f"Bad argument for command {ctx.command.qualified_name}. ({error})")
         return
     if isinstance(error, Blacklisted):
-        reason = bot.blacklisted_users.get(str(ctx.author.id), "No reason provided.")
+        reason = bot.blacklisted_users[ctx.author.id]
         logger.warning(f"{ctx.author.name} has been blocked from using the bot. Reason: {reason}. Command: {ctx.message.content}")
         await ctx.send(f"You are blocked from using G-Man. Reason: `{reason}`")
         return
