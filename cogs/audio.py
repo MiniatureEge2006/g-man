@@ -108,7 +108,7 @@ class Audio(commands.Cog):
             await ctx.defer()
         queue = self.get_queue(ctx.guild.id)
         if queue:
-            queue_list = [f"{index + 1}. {url} ({', '.join(filters)})" for index, (url, filters) in enumerate(queue)]
+            queue_list = [f"{index + 1}. <{url}> ({', '.join(filters)})\n" for index, (url, filters) in enumerate(queue)]
             await ctx.send(f"Queue:\n{''.join(queue_list)}")
         else:
             await ctx.send("The queue is empty.")
@@ -130,11 +130,11 @@ class Audio(commands.Cog):
         if ctx.interaction:
             await ctx.defer()
         
-        if ctx.voice_client and ctx.voice_client.is_playing():
+        if ctx.voice_client:
             queue = self.get_queue(ctx.guild.id)
             queue.clear()
             ctx.voice_client.stop()
-            await ctx.send("Stopped playback.")
+            await ctx.send("Stopped playback and cleared the queue.")
         else:
             await ctx.send("I am not connected to a voice channel.")
     
