@@ -5,6 +5,7 @@ import yt_dlp
 import os
 import asyncio
 from collections import deque
+from datetime import datetime
 
 YDL_OPTIONS = {'format': 'bestaudio/best', 'noplaylist': True, 'outtmpl': 'vids/%(extractor)s-%(id)s-%(title)s.%(ext)s', 'restrictfilenames': True}
 
@@ -64,11 +65,15 @@ class Audio(commands.Cog):
                     color=discord.Color.og_blurple(),
                     timestamp=discord.utils.utcnow()
                 )
+                raw_date = info.get('upload_date')
+                upload_date = datetime.strptime(raw_date, '%Y%m%d').strftime('%B %d, %Y') if raw_date else "Unknown"
                 embed.add_field(name="Length", value=info['duration_string'] if info['duration_string'] else "Unknown", inline=True)
                 embed.add_field(name="Author", value=info['uploader'] if info['uploader'] else "Unknown", inline=True)
-                embed.add_field(name="Views", value=info['view_count'] if info['view_count'] else "Unknown", inline=True)
-                embed.add_field(name="Likes", value=info['like_count'] if info['like_count'] else "Unknown", inline=True)
+                embed.add_field(name="Channel", value=info['uploader_url'] if info['uploader_url'] else "Unknown", inline=True)
+                embed.add_field(name="Views", value=f"{info['view_count']:,}" if info['view_count'] else "Unknown", inline=True)
+                embed.add_field(name="Likes", value=f"{info['like_count']:,}" if info['like_count'] else "Unknown", inline=True)
                 embed.add_field(name="Filters", value=", ".join(filters) if filters else "None", inline=True)
+                embed.add_field(name="Published At", value=upload_date, inline=True)
                 embed.set_image(url=info.get('thumbnail', None))
                 embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
                 await ctx.send(embed=embed)
@@ -210,11 +215,15 @@ class Audio(commands.Cog):
                     color=discord.Color.og_blurple(),
                     timestamp=discord.utils.utcnow()
                 )
+                raw_date = info.get('upload_date')
+                upload_date = datetime.strptime(raw_date, '%Y%m%d').strftime('%B %d, %Y') if raw_date else "Unknown"
                 embed.add_field(name="Length", value=info['duration_string'] if info['duration_string'] else "Unknown", inline=True)
                 embed.add_field(name="Author", value=info['uploader'] if info['uploader'] else "Unknown", inline=True)
-                embed.add_field(name="Views", value=info['view_count'] if info['view_count'] else "Unknown", inline=True)
-                embed.add_field(name="Likes", value=info['like_count'] if info['like_count'] else "Unknown", inline=True)
+                embed.add_field(name="Channel", value=info['uploader_url'] if info['uploader_url'] else "Unknown", inline=True)
+                embed.add_field(name="Views", value=f"{info['view_count']:,}" if info['view_count'] else "Unknown", inline=True)
+                embed.add_field(name="Likes", value=f"{info['like_count']:,}" if info['like_count'] else "Unknown", inline=True)
                 embed.add_field(name="Filters", value=", ".join(filters) if filters else "None", inline=True)
+                embed.add_field(name="Published At", value=upload_date, inline=True)
                 embed.set_image(url=info.get('thumbnail', None))
                 embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
                 await ctx.send(embed=embed)
