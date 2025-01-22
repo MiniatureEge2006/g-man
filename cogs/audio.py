@@ -12,6 +12,7 @@ class Audio(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.queues = {}
+        self.currently_playing = {}
     
     def get_queue(self, guild_id):
         if guild_id not in self.queues:
@@ -53,7 +54,24 @@ class Audio(commands.Cog):
             
                 source = discord.FFmpegPCMAudio(file_path, **ffmpeg_options)
                 voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.cleanup_file_and_play_next(ctx, file_path), self.bot.loop))
-                await ctx.send(f"Playing: [{info['title']} ({info['id']})](<{info['webpage_url'] if 'webpage_url' in info else 'Unknown URL'}>) by [{info['uploader'] if 'uploader' in info else 'Unknown Uploader'}](<{info['uploader_url'] if 'uploader_url' in info else 'Unknown URL'}> '{info['uploader_id'] if 'uploader_id' in info else 'Unknown ID'}') from {info['extractor']} with a duration of {info['duration_string'] if 'duration_string' in info else 'Unknown Duration'} ({info['duration'] if 'duration' in info else 'Unknown Duration'} seconds).")
+                self.currently_playing[ctx.guild.id] = {
+                    'info': info,
+                    'filters': filters
+                }
+                embed = discord.Embed(
+                    title=f"Playing - {info['title'] if info['title'] else 'Unknown'}",
+                    description=f"URL: {info['webpage_url'] if info['webpage_url'] else 'Unknown'}",
+                    color=discord.Color.og_blurple(),
+                    timestamp=discord.utils.utcnow()
+                )
+                embed.add_field(name="Length", value=info['duration_string'] if info['duration_string'] else "Unknown", inline=True)
+                embed.add_field(name="Author", value=info['uploader'] if info['uploader'] else "Unknown", inline=True)
+                embed.add_field(name="Views", value=info['view_count'] if info['view_count'] else "Unknown", inline=True)
+                embed.add_field(name="Likes", value=info['like_count'] if info['like_count'] else "Unknown", inline=True)
+                embed.add_field(name="Filters", value=", ".join(filters) if filters else "None", inline=True)
+                embed.set_image(url=info.get('thumbnail', None))
+                embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
+                await ctx.send(embed=embed)
     
     async def cleanup_file_and_play_next(self, ctx, file_path):
         if os.path.exists(file_path):
@@ -108,8 +126,13 @@ class Audio(commands.Cog):
             await ctx.defer()
         queue = self.get_queue(ctx.guild.id)
         if queue:
-            queue_list = [f"{index + 1}. <{url}> ({', '.join(filters)})\n" for index, (url, filters) in enumerate(queue)]
-            await ctx.send(f"Queue:\n{''.join(queue_list)}")
+            embed = discord.Embed(
+                title="Queue",
+                description="\n".join(f"{i+1}. {url} ({', '.join(filters)})" for i, (url, filters) in enumerate(queue)),
+                color=discord.Color.og_blurple(),
+                timestamp=discord.utils.utcnow()
+            )
+            await ctx.send(embed=embed)
         else:
             await ctx.send("The queue is empty.")
     
@@ -170,6 +193,33 @@ class Audio(commands.Cog):
             await ctx.send("Resumed playback.")
         else:
             await ctx.send("Nothing is currently paused.")
+    
+    @commands.hybrid_command(name="nowplaying", description="Display information about the currently playing audio/song.", aliases=["np"])
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def nowplaying(self, ctx: commands.Context):
+        if ctx.interaction:
+            await ctx.defer()
+        if ctx.voice_client and ctx.voice_client.is_playing():
+            current = self.currently_playing.get(ctx.guild.id)
+            if current:
+                info = current['info']
+                filters = current['filters']
+                embed = discord.Embed(
+                    title=f"Currently Playing - {info['title'] if info['title'] else 'Unknown'}",
+                    description=f"URL: {info['webpage_url'] if info['webpage_url'] else 'Unknown'}",
+                    color=discord.Color.og_blurple(),
+                    timestamp=discord.utils.utcnow()
+                )
+                embed.add_field(name="Length", value=info['duration_string'] if info['duration_string'] else "Unknown", inline=True)
+                embed.add_field(name="Author", value=info['uploader'] if info['uploader'] else "Unknown", inline=True)
+                embed.add_field(name="Views", value=info['view_count'] if info['view_count'] else "Unknown", inline=True)
+                embed.add_field(name="Likes", value=info['like_count'] if info['like_count'] else "Unknown", inline=True)
+                embed.add_field(name="Filters", value=", ".join(filters) if filters else "None", inline=True)
+                embed.set_image(url=info.get('thumbnail', None))
+                embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
+                await ctx.send(embed=embed)
+        else:
+            await ctx.send("Nothing is currently playing.")
     
 async def setup(bot):
     await bot.add_cog(Audio(bot))
