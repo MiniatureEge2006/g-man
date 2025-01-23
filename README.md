@@ -57,4 +57,13 @@ pip3 install -r requirements.txt
       * `mahna.mp3` (The song "Mah Na Mah Na" from the Muppets soundtrack, used with the `!mahna` command).
       * `tetris.mp3` (The Tetris beatbox song by Verbalase, used with the `!tetris` command).
 * Create a copy of `bot_info_template.json` and rename it to `bot_info.json`. Fill it in with the appropriate information (keep the quotes).
+* Make these 4 JSON files for the allow/blocklist commands and global block commands: `allowlist.json`, `blocklist.json`, `global_server_blocks.json` and `global_user_blocks.json`.
+  * `allowlist.json`
+    * ```{"user": [], "channel": [], "role": []}```
+  * `blocklist.json`
+    * ```{"user": [], "channel": [], "role": []}```
+  * `global_server_blocks.json`
+    * ```{"blocked_servers": {}}```
+  * `global_user_blocks.json`
+    * ```{"blocked_users": {}}```
 * Run `python3 gman.py`

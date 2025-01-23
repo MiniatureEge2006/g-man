@@ -11,7 +11,6 @@ import database as db
 import discord
 from discord import app_commands
 from discord.ext import commands
-from discord.ext.commands import CheckFailure
 import media_cache
 import os
 import re
@@ -20,8 +19,6 @@ import traceback
 from urllib.parse import urlparse
 
 
-class Blacklisted(CheckFailure):
-    pass
 
 
 # If any videos were not deleted while the bot was last up, remove them
@@ -33,7 +30,6 @@ for f in vid_files:
 extensions = ['cogs.audio', 'cogs.help', 'cogs.ping', 'cogs.bitrate', 'cogs.filter', 'cogs.fun', 'cogs.corruption', 'cogs.bookmarks', 'cogs.utility', 'cogs.caption', 'cogs.exif', 'cogs.ffmpeg', 'cogs.imagemagick', 'cogs.ytdlp', 'cogs.info']
 bot = commands.Bot(command_prefix=commands.when_mentioned_or('!'), status=discord.Status.online, activity=discord.Game(name="!help"), help_command=None, intents=discord.Intents.all())
 
-bot.blacklisted_users = {}
 
 def setup_logger():
     log_format = "%(log_color)s%(asctime)s - %(levelname)s - %(name)s - %(message)s"
@@ -58,12 +54,37 @@ async def reload_extensions(exs):
     return module_msg
 
 
-@bot.check
-async def blacklist_detector(ctx):
-    if ctx.message.author.id in bot.blacklisted_users:
-        raise Blacklisted("User has been blacklisted from using the bot")
-    else:
-        return True
+@bot.before_invoke
+async def check_access(ctx: commands.Context):
+    user_id = ctx.author.id
+    channel_id = ctx.channel.id
+    guild_id = ctx.guild.id if ctx.guild else None
+    roles = [role.id for role in ctx.author.roles] if ctx.guild else []
+    global_server_blocks = read_json("global_server_blocks")
+    if guild_id and str(guild_id) in global_server_blocks.get("blocked_servers", {}):
+        reason = global_server_blocks["blocked_servers"][str(guild_id)]
+        await ctx.send(f"This server is blocked from using G-Man. Reason: `{reason}`")
+        raise commands.CheckFailure("This server is blocked from using G-Man.")
+    global_user_blocks = read_json("global_user_blocks")
+    if str(user_id) in global_user_blocks.get("blocked_users", {}):
+        reason = global_user_blocks["blocked_users"][str(user_id)]
+        await ctx.send(f"You are blocked from using G-Man. Reason: `{reason}`")
+        raise commands.CheckFailure("This user is blocked from using G-Man.")
+    allowlist = read_json("allowlist")
+    if (
+        user_id in allowlist["user"]
+        or channel_id in allowlist["channel"]
+        or any(role_id in allowlist["role"] for role_id in roles)
+    ):
+        return
+    blocklist = read_json("blocklist")
+    if (
+        user_id in [e["id"] for e in blocklist["user"]]
+        or channel_id in [e["id"] for e in blocklist["channel"]]
+        or any(role_id in [e["id"] for e in blocklist["role"]] for role_id in roles)
+    ):
+        await ctx.send(f"Command blocked. You, this channel, or one of your roles is blocked from using G-Man.")
+        raise commands.CheckFailure("This user, channel, or role is blocked from using G-Man.")
     
     
     
@@ -80,8 +101,6 @@ async def on_ready():
     logger.info(f"Bot {bot.user.name} has successfully logged in via Token {bot_info.data['login']}. ID: {bot.user.id}")
     logger.info(f"Bot {bot.user.name} is in {len(bot.guilds)} guilds, caching a total of {sum(1 for _ in bot.get_all_channels())} channels and {len(bot.users)} users.")
     logger.info(f"Bot {bot.user.name} has a total of {len(bot.commands)} commands with {len(bot.cogs)} cogs.")
-    data = read_json("blacklistedusers")
-    bot.blacklisted_users = data["blacklistedUsers"]
 
 # Process commands
 @bot.event
@@ -156,14 +175,16 @@ async def on_command_error(ctx, error):
         logger.warning(f"Bad argument for command {ctx.command.qualified_name}: {ctx.message.content} ({error})")
         await ctx.send(f"Bad argument for command {ctx.command.qualified_name}. ({error})")
         return
-    if isinstance(error, Blacklisted):
-        reason = bot.blacklisted_users[ctx.author.id]
-        logger.warning(f"{ctx.author.name} has been blocked from using the bot. Reason: {reason}. Command: {ctx.message.content}")
-        await ctx.send(f"You are blocked from using G-Man. Reason: `{reason}`")
+    if isinstance(error, commands.MissingPermissions):
+        logger.warning(f"Missing permissions for command {ctx.command.qualified_name}: {ctx.message.content} ({error})")
+        await ctx.send(f"{ctx.command.qualified_name} requires the following permissions: {', '.join(error.missing_permissions)}")
         return
     if str(ctx.author.id) not in bot_info.data['owners']:
         logger.warning(f"{ctx.author.name} is not a bot owner: {ctx.message.content}")
         await ctx.send("You are not a bot owner.")
+        return
+    if isinstance(error, commands.CheckFailure):
+        logger.warning(f"Check failed for command {ctx.command.qualified_name}: {ctx.message.content} ({error})")
         return
     else:
         logger.critical(f"An unexpected error occurred: {error}")
@@ -217,32 +238,106 @@ async def sync(ctx: commands.Context):
     logger.info("Slash commands synced.")
 
 
-@bot.command()
-@bot_info.is_owner()
-async def block(ctx: commands.Context, user: discord.User, *, reason = "No reason provided."):
-     if ctx.message.author.id == user.id:
-        await ctx.send("Don't block yourself.")
+@bot.command(name="block", description="Blocks a user, channel, or role from using the bot.")
+@commands.has_permissions(administrator=True)
+async def block(ctx: commands.Context, type: str, type_id: int, *, reason="No reason provided"):
+     if ctx.author.id == type_id:
+         await ctx.send("You cannot block yourself.")
+         return
+     if type not in ["user", "channel", "role"]:
+         await ctx.send("Invalid type. Valid types: `user`, `channel`, or `role`.")
+         return
+     
+     data = read_json("blocklist")
+     if type_id in [e["id"] for e in data[type]]:
+         await ctx.send(f"{type} with ID {type_id} is already blocked.")
+         return
+     data[type].append({"id": type_id, "reason": reason})
+     write_json(data, "blocklist")
+     await ctx.send(f"Blocked {type} with ID {type_id}. Reason: `{reason}`")
+
+@bot.command(name="unblock", description="Unblocks a user, channel, or role from using the bot.")
+@commands.has_permissions(administrator=True)
+async def unblock(ctx: commands.Context, type: str, type_id: int):
+    if type not in ["user", "channel", "role"]:
+        await ctx.send("Invalid type. Valid types: `user`, `channel`, or `role`.")
         return
-     if user.id in bot.blacklisted_users:
+    data = read_json("blocklist")
+    data[type] = [e for e in data[type] if e["id"] != type_id]
+    write_json(data, "blocklist")
+    await ctx.send(f"Unblocked {type} with ID {type_id}")
+
+@bot.command(name="allow", description="Allows a user, channel, or role to use the bot.")
+@commands.has_permissions(administrator=True)
+async def allow(ctx: commands.Context, type: str, type_id: int):
+    if type not in ["user", "channel", "role"]:
+        await ctx.send("Invalid type. Valid types: `user`, `channel`, or `role`.")
+        return
+    data = read_json("allowlist")
+    if type_id in data[type]:
+        await ctx.send(f"{type} with ID {type_id} is already allowed.")
+        return
+    data[type].append({"id": type_id})
+    write_json(data, "allowlist")
+    await ctx.send(f"Added {type} with ID {type_id} to the allowlist.")
+
+@bot.command(name="deny", description="Denies a user, channel, or role from using the bot.")
+@commands.has_permissions(administrator=True)
+async def deny(ctx: commands.Context, type: str, type_id: int):
+    if type not in ["user", "channel", "role"]:
+        await ctx.send("Invalid type. Valid types: `user`, `channel`, or `role`.")
+        return
+    data = read_json("allowlist")
+    data[type] = [e for e in data[type] if e["id"] != type_id]
+    write_json(data, "allowlist")
+    await ctx.send(f"Removed {type} with ID {type_id} from the allowlist.")
+
+@bot.command(name="globalserverblock", description="Blocks a server from using the bot.", aliases=["gsblock"])
+@bot_info.is_owner()
+async def globalserverblock(ctx: commands.Context, guild_id: int, *, reason="No reason provided"):
+    data = read_json("global_server_blocks")
+    if str(guild_id) in data.get("blocked_servers", {}):
+        await ctx.send(f"Server with ID {guild_id} is already blocked.")
+        return
+    data.setdefault("blocked_servers", {})[str(guild_id)] = reason
+    write_json(data, "global_server_blocks")
+    await ctx.send(f"Successfully blocked server with ID {guild_id}. Reason: `{reason}`")
+
+@bot.command(name="globalserverunblock", description="Unblocks a server from using the bot.", aliases=["gsunblock"])
+@bot_info.is_owner()
+async def globalserverunblock(ctx: commands.Context, guild_id: int):
+    data = read_json("global_server_blocks")
+    if str(guild_id) not in data.get("blocked_servers", {}):
+        await ctx.send(f"Server with ID {guild_id} is not blocked.")
+        return
+    del data["blocked_servers"][str(guild_id)]
+    write_json(data, "global_server_blocks")
+    await ctx.send(f"Successfully unblocked server with ID {guild_id}.")
+
+@bot.command(name="globaluserblock", description="Blocks a user from using the bot.", aliases=["gblock"])
+@bot_info.is_owner()
+async def globaluserblock(ctx: commands.Context, user: discord.User, *, reason="No reason provided"):
+    if user.id == ctx.author.id:
+        await ctx.send("You cannot block yourself.")
+        return
+    data = read_json("global_user_blocks")
+    if str(user.id) in data.get("blocked_users", {}):
         await ctx.send(f"{user.name} is already blocked.")
         return
-     bot.blacklisted_users[user.id] = reason
-     data = read_json("blacklistedusers")
-     data["blacklistedUsers"][str(user.id)] = reason
-     write_json(data, "blacklistedusers")
-     await ctx.send(f"Successfully blocked {user.name}. Reason: `{reason}`")
+    data.setdefault("blocked_users", {})[str(user.id)] = reason
+    write_json(data, "global_user_blocks")
+    await ctx.send(f"Successfully blocked {user.name}. Reason: `{reason}`")
 
-@bot.command()
+@bot.command(name="globaluserunblock", description="Unblocks a user from using the bot.", aliases=["gunblock"])
 @bot_info.is_owner()
-async def unblock(ctx: commands.Context, user: discord.User):
-     if user.id not in bot.blacklisted_users:
+async def globaluserunblock(ctx: commands.Context, user: discord.User):
+    data = read_json("global_user_blocks")
+    if str(user.id) not in data.get("blocked_users", {}):
         await ctx.send(f"{user.name} is not blocked.")
         return
-     bot.blacklisted_users.pop(user.id)
-     data = read_json("blacklistedusers")
-     data["blacklistedUsers"].pop(str(user.id), None)
-     write_json(data, "blacklistedusers")
-     await ctx.send(f"Unblocked {user.name}.")
+    del data["blocked_users"][str(user.id)]
+    write_json(data, "global_user_blocks")
+    await ctx.send(f"Successfully unblocked {user.name}.")
 
 # Reloading extensions
 @bot.command(description='Reloads extensions. Usage: /reload [extension_list]', pass_context=True)
