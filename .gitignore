@@ -1,10 +1,6 @@
 .vscode
 cache.json
 bot_info.json
-allowlist.json
-blocklist.json
-global_server_blocks.json
-global_user_blocks.json
 
 # These should be downloaded manually
 vids/*

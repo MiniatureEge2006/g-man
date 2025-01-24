@@ -11,14 +11,16 @@ Filters are applied using FFMPEG, with some corruption commands using tomato.py 
 * Apply premade sequences of filters, such as !tutorial to convert a video into an old-school YouTube tutorial.
 * Corrupt videos in various ways, such as datamoshing and modifying random chunks of bytes in the video file.
 * Save your videos using a personal bookmark system, and load your bookmarks in any server g_man is in.
-* Slash commands. (only help and ping for now.)
-* A blacklisting system incase you do not want some users to use your bot.
+* Slash commands.
+* A block/allowlisting system along with bot owners being able to globally block users or servers.
 
 ## Usage/Commands
 You can now just type `!help` in a channel to see all the commands.
 
 ## Requirements
 * Static build of ffmpeg (version 4.2 or above)
+* A PostgreSQL database
+  * see the `setup.sql` file and run the query. This is required for the block/allowlisting system.
 * A MongoDB database
   * The bot looks for a database called `gman`. It uses a collection called `inventory` for the bookmark system and `videos` for keeping track of videos sent.
 * AviGlitch, see https://github.com/ucnv/aviglitch for installation instructions. This is needed for the !mosh command.
@@ -57,21 +59,4 @@ pip3 install -r requirements.txt
       * `mahna.mp3` (The song "Mah Na Mah Na" from the Muppets soundtrack, used with the `!mahna` command).
       * `tetris.mp3` (The Tetris beatbox song by Verbalase, used with the `!tetris` command).
 * Create a copy of `bot_info_template.json` and rename it to `bot_info.json`. Fill it in with the appropriate information (keep the quotes).
-* Make these 4 JSON files for the allow/blocklist commands and global block commands: `allowlist.json`, `blocklist.json`, `global_server_blocks.json` and `global_user_blocks.json`.
-  * `allowlist.json`
-     ```
-     {"user": [], "channel": [], "role": []}
-     ```
-  * `blocklist.json`
-     ```
-     {"user": [], "channel": [], "role": []}
-     ```
-  * `global_server_blocks.json`
-     ```
-     {"blocked_servers": {}}
-     ```
-  * `global_user_blocks.json`
-     ```
-     {"blocked_users": {}}
-     ```
 * Run `python3 gman.py`
