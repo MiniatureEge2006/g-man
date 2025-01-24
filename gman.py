@@ -57,11 +57,16 @@ async def reload_extensions(exs):
 
 @bot.before_invoke
 async def check_access(ctx: commands.Context):
+    try:
+        is_admin = ctx.author.guild_permissions.administrator
+        roles = [role.id for role in ctx.author.roles]
+    except AttributeError:
+        is_admin = False
+        roles = []
     user_id = ctx.author.id
     channel_id = ctx.channel.id
     guild_id = ctx.guild.id if ctx.guild else None
-    roles = [role.id for role in ctx.author.roles] if ctx.guild else []
-    if ctx.author.guild_permissions.administrator or str(user_id) in bot_info.data['owners']:
+    if is_admin or str(user_id) in bot_info.data['owners']:
         return
     async with bot.db.acquire() as conn:
         allowlist_active = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM allowlist)")
@@ -96,14 +101,14 @@ async def on_ready():
     logger = logging.getLogger()
     global extensions
     try:
-        bot.db = await asyncpg.create_pool(dsn=bot_info.data['database'])
-        logger.info("Connected to database.")
-    except Exception as e:
-        logger.error(f"Error connecting to database: {e}")
-    try:
         logger.info(await reload_extensions(extensions))
     except Exception as e:
         logger.error(f"Error reloading extensions: {e}")
+    try:
+        bot.db = await asyncpg.create_pool(bot_info.data['database'])
+        logger.info(f"Connected to PostgreSQL database via {bot_info.data['database']}")
+    except Exception as e:
+        logger.error(f"Error connecting to PostgreSQL database: {e}")
     logger.info(f"Bot {bot.user.name} has successfully logged in via Token {bot_info.data['login']}. ID: {bot.user.id}")
     logger.info(f"Bot {bot.user.name} is in {len(bot.guilds)} guilds, caching a total of {sum(1 for _ in bot.get_all_channels())} channels and {len(bot.users)} users.")
     logger.info(f"Bot {bot.user.name} has a total of {len(bot.commands)} commands with {len(bot.cogs)} cogs.")
