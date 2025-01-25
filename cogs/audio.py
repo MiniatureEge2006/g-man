@@ -52,56 +52,55 @@ class Audio(commands.Cog):
                 await self.play_audio(ctx, url, filters)
 
     async def play_audio(self, ctx: commands.Context, url: str, filters=None):
-        async with ctx.typing():
-            if 'spotify.com' in url:
-                track = spotify.track(url)
-                query = f"{track['name']} {track['artists'][0]['name']}"
-                with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-                    results = ydl.extract_info(f"ytsearch:{query}", download=False)['entries']
-                    if results:
-                        url = results[0]['webpage_url']
-            
+        if 'spotify.com' in url:
+            track = spotify.track(url)
+            query = f"{track['name']} {track['artists'][0]['name']}"
             with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-                info = ydl.extract_info(url, download=True)
-                file_path = ydl.prepare_filename(info)
-        
-            if ctx.voice_client is None:
-                await self.connect_to_channel(ctx)
-        
-            voice_client = ctx.voice_client
-            if voice_client:
-                ffmpeg_options = {
-                    'options': '-vn'
-                }
-                if filters:
-                    ffmpeg_options['options'] += f" -af {','.join(filters)}"
+                results = ydl.extract_info(f"ytsearch:{query}", download=False)['entries']
+                if results:
+                    url = results[0]['webpage_url']
             
-                source = discord.FFmpegPCMAudio(file_path, **ffmpeg_options)
-                voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.cleanup_file_and_play_next(ctx, file_path), self.bot.loop))
-                self.currently_playing[ctx.guild.id] = {
-                    'info': info,
-                    'url': url,
-                    'filters': filters,
-                    'queue_snapshot': list(self.get_queue(ctx.guild.id))
-                }
-                embed = discord.Embed(
-                    title=f"Playing - {info['title'] or 'Unknown'}",
-                    description=f"URL: {info['webpage_url'] or 'Unknown'}",
-                    color=discord.Color.og_blurple(),
-                    timestamp=discord.utils.utcnow()
-                )
-                raw_date = info.get('upload_date')
-                upload_date = datetime.strptime(raw_date, '%Y%m%d').strftime('%B %d, %Y') if raw_date else "Unknown"
-                embed.add_field(name="Length", value=info.get('duration_string', 'Unknown'), inline=True)
-                embed.add_field(name="Author", value=info.get('uploader', 'Unknown'), inline=True)
-                embed.add_field(name="Channel", value=info.get('uploader_url', 'Unknown'), inline=True)
-                embed.add_field(name="Views", value=f"{info.get('view_count', 'Unknown'):,}", inline=True)
-                embed.add_field(name="Likes", value=f"{info.get('like_count', 'Unknown'):,}", inline=True)
-                embed.add_field(name="Filters", value=", ".join(filters) if filters else "None", inline=True)
-                embed.add_field(name="Published At", value=upload_date, inline=True)
-                embed.set_image(url=info.get('thumbnail'))
-                embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
-                await ctx.send(embed=embed)
+        with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+            info = ydl.extract_info(url, download=True)
+            file_path = ydl.prepare_filename(info)
+        
+        if ctx.voice_client is None:
+            await self.connect_to_channel(ctx)
+        
+        voice_client = ctx.voice_client
+        if voice_client:
+            ffmpeg_options = {
+                'options': '-vn'
+            }
+            if filters:
+                ffmpeg_options['options'] += f" -af {','.join(filters)}"
+            
+            source = discord.FFmpegPCMAudio(file_path, **ffmpeg_options)
+            voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.cleanup_file_and_play_next(ctx, file_path), self.bot.loop))
+            self.currently_playing[ctx.guild.id] = {
+                'info': info,
+                'url': url,
+                'filters': filters,
+                'queue_snapshot': list(self.get_queue(ctx.guild.id))
+            }
+            embed = discord.Embed(
+                title=f"Playing - {info['title'] or 'Unknown'}",
+                description=f"URL: {info['webpage_url'] or 'Unknown'}",
+                color=discord.Color.og_blurple(),
+                timestamp=discord.utils.utcnow()
+            )
+            raw_date = info.get('upload_date')
+            upload_date = datetime.strptime(raw_date, '%Y%m%d').strftime('%B %d, %Y') if raw_date else "Unknown"
+            embed.add_field(name="Length", value=info.get('duration_string', 'Unknown'), inline=True)
+            embed.add_field(name="Author", value=info.get('uploader', 'Unknown'), inline=True)
+            embed.add_field(name="Channel", value=info.get('uploader_url', 'Unknown'), inline=True)
+            embed.add_field(name="Views", value=f"{info.get('view_count', 'Unknown'):,}", inline=True)
+            embed.add_field(name="Likes", value=f"{info.get('like_count', 'Unknown'):,}", inline=True)
+            embed.add_field(name="Filters", value=", ".join(filters) if filters else "None", inline=True)
+            embed.add_field(name="Published At", value=upload_date, inline=True)
+            embed.set_image(url=info.get('thumbnail'))
+            embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
+            await ctx.send(embed=embed)
     
     async def cleanup_file_and_play_next(self, ctx, file_path):
         if os.path.exists(file_path):
@@ -154,8 +153,6 @@ class Audio(commands.Cog):
     async def repeat(self, ctx: commands.Context, mode: str):
         if ctx.interaction:
             await ctx.defer()
-        else:
-            await ctx.typing()
         if mode.lower() not in ["single", "queue", "none"]:
             await ctx.send("Invalid mode. Valid modes are 'single', 'queue', or 'none'.")
             return
@@ -168,22 +165,23 @@ class Audio(commands.Cog):
     async def search(self, ctx: commands.Context, *, query: str):
         if ctx.interaction:
             await ctx.defer()
-        async with ctx.typing():
-            with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-                try:
-                    results = ydl.extract_info(f"ytsearch5:{query}", download=False)['entries']
-                except Exception as e:
-                    await ctx.send(f"Error searching for {query}: {e}")
-                    return
-            embed = discord.Embed(
-                title="Search Results",
-                description="Select a song by typing its number.",
-                color=discord.Color.og_blurple(),
-                timestamp=discord.utils.utcnow()
-            )
-            for i, result in enumerate(results):
-                embed.add_field(name=f"{i+1}. {result['title']}", value=result['webpage_url'], inline=False)
-            await ctx.send(embed=embed)
+        else:
+            await ctx.typing()
+        with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+            try:
+                results = ydl.extract_info(f"ytsearch5:{query}", download=False)['entries']
+            except Exception as e:
+                await ctx.send(f"Error searching for {query}: {e}")
+                return
+        embed = discord.Embed(
+            title="Search Results",
+            description="Select a song by typing its number.",
+            color=discord.Color.og_blurple(),
+            timestamp=discord.utils.utcnow()
+        )
+        for i, result in enumerate(results):
+            embed.add_field(name=f"{i+1}. {result['title']}", value=result['webpage_url'], inline=False)
+        await ctx.send(embed=embed)
         def check(m):
             return m.author == ctx.author and m.content.isdigit() and 1 <= int(m.content) <= len(results)
         try:
