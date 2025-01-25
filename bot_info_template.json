@@ -3,5 +3,7 @@
     "login": "Your Discord app token",
     "mongo_url": "Your MongoDB connection url",
     "openweather_api_key": "Your OpenWeather API key",
-    "database": "Your PostgreSQL database URL"
+    "database": "Your PostgreSQL database URL",
+    "spotify_client_id": "Your Spotify client ID",
+    "spotify_client_secret": "Your Spotify client secret"
 }

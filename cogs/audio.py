@@ -2,12 +2,15 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import yt_dlp
+import spotipy
+import bot_info
 import os
 import asyncio
 from collections import deque
 from datetime import datetime
 
 YDL_OPTIONS = {'format': 'bestaudio/best', 'noplaylist': True, 'outtmpl': 'vids/%(extractor)s-%(id)s-%(title)s.%(ext)s', 'restrictfilenames': True, 'sleep_interval': 5}
+spotify = spotipy.Spotify(auth_manager=spotipy.SpotifyClientCredentials(client_id=bot_info.data['spotify_client_id'], client_secret=bot_info.data['spotify_client_secret']))
 
 class Audio(commands.Cog):
     def __init__(self, bot):
@@ -50,6 +53,14 @@ class Audio(commands.Cog):
 
     async def play_audio(self, ctx: commands.Context, url: str, filters=None):
         async with ctx.typing():
+            if 'spotify.com' in url:
+                track = spotify.track(url)
+                query = f"{track['name']} {track['artists'][0]['name']}"
+                with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+                    results = ydl.extract_info(f"ytsearch:{query}", download=False)['entries']
+                    if results:
+                        url = results[0]['webpage_url']
+            
             with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
                 info = ydl.extract_info(url, download=True)
                 file_path = ydl.prepare_filename(info)
@@ -58,7 +69,6 @@ class Audio(commands.Cog):
                 await self.connect_to_channel(ctx)
         
             voice_client = ctx.voice_client
-
             if voice_client:
                 ffmpeg_options = {
                     'options': '-vn'
@@ -75,21 +85,21 @@ class Audio(commands.Cog):
                     'queue_snapshot': list(self.get_queue(ctx.guild.id))
                 }
                 embed = discord.Embed(
-                    title=f"Playing - {info['title'] if info['title'] else 'Unknown'}",
-                    description=f"URL: {info['webpage_url'] if info['webpage_url'] else 'Unknown'}",
+                    title=f"Playing - {info['title'] or 'Unknown'}",
+                    description=f"URL: {info['webpage_url'] or 'Unknown'}",
                     color=discord.Color.og_blurple(),
                     timestamp=discord.utils.utcnow()
                 )
                 raw_date = info.get('upload_date')
                 upload_date = datetime.strptime(raw_date, '%Y%m%d').strftime('%B %d, %Y') if raw_date else "Unknown"
-                embed.add_field(name="Length", value=info['duration_string'] if info['duration_string'] else "Unknown", inline=True)
-                embed.add_field(name="Author", value=info['uploader'] if info['uploader'] else "Unknown", inline=True)
-                embed.add_field(name="Channel", value=info['uploader_url'] if info['uploader_url'] else "Unknown", inline=True)
-                embed.add_field(name="Views", value=f"{info['view_count']:,}" if info['view_count'] else "Unknown", inline=True)
-                embed.add_field(name="Likes", value=f"{info['like_count']:,}" if info['like_count'] else "Unknown", inline=True)
+                embed.add_field(name="Length", value=info.get('duration_string', 'Unknown'), inline=True)
+                embed.add_field(name="Author", value=info.get('uploader', 'Unknown'), inline=True)
+                embed.add_field(name="Channel", value=info.get('uploader_url', 'Unknown'), inline=True)
+                embed.add_field(name="Views", value=f"{info.get('view_count', 'Unknown'):,}", inline=True)
+                embed.add_field(name="Likes", value=f"{info.get('like_count', 'Unknown'):,}", inline=True)
                 embed.add_field(name="Filters", value=", ".join(filters) if filters else "None", inline=True)
                 embed.add_field(name="Published At", value=upload_date, inline=True)
-                embed.set_image(url=info.get('thumbnail', None))
+                embed.set_image(url=info.get('thumbnail'))
                 embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
                 await ctx.send(embed=embed)
     
