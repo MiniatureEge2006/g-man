@@ -66,15 +66,7 @@ async def check_access(ctx: commands.Context):
     user_id = ctx.author.id
     channel_id = ctx.channel.id
     guild_id = ctx.guild.id if ctx.guild else None
-    if is_admin or str(user_id) in bot_info.data['owners']:
-        return
     async with bot.db.acquire() as conn:
-        allowlist_active = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM allowlist)")
-        if allowlist_active:
-            is_allowed = await conn.fetchval("SELECT 1 FROM allowlist WHERE (type = 'user' AND entity_id = $1) OR (type = 'channel' AND entity_id = $2) OR (type = 'role' AND entity_id = ANY($3))", user_id, channel_id, roles)
-            if not is_allowed:
-                await ctx.send("Command blocked. Either you, one of your roles, or this channel is not part of the allowlist.")
-                raise commands.CheckFailure("User/Channel/Role is not allowed.")
         global_blocked = await conn.fetchval("SELECT reason FROM global_blocked_users WHERE discord_id = $1", user_id)
         if global_blocked:
             await ctx.send(f"You are globally blocked from using G-Man. Reason: `{global_blocked}`")
@@ -84,9 +76,18 @@ async def check_access(ctx: commands.Context):
             if server_blocked:
                 await ctx.send(f"This server is globally blocked from using G-Man. Reason: `{server_blocked}`")
                 raise commands.CheckFailure("Server is globally blocked.")
-        allowed = await conn.fetchval("SELECT 1 FROM allowlist WHERE (type = 'user' AND entity_id = $1) OR (type = 'channel' AND entity_id = $2) OR (type = 'role' AND entity_id = ANY($3))", user_id, channel_id, roles)
-        if allowed:
+        if str(user_id) in bot_info.data['owners']:
             return
+        if is_admin:
+            return
+        allowlist_active = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM allowlist)")
+        if allowlist_active:
+            is_allowed = await conn.fetchval("SELECT 1 FROM allowlist WHERE (type = 'user' AND entity_id = $1) OR (type = 'channel' AND entity_id = $2) OR (type = 'role' AND entity_id = ANY($3))", user_id, channel_id, roles)
+            if not is_allowed:
+                await ctx.send("Command blocked. Either you, one of your roles, or this channel is not part of the allowlist.")
+                raise commands.CheckFailure("User/Channel/Role is not allowed.")
+            if is_allowed:
+                return
         blocked = await conn.fetchval("SELECT reason FROM blocklist WHERE (type = 'user' AND entity_id = $1) OR (type = 'channel' AND entity_id = $2) OR (type = 'role' AND entity_id = ANY($3))", user_id, channel_id, roles)
         if blocked:
             await ctx.send(f"Command blocked. Either you, one of your roles, or this channel is part of the blocklist. Reason: `{blocked}`")
@@ -175,6 +176,8 @@ async def on_command_error(ctx, error):
     command_name = ctx.command.qualified_name if ctx.command else "Unknown"
     command_content = ctx.message.content
     logger.error(f"\n--- Command Error Log ---\nTimestamp: {timestamp}\nUser: {user}\nGuild: {guild}\nChannel: {channel}\nCommand: {command_name}\nCommand Content: {command_content}\nError: {error}\n--- End Command Error Log ---")
+    if isinstance(error, commands.CheckFailure):
+        return
     if isinstance(error, commands.CommandNotFound):
         logger.warning(f"Command not found: {ctx.message.content}")
         return
@@ -188,14 +191,7 @@ async def on_command_error(ctx, error):
         return
     if isinstance(error, commands.MissingPermissions):
         logger.warning(f"Missing permissions for command {ctx.command.qualified_name}: {ctx.message.content} ({error})")
-        await ctx.send(f"{ctx.command.qualified_name} requires the following permissions: {', '.join(error.missing_permissions)}")
-        return
-    if str(ctx.author.id) not in bot_info.data['owners']:
-        logger.warning(f"{ctx.author.name} is not a bot owner: {ctx.message.content}")
-        await ctx.send("You are not a bot owner.")
-        return
-    if isinstance(error, commands.CheckFailure):
-        logger.warning(f"Check failed for command {ctx.command.qualified_name}: {ctx.message.content} ({error})")
+        await ctx.send(f"`{ctx.command.qualified_name}` requires the following permissions: `{', '.join(error.missing_permissions).capitalize()}`")
         return
     else:
         logger.critical(f"An unexpected error occurred: {error}")
