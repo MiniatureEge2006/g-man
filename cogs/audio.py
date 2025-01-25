@@ -7,13 +7,14 @@ import asyncio
 from collections import deque
 from datetime import datetime
 
-YDL_OPTIONS = {'format': 'bestaudio/best', 'noplaylist': True, 'outtmpl': 'vids/%(extractor)s-%(id)s-%(title)s.%(ext)s', 'restrictfilenames': True}
+YDL_OPTIONS = {'format': 'bestaudio/best', 'noplaylist': True, 'outtmpl': 'vids/%(extractor)s-%(id)s-%(title)s.%(ext)s', 'restrictfilenames': True, 'sleep_interval': 5}
 
 class Audio(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.queues = {}
         self.currently_playing = {}
+        self.loop_mode = {}
     
     def get_queue(self, guild_id):
         if guild_id not in self.queues:
@@ -30,10 +31,22 @@ class Audio(commands.Cog):
             return
     
     async def play_next(self, ctx: commands.Context):
-        queue = self.get_queue(ctx.guild.id)
+        guild_id = ctx.guild.id
+        queue = self.get_queue(guild_id)
+        if self.loop_mode.get(guild_id) == "single":
+            current = self.currently_playing.get(guild_id)
+            if current:
+                await self.play_audio(ctx, current['url'], current['filters'])
+            return
         if queue:
             url, filters = queue.popleft()
             await self.play_audio(ctx, url, filters)
+        elif self.loop_mode.get(guild_id) == "queue":
+            for item in self.currently_playing.get(guild_id, {}).get("queue_snapshot", []):
+                queue.append(item)
+            if queue:
+                url, filters = queue.popleft()
+                await self.play_audio(ctx, url, filters)
 
     async def play_audio(self, ctx: commands.Context, url: str, filters=None):
         async with ctx.typing():
@@ -57,7 +70,9 @@ class Audio(commands.Cog):
                 voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.cleanup_file_and_play_next(ctx, file_path), self.bot.loop))
                 self.currently_playing[ctx.guild.id] = {
                     'info': info,
-                    'filters': filters
+                    'url': url,
+                    'filters': filters,
+                    'queue_snapshot': list(self.get_queue(ctx.guild.id))
                 }
                 embed = discord.Embed(
                     title=f"Playing - {info['title'] if info['title'] else 'Unknown'}",
@@ -109,8 +124,7 @@ class Audio(commands.Cog):
             await ctx.send("I am not connected to a voice channel.")
     
     @commands.hybrid_command(name="play", description="Play an audio/song from a given URL. Any URL that yt-dlp supports also works.", aliases=["p"])
-    @app_commands.describe(url="The URL of the audio/song to play.")
-    @app_commands.describe(filters="A comma-separated list of filters to apply to the audio.")
+    @app_commands.describe(url="The URL of the audio/song to play.", filters="A comma-separated list of filters to apply to the audio.")
     @app_commands.allowed_installs(guilds=True, users=False)
     async def play(self, ctx: commands.Context, url: str, *, filters: str = None):
         if ctx.interaction:
@@ -124,6 +138,52 @@ class Audio(commands.Cog):
         else:
             await self.play_audio(ctx, url, filters=filters_list)
     
+    @commands.hybrid_command(name="repeat", description="Repeat the currently playing audio/song or the queue.")
+    @app_commands.describe(mode="The mode to repeat. Can be 'single', 'queue', or 'none'.")
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def repeat(self, ctx: commands.Context, mode: str):
+        if ctx.interaction:
+            await ctx.defer()
+        else:
+            await ctx.typing()
+        if mode.lower() not in ["single", "queue", "none"]:
+            await ctx.send("Invalid mode. Valid modes are 'single', 'queue', or 'none'.")
+            return
+        self.loop_mode[ctx.guild.id] = mode.lower()
+        await ctx.send(f"Loop mode set to {mode.lower()}.")
+    
+    @commands.hybrid_command(name="search", description="Search for an audio/song.")
+    @app_commands.describe(query="The query to search for.")
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def search(self, ctx: commands.Context, *, query: str):
+        if ctx.interaction:
+            await ctx.defer()
+        async with ctx.typing():
+            with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+                try:
+                    results = ydl.extract_info(f"ytsearch5:{query}", download=False)['entries']
+                except Exception as e:
+                    await ctx.send(f"Error searching for {query}: {e}")
+                    return
+            embed = discord.Embed(
+                title="Search Results",
+                description="Select a song by typing its number.",
+                color=discord.Color.og_blurple(),
+                timestamp=discord.utils.utcnow()
+            )
+            for i, result in enumerate(results):
+                embed.add_field(name=f"{i+1}. {result['title']}", value=result['webpage_url'], inline=False)
+            await ctx.send(embed=embed)
+        def check(m):
+            return m.author == ctx.author and m.content.isdigit() and 1 <= int(m.content) <= len(results)
+        try:
+            msg = await self.bot.wait_for("message", check=check, timeout=30)
+            selection = int(msg.content) - 1
+            selected_url = results[selection]['webpage_url']
+            await self.play(ctx, selected_url)
+        except asyncio.TimeoutError:
+            await ctx.send("Took longer than 30 seconds to select a song. Aborting search.")
+
     @commands.hybrid_command(name="queue", description="Display the current queue.")
     @app_commands.allowed_installs(guilds=True, users=False)
     async def queue(self, ctx: commands.Context):
