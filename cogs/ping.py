@@ -41,7 +41,7 @@ class Ping(commands.Cog):
             value=f"{memory_usage} MB / {memory_total} MB",
             inline=True
         )
-        embed.set_author(name=ctx.author, icon_url=ctx.author.display_avatar.url)
+        embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", url=f"https://discord.com/users/{ctx.author.id}", icon_url=ctx.author.display_avatar.url)
         embed.timestamp = discord.utils.utcnow()
 
         await message.edit(content=None, embed=embed)

@@ -189,7 +189,7 @@ class Info(commands.Cog):
             h = fmod(h * 60, 360)
         return round(h), round(s * 100), round(v * 100), round(a * 100)
 
-    @commands.command(name="userinfo", aliases=["user", "member", "memberinfo"], description="Displays information about a user.")
+    @commands.command(name="userinfo", aliases=["user", "member", "memberinfo"], description="Displays information about a user. Defaults to the author.")
     async def userinfo(self, ctx: commands.Context, member: discord.Member = None):
         member = member or ctx.author
         roles = [role.mention for role in member.roles if role != ctx.guild.default_role]
@@ -201,15 +201,49 @@ class Info(commands.Cog):
         embed.set_thumbnail(url=member.display_avatar.url if member.avatar else member.default_avatar)
         embed.add_field(name="ID", value=member.id, inline=True)
         embed.add_field(name="Name", value=str(member), inline=True)
-        embed.add_field(name="Created At", value=member.created_at.strftime("%Y-%m-%d %H:%M:%S"), inline=True)
+        embed.add_field(name="Bot?", value=member.bot, inline=True)
+        embed.add_field(name="Display Name", value=member.display_name, inline=True)
+        embed.add_field(name="Nickname", value=member.nick if member.nick else "None", inline=True)
+        embed.add_field(name="Joined Discord", value=member.created_at.strftime("%Y-%m-%d %H:%M:%S"), inline=True)
         embed.add_field(name="Joined Server", value=member.joined_at.strftime("%Y-%m-%d %H:%M:%S"), inline=True)
+        embed.add_field(name="Status", value=str(member.status).capitalize(), inline=True)
+        if member.activity:
+            activity_attributes = {
+                'name': 'Activity',
+                'type': 'Activity Type',
+                'details': 'Details',
+                'state': 'State',
+                'large_image_text': 'Large Image Text',
+                'small_image_text': 'Small Image Text',
+                'large_image_url': 'Large Image URL',
+                'small_image_url': 'Small Image URL',
+                'start': 'Start Time',
+                'end': 'End Time',
+            }
+            for attribute, field_name in activity_attributes.items():
+                if hasattr(member.activity, attribute):
+                    value = getattr(member.activity, attribute)
+                    if attribute == "type":
+                        value = value.name
+                    elif attribute in ["large_image_url", "small_image_url"]:
+                        value = f"[Link]({value})"
+                    elif attribute in ["start", "end"]:
+                        value = datetime.strftime(value, "%Y-%m-%d %H:%M:%S") if value else "None"
+                    embed.add_field(name=field_name, value=value, inline=True)
+        if member.voice:
+            embed.add_field(name="Voice Channel", value=member.voice.channel.mention if member.voice.channel else "None", inline=True)
         embed.add_field(name="Roles", value=", ".join(roles) if roles else "None", inline=False)
+        embed.add_field(name="Top Role", value=member.top_role.mention, inline=True)
+        embed.set_author(name=f"{member.name}#{member.discriminator}", icon_url=member.display_avatar.url, url=f"https://discord.com/users/{member.id}")
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
     
-    @commands.command(name="serverinfo", aliases=["server", "guild", "guildinfo"], description="Displays information about the server.")
-    async def serverinfo(self, ctx: commands.Context):
-        guild = ctx.guild
+    @commands.command(name="serverinfo", aliases=["server", "guild", "guildinfo"], description="Displays information about a server. Defaults to the current server.")
+    async def serverinfo(self, ctx: commands.Context, *, guild: discord.Guild = None):
+        if guild is None:
+            guild = ctx.guild
+        else:
+            guild = discord.utils.get(self.bot.guilds, id=guild.id)
         embed = discord.Embed(
             title=f"Server Info - {guild.name}",
             color=discord.Color.blue(),
@@ -218,16 +252,27 @@ class Info(commands.Cog):
         embed.set_thumbnail(url=guild.icon.url if guild.icon else "")
         embed.add_field(name="ID", value=guild.id, inline=True)
         embed.add_field(name="Owner", value=guild.owner.mention if guild.owner else "Unknown", inline=True)
+        embed.add_field(name="Owner ID", value=guild.owner_id, inline=True)
+        embed.add_field(name="Description", value=guild.description, inline=False)
+        embed.add_field(name="Verification Level", value=str(guild.verification_level).capitalize(), inline=True)
+        embed.add_field(name="NSFW Level", value=f"{guild.nsfw_level.name} ({guild.nsfw_level.value})", inline=True)
         embed.add_field(name="Created At", value=guild.created_at.strftime("%Y-%m-%d %H:%M:%S"), inline=True)
         embed.add_field(name="Members", value=f"{guild.member_count} members", inline=True)
         embed.add_field(name="Channels", value=f"{len(guild.channels)} total", inline=True)
+        embed.add_field(name="Text Channels", value=f"{len(guild.text_channels)} text", inline=True)
+        embed.add_field(name="Voice Channels", value=f"{len(guild.voice_channels)} voice", inline=True)
+        embed.add_field(name="Categories", value=f"{len(guild.categories)} categories", inline=True)
+        embed.add_field(name="Emojis", value=f"{len(guild.emojis)} emojis", inline=True)
+        embed.add_field(name="Stickers", value=f"{len(guild.stickers)} stickers", inline=True)
         embed.add_field(name="Roles", value=f"{len(guild.roles)} roles", inline=True)
+        embed.add_field(name="Boost Tier", value=guild.premium_tier, inline=True)
         embed.add_field(name="Boosts", value=f"{guild.premium_subscription_count} boosts", inline=True)
+        embed.set_author(name=guild.name, icon_url=guild.icon.url if guild.icon else None, url=f"https://discord.com/channels/{guild.id}")
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
     
-    @commands.command(name="channelinfo", aliases=["channel"], description="Displays information about a text channel.")
-    async def channelinfo(self, ctx: commands.Context, channel: discord.TextChannel = None):
+    @commands.command(name="channelinfo", aliases=["channel"], description="Displays information about a text channel. Defaults to the current channel.")
+    async def channelinfo(self, ctx: commands.Context, *, channel: discord.TextChannel = None):
         channel = channel or ctx.channel
         embed = discord.Embed(
             title=f"Channel Info - {channel.name}",
@@ -239,13 +284,26 @@ class Info(commands.Cog):
         embed.add_field(name="Type", value=str(channel.type).capitalize(), inline=True)
         embed.add_field(name="Category", value=channel.category.name if channel.category else "None", inline=True)
         embed.add_field(name="Topic", value=channel.topic if channel.topic else "No topic", inline=False)
+        embed.add_field(name="Slowmode Delay", value=f"{channel.slowmode_delay} seconds" if channel.slowmode_delay else "None", inline=True)
+        embed.add_field(name="NSFW?", value=channel.is_nsfw(), inline=True)
+        embed.add_field(name="Permissions Synced?", value=channel.permissions_synced, inline=True)
+        embed.add_field(name="Position", value=channel.position, inline=True)
+        embed.add_field(name="Members", value=len(channel.members), inline=False)
+        embed.add_field(name="Last Message ID", value=channel.last_message_id, inline=True)
+        embed.add_field(name="Last Message Timestamp", value=channel.last_message.created_at.strftime("%Y-%m-%d %H:%M:%S") if channel.last_message else "None", inline=True)
         embed.add_field(name="Created At", value=channel.created_at.strftime("%Y-%m-%d %H:%M:%S"), inline=True)
+        embed.set_author(name=channel.name, icon_url=channel.guild.icon.url if channel.guild.icon else None, url=f"https://discord.com/channels/{channel.guild.id}/{channel.id}")
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
 
-    @commands.command(name="voiceinfo", description="Displays information about a voice channel.")
-    async def voiceinfo(self, ctx: commands.Context, channel: discord.VoiceChannel = None):
-        channel = channel or ctx.author.voice.channel
+    @commands.command(name="voiceinfo", aliases=["vc", "vcinfo", "voice"], description="Displays information about a voice channel. Defaults to the current voice channel the author is in.")
+    async def voiceinfo(self, ctx: commands.Context, *, channel: discord.VoiceChannel = None):
+        if channel is None:
+            if ctx.author.voice and ctx.author.voice.channel:
+                channel = ctx.author.voice.channel
+            else:
+                await ctx.send("You are not in a voice channel. Please specify a voice channel instead.")
+                return
         embed = discord.Embed(
             title=f"Voice Channel Info - {channel.name}",
             color=discord.Color.green(),
@@ -256,12 +314,20 @@ class Info(commands.Cog):
         embed.add_field(name="Category", value=channel.category.name if channel.category else "None", inline=True)
         embed.add_field(name="Bitrate", value=f"{channel.bitrate // 1000} kbps", inline=True)
         embed.add_field(name="User Limit", value=channel.user_limit or "Unlimited", inline=True)
+        embed.add_field(name="Region", value=channel.rtc_region, inline=True)
+        embed.add_field(name="NSFW?", value=channel.is_nsfw(), inline=True)
         embed.add_field(name="Connected Members", value=", ".join([member.mention for member in channel.members]) or "None", inline=False)
+        embed.add_field(name="Created At", value=channel.created_at.strftime("%Y-%m-%d %H:%M:%S"), inline=True)
+        embed.add_field(name="Permissions Synced?", value=channel.permissions_synced, inline=True)
+        embed.add_field(name="Position", value=channel.position, inline=True)
+        embed.add_field(name="Last Message ID", value=channel.last_message_id if channel.last_message else "None", inline=True)
+        embed.add_field(name="Last Message Timestamp", value=channel.last_message.created_at.strftime("%Y-%m-%d %H:%M:%S") if channel.last_message else "None", inline=True)
+        embed.set_author(name=channel.name, icon_url=channel.members[0].display_avatar.url if channel.members else None, url=f"https://discord.com/users/{channel.members[0].id}" if channel.members else None)
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
     
     @commands.command(name="threadinfo", aliases=["thread"], description="Displays information about a text channel's thread.")
-    async def threadinfo(self, ctx: commands.Context, thread: discord.Thread):
+    async def threadinfo(self, ctx: commands.Context, *, thread: discord.Thread):
         embed = discord.Embed(
             title=f"Thread Info - {thread.name}",
             color=discord.Color.purple(),
@@ -271,11 +337,14 @@ class Info(commands.Cog):
         embed.add_field(name="Owner", value=thread.owner.mention if thread.owner else "Unknown", inline=True)
         embed.add_field(name="Participants", value=", ".join([member.mention for member in thread.members]) or "None", inline=False)
         embed.add_field(name="Message Count", value=thread.message_count, inline=True)
+        embed.add_field(name="Created At", value=thread.created_at.strftime("%Y-%m-%d %H:%M:%S"), inline=True)
+        embed.add_field(name="Archived", value=thread.archived, inline=True)
+        embed.set_author(name=thread.name, icon_url=thread.owner.display_avatar.url, url=f"https://discord.com/users/{thread.owner.id}")
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
     
-    @commands.command(name="messageinfo", description="Displays information about a message.")
-    async def messageinfo(self, ctx: commands.Context, message: discord.Message):
+    @commands.command(name="messageinfo", aliases=["msg", "message", "msginfo"], description="Displays information about a message.")
+    async def messageinfo(self, ctx: commands.Context, *, message: discord.Message):
         embed = discord.Embed(
             title=f"Message Info - {message.id}",
             color=discord.Color.gold(),
@@ -286,11 +355,17 @@ class Info(commands.Cog):
         embed.add_field(name="Channel", value=message.channel.mention, inline=True)
         embed.add_field(name="Content", value=message.content or "None", inline=False)
         embed.add_field(name="Created At", value=message.created_at.strftime("%Y-%m-%d %H:%M:%S"), inline=True)
+        embed.add_field(name="Edited At", value=message.edited_at.strftime("%Y-%m-%d %H:%M:%S") if message.edited_at else "None", inline=True)
+        embed.add_field(name="Attachments", value=", ".join([attachment.url for attachment in message.attachments]) or "None", inline=False)
+        embed.add_field(name="Embeds", value=", ".join([embed.title for embed in message.embeds]) or "None", inline=False)
+        embed.add_field(name="Reactions", value=", ".join([reaction.emoji for reaction in message.reactions]) or "None", inline=False)
+        embed.add_field(name="Mentions", value=", ".join([mention.mention for mention in message.mentions]) or "None", inline=False)
+        embed.set_author(name=message.author.name, icon_url=message.author.display_avatar.url, url=f"https://discord.com/users/{message.author.id}")
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
     
     @commands.command(name="emojiinfo", aliases=["emoji"], description="Displays information about an emoji.")
-    async def emojiinfo(self, ctx: commands.Context, emoji: discord.Emoji):
+    async def emojiinfo(self, ctx: commands.Context, *, emoji: discord.Emoji):
         embed = discord.Embed(
             title=f"Emoji Info - {emoji.name}",
             color=discord.Color.dark_orange(),
@@ -301,11 +376,12 @@ class Info(commands.Cog):
         embed.add_field(name="Created At", value=emoji.created_at.strftime("%Y-%m-%d %H:%M:%S"), inline=True)
         embed.add_field(name="Guild", value=emoji.guild.name if emoji.guild else "None", inline=False)
         embed.set_thumbnail(url=emoji.url)
+        embed.set_author(name=emoji.name, url=emoji.url, icon_url=emoji.url)
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
     
     @commands.command(name="stickerinfo", aliases=["sticker"], description="Displays information about a sticker.")
-    async def stickerinfo(self, ctx: commands.Context, sticker: discord.GuildSticker):
+    async def stickerinfo(self, ctx: commands.Context, *, sticker: discord.GuildSticker):
         embed = discord.Embed(
             title=f"Sticker Info - {sticker.name}",
             color=discord.Color.dark_green(),
@@ -319,12 +395,13 @@ class Info(commands.Cog):
             embed.add_field(name="Description", value=sticker.description, inline=False)
 
         embed.set_image(url=sticker.url)
+        embed.set_author(name=sticker.name, url=sticker.url, icon_url=sticker.url)
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
 
         await ctx.send(embed=embed)
     
     @commands.command(name="inviteinfo", description="Displays information about an invite code.")
-    async def inviteinfo(self, ctx: commands.Context, invite: discord.Invite):
+    async def inviteinfo(self, ctx: commands.Context, *, invite: discord.Invite):
         embed = discord.Embed(
             title=f"Invite Info - {invite.code}",
             color=discord.Color.dark_purple(),
@@ -334,10 +411,12 @@ class Info(commands.Cog):
         embed.add_field(name="Channel", value=invite.channel.name, inline=True)
         embed.add_field(name="Uses", value=f"{invite.uses}/{invite.max_uses}" if invite.max_uses else "Unlimited", inline=True)
         embed.add_field(name="Expires At", value=invite.expires_at.strftime("%Y-%m-%d %H:%M:%S") if invite.expires_at else "Never", inline=True)
+        embed.add_field(name="Created At", value=invite.created_at.strftime("%Y-%m-%d %H:%M:%S"), inline=True)
+        embed.set_author(name=invite.code, url=invite.url, icon_url=invite.guild.icon.url if invite.guild.icon else None)
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
     
-    @commands.command(name="permissions", aliases=["perms"], description="Displays a user's permissions in a channel.")
+    @commands.command(name="permissions", aliases=["perms"], description="Displays a user's permissions in a channel. Defaults to the current channel and author.")
     async def permissions(self, ctx: commands.Context, member: discord.Member = None, channel: discord.TextChannel = None):
         member = member or ctx.author
         channel = channel or ctx.channel
@@ -349,28 +428,36 @@ class Info(commands.Cog):
             timestamp=discord.utils.utcnow()
         )
         embed.add_field(name="Permissions", value=", ".join(permissions) or "None", inline=False)
+        embed.set_author(name=f"{member.name}#{member.discriminator}", icon_url=member.display_avatar.url, url=f"https://discord.com/users/{member.id}")
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
     
-    @commands.command(name="roleinfo", aliases=["role"], description="Displays information about a role.")
-    async def roleinfo(self, ctx: commands.Context, role: discord.Role):
+    @commands.command(name="roleinfo", aliases=["role"], description="Displays information about a role. Defaults to the everyone role.")
+    async def roleinfo(self, ctx: commands.Context, *, role: discord.Role = None):
+        role = role or ctx.guild.default_role
         embed = discord.Embed(
             title=f"Role Info - {role.name}",
             color=role.color,
             timestamp=discord.utils.utcnow()
         )
+        role_color = role.color.to_rgb()
+        role_color_image = Image.new("RGB", (512, 512), role_color)
+        buffer = io.BytesIO()
+        role_color_image.save(buffer, "PNG")
+        buffer.seek(0)
         embed.add_field(name="ID", value=role.id, inline=True)
         embed.add_field(name="Name", value=role.name, inline=True)
         embed.add_field(name="Color", value=str(role.color), inline=True)
         embed.add_field(name="Mentionable", value="Yes" if role.mentionable else "No", inline=True)
         embed.add_field(name="Created At", value=role.created_at.strftime("%Y-%m-%d %H:%M:%S"), inline=True)
         embed.add_field(name="Permissions", value=", ".join(perm[0].replace('_', ' ').title() for perm in role.permissions if perm[1]) or "None", inline=False)
+        embed.set_author(name=role.name, icon_url="attachment://role_color.png")
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, file=discord.File(buffer, "role_color.png"))
 
     @commands.command(name="baninfo", description="Displays information about a banned user.")
     @commands.has_permissions(ban_members=True)
-    async def baninfo(self, ctx: commands.Context, user: discord.User):
+    async def baninfo(self, ctx: commands.Context, *, user: discord.User):
         ban_entry = await ctx.guild.fetch_ban(user)
         embed = discord.Embed(
             title=f"Ban Info - {user}",
@@ -378,6 +465,7 @@ class Info(commands.Cog):
             timestamp=discord.utils.utcnow()
         )
         embed.add_field(name="Reason", value=ban_entry.reason or "None", inline=False)
+        embed.set_author(name=f"{user.name}#{user.discriminator}", icon_url=user.avatar.url, url=f"https://discord.com/users/{user.id}")
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
     
@@ -397,6 +485,7 @@ class Info(commands.Cog):
         embed.add_field(name="Developers", value="[nkrasn](https://github.com/nkrasn 'Original Developer.'), [MiniatureEge2006](https://github.com/MiniatureEge2006 'Current Developer.')", inline=True)
         embed.add_field(name="Source Code", value="https://github.com/MiniatureEge2006/g_man-revived", inline=True)
         embed.set_thumbnail(url=self.bot.user.avatar.url)
+        embed.set_author(name=f"{self.bot.user.name}#{self.bot.user.discriminator}", icon_url=self.bot.user.avatar.url, url=f"https://discord.com/users/{self.bot.user.id}")
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
     
@@ -447,7 +536,8 @@ class Info(commands.Cog):
                     embed.add_field(name="Visibility", value=f"{visibility} km", inline=True)
                     embed.add_field(name="Coordinates", value=f"{coordinates_lat}, {coordinates_lon}", inline=True)
                     embed.set_thumbnail(url=icon_url)
-                    embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
+                    embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
+                    embed.set_footer(text="OpenWeatherMap API", icon_url="https://openweathermap.org/themes/openweathermap/assets/img/mobile_app/android-app-top-banner.png")
                     await ctx.send(embed=embed)
                 else:
                     await ctx.send("Could not find weather data for the specified location.")
@@ -537,7 +627,8 @@ class Info(commands.Cog):
             embed.add_field(name="HSL/A", value=f"{hsl[0]}°, {hsl[1]}%, {hsl[2]}%, {hsl[3]}%", inline=True)
             embed.add_field(name="HSV/A", value=f"{hsv[0]}°, {hsv[1]}%, {hsv[2]}%, {hsv[3]}%", inline=True)
             embed.set_thumbnail(url="attachment://color.png")
-            embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
+            embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
+            embed.set_footer(text=f"Color with HEX {hex_color}", icon_url="attachment://color.png")
             await ctx.send(embed=embed, file=discord.File(buffer, "color.png"))
         except Exception as e:
             await ctx.send(f"Invalid color format. Please provide a valid color name or color code (HEX, RGB/A, HSL/A, HSV/A or CMYK).\nError: {e}")
@@ -570,7 +661,8 @@ class Info(commands.Cog):
             embed.add_field(name="Colors", value="\n".join(colors), inline=True)
             embed.add_field(name="Positions", value="\n".join(f"{pos}%" for pos in positions), inline=True)
             embed.set_image(url="attachment://gradient.png")
-            embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
+            embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
+            embed.set_footer(text=f"Gradient with {len(colors)} colors", icon_url="attachment://gradient.png")
             await ctx.send(embed=embed, file=discord.File(buffer, "gradient.png"))
         except Exception as e:
             await ctx.send(f"Invalid color format. Please provide a valid HEX/A color code.\nError: {e}")
