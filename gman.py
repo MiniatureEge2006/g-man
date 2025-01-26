@@ -28,7 +28,7 @@ for f in vid_files:
     os.remove(f'vids/{f}')
 
 
-extensions = ['cogs.audio', 'cogs.help', 'cogs.ping', 'cogs.bitrate', 'cogs.filter', 'cogs.fun', 'cogs.corruption', 'cogs.bookmarks', 'cogs.utility', 'cogs.caption', 'cogs.exif', 'cogs.ffmpeg', 'cogs.imagemagick', 'cogs.ytdlp', 'cogs.info']
+extensions = ['cogs.audio', 'cogs.help', 'cogs.ping', 'cogs.bitrate', 'cogs.filter', 'cogs.fun', 'cogs.corruption', 'cogs.bookmarks', 'cogs.utility', 'cogs.caption', 'cogs.exif', 'cogs.ffmpeg', 'cogs.imagemagick', 'cogs.ytdlp', 'cogs.youtube', 'cogs.info']
 bot = commands.Bot(command_prefix=commands.when_mentioned_or('!'), status=discord.Status.online, activity=discord.Game(name="!help"), help_command=None, intents=discord.Intents.all())
 
 
@@ -194,7 +194,7 @@ async def on_command_error(ctx, error):
         await ctx.send(f"`{ctx.command.qualified_name}` requires the following permissions: `{', '.join(error.missing_permissions).capitalize()}`")
         return
     else:
-        logger.critical(f"An unexpected error occurred: {error}")
+        logger.critical(f"An unexpected error occurred: {traceback.format_exception(type(error), error, error.__traceback__)}")
     
     await ctx.send(f"An error occurred while processing your command. ```\n{error}```")
     

@@ -16,6 +16,7 @@ psutil
 colorlog
 asyncpg
 spotipy
+isodate
 future==0.18.2
 idna==3.3
 multidict==5.2.0
