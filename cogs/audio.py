@@ -159,38 +159,6 @@ class Audio(commands.Cog):
         self.loop_mode[ctx.guild.id] = mode.lower()
         await ctx.send(f"Loop mode set to {mode.lower()}.")
     
-    @commands.hybrid_command(name="search", description="Search for an audio/song.")
-    @app_commands.describe(query="The query to search for.")
-    @app_commands.allowed_installs(guilds=True, users=False)
-    async def search(self, ctx: commands.Context, *, query: str):
-        if ctx.interaction:
-            await ctx.defer()
-        else:
-            await ctx.typing()
-        with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-            try:
-                results = ydl.extract_info(f"ytsearch5:{query}", download=False)['entries']
-            except Exception as e:
-                await ctx.send(f"Error searching for {query}: {e}")
-                return
-        embed = discord.Embed(
-            title="Search Results",
-            description="Select a song by typing its number.",
-            color=discord.Color.og_blurple(),
-            timestamp=discord.utils.utcnow()
-        )
-        for i, result in enumerate(results):
-            embed.add_field(name=f"{i+1}. {result['title']}", value=result['webpage_url'], inline=False)
-        await ctx.send(embed=embed)
-        def check(m):
-            return m.author == ctx.author and m.content.isdigit() and 1 <= int(m.content) <= len(results)
-        try:
-            msg = await self.bot.wait_for("message", check=check, timeout=30)
-            selection = int(msg.content) - 1
-            selected_url = results[selection]['webpage_url']
-            await self.play(ctx, selected_url)
-        except asyncio.TimeoutError:
-            await ctx.send("Took longer than 30 seconds to select a song. Aborting search.")
 
     @commands.hybrid_command(name="queue", description="Display the current queue.")
     @app_commands.allowed_installs(guilds=True, users=False)
