@@ -190,50 +190,72 @@ class Info(commands.Cog):
         return round(h), round(s * 100), round(v * 100), round(a * 100)
 
     @commands.command(name="userinfo", aliases=["user", "member", "memberinfo"], description="Displays information about a user. Defaults to the author.")
-    async def userinfo(self, ctx: commands.Context, *, member: discord.Member = None):
+    async def userinfo(self, ctx: commands.Context, *, member = None):
         member = member or ctx.author
-        roles = [role.mention for role in member.roles if role != ctx.guild.default_role]
+
+        if not isinstance(member, (discord.Member, discord.User)):
+            try:
+                member = await commands.MemberConverter().convert(ctx, member)
+            except commands.BadArgument:
+                try:
+                    member = await commands.UserConverter().convert(ctx, member)
+                except commands.BadArgument:
+                    await ctx.send("Could not find user. Please use an user ID instead.")
+                    return
         embed = discord.Embed(
-            title=f"User Info - {member}",
-            color=member.color,
+            title=f"User Info - {member.name}",
+            color=getattr(member, "color", discord.Color.default()),
             timestamp=discord.utils.utcnow()
         )
         embed.set_thumbnail(url=member.display_avatar.url if member.avatar else member.default_avatar)
         embed.add_field(name="ID", value=member.id, inline=True)
-        embed.add_field(name="Name", value=str(member), inline=True)
+        embed.add_field(name="Name", value=member.name, inline=True)
         embed.add_field(name="Bot?", value=member.bot, inline=True)
-        embed.add_field(name="Display Name", value=member.display_name, inline=True)
-        embed.add_field(name="Nickname", value=member.nick if member.nick else "None", inline=True)
-        embed.add_field(name="Joined Discord", value=member.created_at.strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)"), inline=True)
-        embed.add_field(name="Joined Server", value=member.joined_at.strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)"), inline=True)
-        embed.add_field(name="Status", value=str(member.status).capitalize(), inline=True)
-        if member.activity:
-            activity_attributes = {
-                'name': 'Activity',
-                'type': 'Activity Type',
-                'details': 'Details',
-                'state': 'State',
-                'large_image_text': 'Large Image Text',
-                'small_image_text': 'Small Image Text',
-                'large_image_url': 'Large Image URL',
-                'small_image_url': 'Small Image URL',
-                'start': 'Start Time',
-                'end': 'End Time',
-            }
-            for attribute, field_name in activity_attributes.items():
-                if hasattr(member.activity, attribute):
-                    value = getattr(member.activity, attribute)
-                    if attribute == "type":
-                        value = value.name
-                    elif attribute in ["large_image_url", "small_image_url"]:
-                        value = f"[Link]({value})" if value else "None"
-                    elif attribute in ["start", "end"]:
-                        value = datetime.strftime(value, "%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)") if value else "None"
-                    embed.add_field(name=field_name, value=value, inline=True)
-        if member.voice:
-            embed.add_field(name="Voice Channel", value=member.voice.channel.mention if member.voice.channel else "None", inline=True)
-        embed.add_field(name="Roles", value=", ".join(roles) if roles else "None", inline=False)
-        embed.add_field(name="Top Role", value=member.top_role.mention, inline=True)
+        embed.add_field(name="Joined Discord", value=member.created_at.strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)") if member.created_at else "Unknown", inline=True)
+        if isinstance(member, discord.Member):
+            embed.add_field(name="Display Name", value=member.display_name, inline=True)
+            embed.add_field(name="Nickname", value=member.nick if member.nick else "None", inline=True)
+            embed.add_field(name="Mention", value=member.mention, inline=True)
+            embed.add_field(name="Joined Server", value=member.joined_at.strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)") if member.joined_at else "Unknown", inline=True)
+            roles = [role.mention for role in member.roles if role != ctx.guild.default_role]
+            embed.add_field(name="Roles", value=", ".join(roles) if roles else "None", inline=False)
+            embed.add_field(name="Top Role", value=member.top_role.mention, inline=True)
+            embed.add_field(name="Status", value=f"{member.status.name.capitalize()} (Desktop: {member.desktop_status.name.capitalize()} | Mobile: {member.mobile_status.name.capitalize()} | Web: {member.web_status.name.capitalize()})", inline=True)
+            if member.voice:
+                embed.add_field(name="Voice Channel", value=f"{member.voice.channel.mention} | {member.voice.channel.name} ({member.voice.channel.id}) (Muted: {member.voice.self_mute} (Server Muted: {member.voice.mute}) | Deafened: {member.voice.self_deaf} (Server Deafened: {member.voice.deaf}) | Video: {member.voice.self_video} | Stream: {member.voice.self_stream})" if member.voice.channel else "None", inline=True)
+            if member.activity:
+                activity_attributes = {
+                    'name': 'Activity',
+                    'type': 'Activity Type',
+                    'details': 'Details',
+                    'state': 'State',
+                    'large_image_text': 'Large Image Text',
+                    'small_image_text': 'Small Image Text',
+                    'large_image_url': 'Large Image URL',
+                    'small_image_url': 'Small Image URL',
+                    'start': 'Start Time',
+                    'end': 'End Time',
+                }
+                for attribute, field_name in activity_attributes.items():
+                    if hasattr(member.activity, attribute):
+                        value = getattr(member.activity, attribute)
+                        if attribute == "type":
+                            value = value.name
+                        elif attribute in ["large_image_url", "small_image_url"]:
+                            value = f"[Link]({value})" if value else "None"
+                        elif attribute in ["start", "end"]:
+                            value = datetime.strftime(value, "%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)") if value else "Unknown"
+                        embed.add_field(name=field_name, value=value, inline=True)
+        if member.banner:
+            embed.add_field(name="Banner URL", value=f"[Link]({member.banner.url})", inline=True)
+        if member.accent_color:
+            embed.add_field(name="Banner Color", value=f"{member.accent_color} rgb{member.accent_color.to_rgb()}", inline=True)
+        avatar = "None"
+        if member.avatar:
+            avatar = f"[Link]({member.avatar.url})"
+            if hasattr(member, "display_avatar") and member.display_avatar != member.avatar:
+                avatar += f" | [Link]({member.display_avatar.url}) (Guild Avatar)"
+        embed.add_field(name="Avatar URL", value=avatar, inline=True)
         embed.set_author(name=f"{member.name}#{member.discriminator}", icon_url=member.display_avatar.url, url=f"https://discord.com/users/{member.id}")
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
