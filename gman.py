@@ -17,6 +17,7 @@ import os
 import re
 import sys
 import traceback
+import random
 from urllib.parse import urlparse
 
 
@@ -393,28 +394,105 @@ async def eval(ctx, *, code):
     stdout = io.StringIO()
     
     to_compile = f'async def func():\n{textwrap.indent(code, "  ")}'
-    
     try:
         exec(to_compile, env)
     except Exception as e:
-            result = result[:2000]
-            await ctx.send(embed=discord.Embed(title="Eval Error", description=f'```py\n{result}{traceback.format_exc()}\n```', color=discord.Color.red()))
-            logger.error(f"Error evaluating code: {e}")
-            return
+        result = f"```py\n{e.__class__.__name__}: {e}\n```"
     func = env['func']
     try:
         with contextlib.redirect_stdout(stdout):
             ret = await func()
     except Exception as e:
         result = stdout.getvalue()
-        result = result[:2000]
-        await ctx.send(embed=discord.Embed(title="Eval Error", description=f'```py\n{result}{traceback.format_exc()}\n```', color=discord.Color.red()))
+        embed = discord.Embed(title="Evaluation Error", description=f"```py\n{result}\n{traceback.format_exc()}```", color=discord.Color.red())
+        await ctx.send(embed=embed)
         logger.error(f"Error evaluating code: {e}")
+        return
     else:
-        result = stdout.getvalue()
-        result = result[:2000]
-        await ctx.send(embed=discord.Embed(title="Eval", description=f'```py\n{result}\n-- {ret}```', color=discord.Color.og_blurple()))
+        result = stdout.getvalue() or "No output."
+        if ret is not None:
+            result += f'\n--> {ret}'
         logger.info(f"Evaluated code: {code}")
+    
+    pages = [result[i:i+1980] for i in range(0, len(result), 1980)]
+    
+    if not pages:
+        pages = ["```py\nNo output.\n```"]
+    
+    class EvalView(discord.ui.View):
+        def __init__(self, total_pages: int):
+            super().__init__()
+            self.current_page = 0
+            self.timeout = 60.0
+            self.total_pages = total_pages
+            self.update_button_states()
+        
+        def update_button_states(self):
+            self.children[0].disabled = self.current_page == 0
+            self.children[1].disabled = self.current_page == self.total_pages - 1
+
+        @discord.ui.button(label="◀", style=discord.ButtonStyle.primary, disabled=True)
+        async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if self.current_page > 0:
+                self.current_page -= 1
+                await self.update_page(interaction)
+
+        @discord.ui.button(label="▶", style=discord.ButtonStyle.primary, disabled=False)
+        async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if self.current_page < self.total_pages - 1:
+                self.current_page += 1
+                await self.update_page(interaction)
+
+        @discord.ui.button(label="🔁", style=discord.ButtonStyle.primary)
+        async def shuffle(self, interaction: discord.Interaction, button: discord.ui.Button):
+            self.current_page = random.randint(0, self.total_pages - 1)
+            await self.update_page(interaction)
+        
+        @discord.ui.button(label="🔢", style=discord.ButtonStyle.primary)
+        async def jump(self, interaction: discord.Interaction, button: discord.ui.Button):
+            class JumpView(discord.ui.Modal, title="Jump to Page"):
+                def __init__(self, paginator):
+                    super().__init__(title="Jump to Page")
+                    self.paginator = paginator
+                    self.page_input = discord.ui.TextInput(
+                        label="Page Number",
+                        placeholder=f"Enter a number between 1 and {self.total_pages}",
+                        required=True
+                    )
+                
+                async def on_submit(self, interaction: discord.Interaction):
+                    try:
+                        page = int(self.page_input.value)
+                        if 1 <= page <= self.total_pages:
+                            self.current_page = page
+                            await self.update_page(interaction)
+                        else:
+                            await interaction.response.send_message("Invalid page number.", ephemeral=True)
+                    except ValueError:
+                        await interaction.response.send_message("Invalid page number.", ephemeral=True)
+            
+            await interaction.response.send_modal(JumpView(self))
+
+        @discord.ui.button(label="⏹️", style=discord.ButtonStyle.danger)
+        async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await interaction.response.edit_message(view=None)
+        
+        @discord.ui.button(label="🗑️", style=discord.ButtonStyle.danger)
+        async def clear(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await interaction.message.delete()
+        
+        async def update_page(self, interaction: discord.Interaction):
+            embed = discord.Embed(title="Evaluation Result", description=f"```py\n{pages[self.current_page]}\n```", color=discord.Color.og_blurple())
+            embed.set_footer(text=f"Page {self.current_page + 1}/{len(pages)}")
+            self.update_button_states()
+            await interaction.response.edit_message(embed=embed, view=self)
+
+    embed = discord.Embed(title="Evaluation Result", description=f"```py\n{pages[0]}\n```", color=discord.Color.og_blurple())
+    embed.set_footer(text=f"Page 1/{len(pages)}")
+
+    view = EvalView(total_pages=len(pages))
+
+    await ctx.send(embed=embed, view=view)
 
 def cleanup_code(content: str) -> str:
     if content.startswith('```') and content.endswith('```'):

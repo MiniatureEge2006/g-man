@@ -130,24 +130,24 @@ class YouTube(commands.Cog):
                         embed = self.embeds[self.current_page]
                         await interaction.response.edit_message(embed=embed)
                     
-                    @discord.ui.button(label="Previous", style=discord.ButtonStyle.primary)
+                    @discord.ui.button(label="◀", style=discord.ButtonStyle.primary)
                     async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
                         if self.current_page > 0:
                             self.current_page -= 1
                             await self.update_embed(interaction)
                         
-                    @discord.ui.button(label="Next", style=discord.ButtonStyle.primary)
+                    @discord.ui.button(label="▶", style=discord.ButtonStyle.primary)
                     async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
                         if self.current_page < len(self.embeds) - 1:
                             self.current_page += 1
                             await self.update_embed(interaction)
                     
-                    @discord.ui.button(label="Shuffle", style=discord.ButtonStyle.primary)
+                    @discord.ui.button(label="🔁", style=discord.ButtonStyle.primary)
                     async def shuffle(self, interaction: discord.Interaction, button: discord.ui.Button):
                         self.current_page = random.randint(0, len(self.embeds) - 1)
                         await self.update_embed(interaction)
                     
-                    @discord.ui.button(label="Jump", style=discord.ButtonStyle.primary)
+                    @discord.ui.button(label="🔢", style=discord.ButtonStyle.primary)
                     async def jump(self, interaction: discord.Interaction, button: discord.ui.Button):
                         class JumpView(discord.ui.Modal):
                             def __init__(self, paginator):
@@ -173,12 +173,12 @@ class YouTube(commands.Cog):
                         
                         await interaction.response.send_modal(JumpView(self))
                     
-                    @discord.ui.button(label="Close", style=discord.ButtonStyle.danger)
+                    @discord.ui.button(label="🗑️", style=discord.ButtonStyle.danger)
                     async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
                         await interaction.response.defer()
                         await interaction.message.delete()
                     
-                    @discord.ui.button(label="Remove buttons", style=discord.ButtonStyle.danger)
+                    @discord.ui.button(label="⏹️", style=discord.ButtonStyle.danger)
                     async def remove_buttons(self, interaction: discord.Interaction, button: discord.ui.Button):
                         await interaction.response.edit_message(embed=self.embeds[self.current_page], view=None)
                 
