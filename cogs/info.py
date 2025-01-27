@@ -8,6 +8,7 @@ from webcolors import hex_to_name, name_to_hex
 from PIL import Image, ImageDraw
 import io
 import re
+import random
 from math import fmod
 
 class Info(commands.Cog):
@@ -566,65 +567,85 @@ class Info(commands.Cog):
                 else:
                     await ctx.send("Could not find weather data for the specified location.")
     
-    @commands.hybrid_command(name="colorinfo", description="Displays information about a color.", aliases=["color"])
+    @commands.hybrid_command(name="colorinfo", description="Displays information about a color. Defaults to a random color.", aliases=["color"])
     @app_commands.describe(color="The color name or color code (HEX, RGB/A, HSL/A, HSV/A or CMYK)")
     @app_commands.user_install()
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    async def colorinfo(self, ctx: commands.Context, color: str):
+    async def colorinfo(self, ctx: commands.Context, color: str = None):
         if ctx.interaction:
             await ctx.defer()
         else:
             await ctx.typing()
         try:
-            if color.startswith("#"):
-                hex_color = color
-                r, g, b, a = self.hex_to_rgba(hex_color)
-            elif color.lower().startswith("rgba("):
-                rgba_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
-                r, g, b, a = rgba_values
-                hex_color = f"#{int(r):02x}{int(g):02x}{int(b):02x}"
-            elif color.lower().startswith("rgb("):
-                rgb_values = list(map(int, re.findall(r"\d+", color)))
-                r, g, b = rgb_values
-                a = 1.0
-                hex_color = f"#{r:02x}{g:02x}{b:02x}"
-            elif color.lower().startswith("hsla("):
-                hsla_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
-                h, s, l, a = hsla_values
-                r, g, b = self.hsl_to_rgb(h, s, l)
-                hex_color = f"#{r:02x}{g:02x}{b:02x}"
-            elif color.lower().startswith("hsl("):
-                hsl_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
-                h, s, l = hsl_values
-                a = 1.0
-                r, g, b = self.hsl_to_rgb(h, s, l)
-                hex_color = f"#{r:02x}{g:02x}{b:02x}"
-            elif color.lower().startswith("hsva("):
-                hsva_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
-                h, s, v, a = hsva_values
-                r, g, b = self.hsv_to_rgb(h, s, v)
-                hex_color = f"#{r:02x}{g:02x}{b:02x}"
-            elif color.lower().startswith("hsv("):
-                hsv_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
-                h, s, v = hsv_values
-                a = 1.0
-                r, g, b = self.hsv_to_rgb(h, s, v)
-                hex_color = f"#{r:02x}{g:02x}{b:02x}"
-            elif color.lower().startswith("cmyka("):
-                cmyka_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
-                c, m, y, k, a = cmyka_values
-                r, g, b = self.cmyk_to_rgb(c, m, y, k)
-                hex_color = f"#{r:02x}{g:02x}{b:02x}"
-            elif color.lower().startswith("cmyk("):
-                cmyk_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
-                c, m, y, k = cmyk_values
-                r, g, b = self.cmyk_to_rgb(c, m, y, k)
-                a = 1.0
+            if color is None or color.lower() == "random":
+                r = random.randint(0, 255)
+                g = random.randint(0, 255)
+                b = random.randint(0, 255)
+                a = random.uniform(0, 1)
                 hex_color = f"#{r:02x}{g:02x}{b:02x}"
             else:
-                hex_color = name_to_hex(color)
-                r, g, b, a = self.hex_to_rgba(hex_color)
+                if color.startswith("#"):
+                    if len(color) == 9:
+                        hex_color = color
+                        r = int(color[1:3], 16)
+                        g = int(color[3:5], 16)
+                        b = int(color[5:7], 16)
+                        a = int(color[7:9], 16) / 255.0
+                    elif len(color) == 7:
+                        hex_color = color
+                        r = int(color[0:2], 16)
+                        g = int(color[2:4], 16)
+                        b = int(color[4:6], 16)
+                        a = 1.0
+                    else:
+                        raise ValueError(f"Invalid color format: {color}")
+
+                elif color.lower().startswith("rgba("):
+                    rgba_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
+                    r, g, b, a = rgba_values
+                    hex_color = f"#{int(r):02x}{int(g):02x}{int(b):02x}"
+                elif color.lower().startswith("rgb("):
+                    rgb_values = list(map(int, re.findall(r"\d+", color)))
+                    r, g, b = rgb_values
+                    a = 1.0
+                    hex_color = f"#{r:02x}{g:02x}{b:02x}"
+                elif color.lower().startswith("hsla("):
+                    hsla_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
+                    h, s, l, a = hsla_values
+                    r, g, b = self.hsl_to_rgb(h, s, l)
+                    hex_color = f"#{r:02x}{g:02x}{b:02x}"
+                elif color.lower().startswith("hsl("):
+                    hsl_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
+                    h, s, l = hsl_values
+                    a = 1.0
+                    r, g, b = self.hsl_to_rgb(h, s, l)
+                    hex_color = f"#{r:02x}{g:02x}{b:02x}"
+                elif color.lower().startswith("hsva("):
+                    hsva_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
+                    h, s, v, a = hsva_values
+                    r, g, b = self.hsv_to_rgb(h, s, v)
+                    hex_color = f"#{r:02x}{g:02x}{b:02x}"
+                elif color.lower().startswith("hsv("):
+                    hsv_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
+                    h, s, v = hsv_values
+                    a = 1.0
+                    r, g, b = self.hsv_to_rgb(h, s, v)
+                    hex_color = f"#{r:02x}{g:02x}{b:02x}"
+                elif color.lower().startswith("cmyka("):
+                    cmyka_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
+                    c, m, y, k, a = cmyka_values
+                    r, g, b = self.cmyk_to_rgb(c, m, y, k)
+                    hex_color = f"#{r:02x}{g:02x}{b:02x}"
+                elif color.lower().startswith("cmyk("):
+                    cmyk_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
+                    c, m, y, k = cmyk_values
+                    r, g, b = self.cmyk_to_rgb(c, m, y, k)
+                    a = 1.0
+                    hex_color = f"#{r:02x}{g:02x}{b:02x}"
+                else:
+                    hex_color = name_to_hex(color)
+                    r, g, b, a = self.hex_to_rgba(hex_color)
             
             cmyk = self.rgba_to_cmyk(r, g, b, a)
             hsl = self.rgba_to_hsl(r, g, b, a)
@@ -643,7 +664,7 @@ class Info(commands.Cog):
             embed = discord.Embed(
                 title=f"Color Info - {closest_name.capitalize()}",
                 description=f"Details for the color `{color}`",
-                color=int(hex_color.lstrip("#"), 16)
+                color=int(hex_color[:7].lstrip("#"), 16)
             )
             embed.add_field(name="HEX", value=hex_color.upper(), inline=True)
             embed.add_field(name="RGB/A", value=f"({r}, {g}, {b}, {a:.2f})", inline=True)
@@ -657,21 +678,26 @@ class Info(commands.Cog):
         except Exception as e:
             await ctx.send(f"Invalid color format. Please provide a valid color name or color code (HEX, RGB/A, HSL/A, HSV/A or CMYK).\nError: {e}")
     
-    @commands.hybrid_command(name="gradientinfo", description="Displays information about a gradient.", aliases=["gradient"])
+    @commands.hybrid_command(name="gradientinfo", description="Displays information about a gradient. Defaults to a random gradient.", aliases=["gradient"])
     @app_commands.describe(colors="Comma-separated list of colors in HEX format with optional positions (e.g., '#FF0000 0%, #00FF00 50%, #0000FF 100%')")
     @app_commands.user_install()
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    async def gradientinfo(self, ctx: commands.Context, *, colors: str):
+    async def gradientinfo(self, ctx: commands.Context, *, colors: str = None):
         if ctx.interaction:
             await ctx.defer()
         else:
             await ctx.typing()
         try:
-            colors, positions = self.parse_gradient_input(colors)
-            if len(colors) > 10:
-                await ctx.send("You can only create a gradient with up to 10 colors.")
-                return
+            if not colors or colors.lower() == "random":
+                num_colors = random.randint(2, 10)
+                colors = [f"#{random.randint(0, 0xFFFFFF):06x}" for _ in range(num_colors)]
+                positions = sorted([random.randint(0, 100) for _ in range(num_colors)])
+            else:
+                colors, positions = self.parse_gradient_input(colors)
+                if len(colors) > 10:
+                    await ctx.send("You can only create a gradient with up to 10 colors.")
+                    return
             gradient = self.generate_gradient_image(colors, positions)
             buffer = io.BytesIO()
             gradient.save(buffer, "PNG")
