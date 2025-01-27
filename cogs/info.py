@@ -190,7 +190,7 @@ class Info(commands.Cog):
         return round(h), round(s * 100), round(v * 100), round(a * 100)
 
     @commands.command(name="userinfo", aliases=["user", "member", "memberinfo"], description="Displays information about a user. Defaults to the author.")
-    async def userinfo(self, ctx: commands.Context, member: discord.Member = None):
+    async def userinfo(self, ctx: commands.Context, *, member: discord.Member = None):
         member = member or ctx.author
         roles = [role.mention for role in member.roles if role != ctx.guild.default_role]
         embed = discord.Embed(
