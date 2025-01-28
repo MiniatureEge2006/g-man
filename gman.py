@@ -450,26 +450,27 @@ async def eval(ctx, *, code):
         
         @discord.ui.button(label="🔢", style=discord.ButtonStyle.primary)
         async def jump(self, interaction: discord.Interaction, button: discord.ui.Button):
-            class JumpView(discord.ui.Modal, title="Jump to Page"):
+            class JumpView(discord.ui.Modal):
                 def __init__(self, paginator):
                     super().__init__(title="Jump to Page")
                     self.paginator = paginator
                     self.page_input = discord.ui.TextInput(
                         label="Page Number",
-                        placeholder=f"Enter a number between 1 and {self.total_pages}",
+                        placeholder=f"Enter a number between 1 and {self.paginator.total_pages}",
                         required=True
                     )
+                    self.add_item(self.page_input)
                 
                 async def on_submit(self, interaction: discord.Interaction):
                     try:
                         page = int(self.page_input.value)
-                        if 1 <= page <= self.total_pages:
-                            self.current_page = page
-                            await self.update_page(interaction)
+                        if 1 <= page <= self.paginator.total_pages:
+                            self.paginator.current_page = page
+                            await self.paginator.update_page(interaction)
                         else:
                             await interaction.response.send_message("Invalid page number.", ephemeral=True)
                     except ValueError:
-                        await interaction.response.send_message("Invalid page number.", ephemeral=True)
+                        await interaction.response.send_message("Please enter a valid number.", ephemeral=True)
             
             await interaction.response.send_modal(JumpView(self))
 
