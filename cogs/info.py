@@ -526,46 +526,58 @@ class Info(commands.Cog):
             await ctx.typing()
         api_key = bot_info.data['openweather_api_key']
         base_url = "https://api.openweathermap.org/data/2.5/weather"
+        geocode_url = "https://api.openweathermap.org/geo/1.0/direct"
         params = {"q": location, "appid": api_key, "units": "metric"}
+        geo_params = {"q": location, "appid": api_key, "limit": 1}
 
         async with aiohttp.ClientSession() as session:
-            async with session.get(base_url, params=params) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    city = data["name"]
-                    country = data["sys"]["country"]
-                    temperature = data["main"]["temp"]
-                    feels_like = data["main"]["feels_like"]
-                    humidity = data["main"]["humidity"]
-                    pressure = data["main"]["pressure"]
-                    wind_speed = data["wind"]["speed"]
-                    wind_direction = data["wind"]["deg"]
-                    coordinates_lat = data["coord"]["lat"]
-                    coordinates_lon = data["coord"]["lon"]
-                    visibility = data["visibility"] / 1000
-                    weather_description = data["weather"][0]["description"].capitalize()
-                    icon = data["weather"][0]["icon"]
-                    icon_url = f"http://openweathermap.org/img/w/{icon}.png"
-                    sunrise = datetime.fromtimestamp(data["sys"]["sunrise"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-                    sunset = datetime.fromtimestamp(data["sys"]["sunset"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+            async with session.get(geocode_url, params=geo_params) as geo_response:
+                geo_data = await geo_response.json()
+                if geo_response.status == 200 and geo_data:
+                    coordinates_lat = geo_data[0]["lat"]
+                    coordinates_lon = geo_data[0]["lon"]
+                    formatted_location = geo_data[0]["name"]
 
-                    embed = discord.Embed(
-                        title=f"Weather Info - {city}, {country}",
-                        description=f"**{weather_description}**\nSunrise: {sunrise}\nSunset: {sunset}",
-                        color=discord.Color.light_gray()
-                    )
-                    embed.add_field(name="Temperature", value=f"{temperature}°C (feels like {feels_like}°C)", inline=True)
-                    embed.add_field(name="Humidity", value=f"{humidity}%", inline=True)
-                    embed.add_field(name="Pressure", value=f"{pressure} hPa", inline=True)
-                    embed.add_field(name="Wind", value=f"{wind_speed} m/s at {wind_direction}°", inline=True)
-                    embed.add_field(name="Visibility", value=f"{visibility} km", inline=True)
-                    embed.add_field(name="Coordinates", value=f"{coordinates_lat}, {coordinates_lon}", inline=True)
-                    embed.set_thumbnail(url=icon_url)
-                    embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
-                    embed.set_footer(text="OpenWeatherMap API", icon_url="https://openweathermap.org/themes/openweathermap/assets/img/mobile_app/android-app-top-banner.png")
-                    await ctx.send(embed=embed)
+                    async with session.get(base_url, params=params) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            city = data["name"]
+                            country = data["sys"]["country"]
+                            weather = data["weather"][0]["main"]
+                            description = data["weather"][0]["description"].capitalize()
+                            temperature = data["main"]["temp"]
+                            pressure = data["main"]["pressure"]
+                            feels_like = data["main"]["feels_like"]
+                            humidity = data["main"]["humidity"]
+                            visibility = data["visibility"]
+                            wind_speed = data["wind"]["speed"]
+                            wind_direction = data["wind"]["deg"]
+                            clouds = data["clouds"]["all"]
+                            timestamp = datetime.fromtimestamp(data["dt"]).strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)")
+                            icon = data["weather"][0]["icon"]
+                            icon_url = f"http://openweathermap.org/img/wn/{icon}.png"
+                            sunrise = datetime.fromtimestamp(data["sys"]["sunrise"]).strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)")
+                            sunset = datetime.fromtimestamp(data["sys"]["sunset"]).strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)")
+                            map_image_url = f"https://static-maps.yandex.ru/1.x/?ll={coordinates_lon},{coordinates_lat}&spn=0.1,0.1&l=map&size=600,430&pt={coordinates_lat},{coordinates_lon},pm2rdm"
+                            maps_link = f"https://google.com/maps/search/?api=1&query={coordinates_lat},{coordinates_lon}"
+
+                            embed = discord.Embed(
+                                title=f"Weather Info - {city}, {country}",
+                                url=f"https://openweathermap.org/city/{data['id']}",
+                                description=f"Currently {temperature}°C with {description}. (feels like {feels_like}°C)\n\nSunrise: {sunrise}\nSunset: {sunset}\n\n**Pressure:** {pressure} hPa\n**Humidity:** {humidity}%\n**Visibility:** {visibility} m\n**Wind:** {wind_speed} m/s from {wind_direction}°\n**Clouds:** {clouds}%\n**Coordinates:** [{coordinates_lat}, {coordinates_lon}]({maps_link})\n**Location:** {formatted_location}\n**Timestamp:** {timestamp}",
+                                color=discord.Color.blue(),
+                                timestamp=discord.utils.utcnow()
+                            )
+                            embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
+                            embed.set_thumbnail(url=icon_url)
+                            embed.set_image(url=map_image_url)
+                            embed.set_footer(text="OpenWeatherMap API", icon_url="https://openweathermap.org/themes/openweathermap/assets/img/mobile_app/android-app-top-banner.png")
+
+                            await ctx.send(embed=embed)
+                        else:
+                            await ctx.send(f"Error: Could not fetch weather data for {location}: Weather status: {response.status} - {response.reason} - Location status: {geo_response.status} - {geo_response.reason}")
                 else:
-                    await ctx.send("Could not find weather data for the specified location.")
+                    await ctx.send(f"Error: Could not find location: {location} - Location status: {geo_response.status} - {geo_response.reason}")
     
     @commands.hybrid_command(name="colorinfo", description="Displays information about a color. Defaults to a random color.", aliases=["color"])
     @app_commands.describe(color="The color name or color code (HEX, RGB/A, HSL/A, HSV/A or CMYK)")
