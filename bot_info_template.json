@@ -1,6 +1,7 @@
 {
     "owners": ["Your Discord user ID"],
     "login": "Your Discord app token",
+    "prefix": "Your bot prefix",
     "mongo_url": "Your MongoDB connection url",
     "openweather_api_key": "Your OpenWeather API key",
     "database": "Your PostgreSQL database URL",

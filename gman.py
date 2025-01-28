@@ -28,9 +28,23 @@ vid_files = [f for f in os.listdir('vids') if os.path.isfile(os.path.join('vids'
 for f in vid_files:
     os.remove(f'vids/{f}')
 
+async def get_prefix(ctx: commands.Context):
+    if ctx.guild is None:
+        return bot_info.data['prefix']
+    guild_id = ctx.guild.id
+    async with bot.db.acquire() as conn:
+        prefix = await conn.fetchrow("SELECT prefix FROM prefixes WHERE guild_id = $1", guild_id)
+        if prefix:
+            return prefix['prefix']
+        return bot_info.data['prefix']
+
+async def set_prefix(guild_id, prefix):
+    async with bot.db.acquire() as conn:
+        await conn.execute("INSERT INTO prefixes (guild_id, prefix) VALUES ($1, $2) ON CONFLICT (guild_id) DO UPDATE SET prefix = $2", guild_id, prefix)
+
 
 extensions = ['cogs.audio', 'cogs.help', 'cogs.ping', 'cogs.bitrate', 'cogs.filter', 'cogs.fun', 'cogs.corruption', 'cogs.bookmarks', 'cogs.utility', 'cogs.caption', 'cogs.exif', 'cogs.ffmpeg', 'cogs.imagemagick', 'cogs.ytdlp', 'cogs.youtube', 'cogs.info']
-bot = commands.Bot(command_prefix=commands.when_mentioned_or('!'), status=discord.Status.online, activity=discord.Game(name="!help"), help_command=None, intents=discord.Intents.all())
+bot = commands.Bot(command_prefix=lambda bot, msg: get_prefix(msg), case_insensitive=True, strip_after_prefix=True, status=discord.Status.online, activity=discord.Game(name=f"{bot_info.data['prefix']}help"), help_command=None, intents=discord.Intents.all())
 
 
 def setup_logger():
@@ -344,6 +358,38 @@ async def deny(ctx: commands.Context, type: str, type_id: int):
             return
         await conn.execute("DELETE FROM allowlist WHERE type = $1 AND entity_id = $2", type, type_id)
     await ctx.send(f"Denied {type} with ID {type_id}.")
+
+@bot.command(name="setprefix", description="Sets the prefix for a guild.")
+async def setprefix(ctx: commands.Context, prefix: str):
+    if ctx.guild is None:
+        await ctx.send("This command can only be used in a guild.")
+        return
+    if ctx.author.guild_permissions.manage_guild or str(ctx.author.id) in bot_info.data['owners']:
+        await set_prefix(ctx.guild.id, prefix)
+        await ctx.send(f"Prefix for {ctx.guild.name} set to `{prefix}`.")
+    else:
+        await ctx.send(f"{ctx.command.qualified_name} can only be used by users who have the `Manage Guild` permission.")
+        return
+
+@bot.command(name="getprefix", description="Gets the prefix for a guild.")
+async def getprefix(ctx: commands.Context):
+    if ctx.guild is None:
+        await ctx.send("This command can only be used in a guild.")
+        return
+    prefix = await get_prefix(ctx)
+    await ctx.send(f"Prefix for {ctx.guild.name} is `{prefix}`.")
+
+@bot.command(name="resetprefix", description="Resets the prefix for a guild to the default.")
+async def resetprefix(ctx: commands.Context):
+    if ctx.guild is None:
+        await ctx.send("This command can only be used in a guild.")
+        return
+    if ctx.author.guild_permissions.manage_guild or str(ctx.author.id) in bot_info.data['owners']:
+        await set_prefix(ctx.guild.id, bot_info.data['prefix'])
+        await ctx.send(f"Prefix for {ctx.guild.name} reset to `{bot_info.data['prefix']}`.")
+    else:
+        await ctx.send(f"{ctx.command.qualified_name} can only be used by users who have the `Manage Guild` permission.")
+        return
 
 # Reloading extensions
 @bot.command(description='Reloads extensions. Usage: /reload [extension_list]', pass_context=True)

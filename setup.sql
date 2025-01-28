@@ -32,3 +32,9 @@ CREATE TABLE IF NOT EXISTS blocklist (
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (type, entity_id)
 );
+
+
+CREATE TABLE IF NOT EXISTS prefixes (
+    guild_id BIGINT PRIMARY KEY,
+    prefix TEXT NOT NULL
+);
