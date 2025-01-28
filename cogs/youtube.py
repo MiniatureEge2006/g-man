@@ -11,6 +11,8 @@ YOUTUBE_API_KEY = bot_info.data['youtube_api_key']
 class YouTube(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.current_page = 0
+        self.embeds = []
     
     @commands.hybrid_command(name="youtube", description="Search YouTube.", aliases=["yt"])
     @app_commands.describe(query="The query to search for.")
@@ -117,7 +119,7 @@ class YouTube(commands.Cog):
                         )
                         embed.set_image(url=snippet["thumbnails"]["high"]["url"])
                         embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
-                        embed.set_footer(text=f"YouTube search results for '{query}'")
+                        embed.set_footer(text=f"YouTube search results for '{query}' | Page {self.current_page + 1} of {len(self.embeds)}")
                         embeds.append(embed)
                 
                 class Paginator(discord.ui.View):
@@ -125,18 +127,29 @@ class YouTube(commands.Cog):
                         super().__init__()
                         self.embeds = embeds
                         self.current_page = 0
+                        self.update_button_states()
+                    
+                    def update_button_states(self):
+                        for child in self.children:
+                            if isinstance(child, discord.ui.Button):
+                                if child.label == "◀":
+                                    child.disabled = self.current_page == 0
+                                elif child.label == "▶":
+                                    child.disabled = self.current_page == len(self.embeds) - 1
                     
                     async def update_embed(self, interaction: discord.Interaction):
                         embed = self.embeds[self.current_page]
-                        await interaction.response.edit_message(embed=embed)
+                        embed.set_footer(text=f"YouTube search results for '{query}' | Page {self.current_page + 1} of {len(self.embeds)}")
+                        self.update_button_states()
+                        await interaction.response.edit_message(embed=embed, view=self)
                     
-                    @discord.ui.button(label="◀", style=discord.ButtonStyle.primary)
+                    @discord.ui.button(label="◀", style=discord.ButtonStyle.primary, disabled=True)
                     async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
                         if self.current_page > 0:
                             self.current_page -= 1
                             await self.update_embed(interaction)
                         
-                    @discord.ui.button(label="▶", style=discord.ButtonStyle.primary)
+                    @discord.ui.button(label="▶", style=discord.ButtonStyle.primary, disabled=False)
                     async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
                         if self.current_page < len(self.embeds) - 1:
                             self.current_page += 1
