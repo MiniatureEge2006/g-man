@@ -511,7 +511,7 @@ async def eval(ctx, *, code):
                     try:
                         page = int(self.page_input.value)
                         if 1 <= page <= self.paginator.total_pages:
-                            self.paginator.current_page = page
+                            self.paginator.current_page = page - 1
                             await self.paginator.update_page(interaction)
                         else:
                             await interaction.response.send_message("Invalid page number.", ephemeral=True)
@@ -530,7 +530,7 @@ async def eval(ctx, *, code):
         
         async def update_page(self, interaction: discord.Interaction):
             embed = discord.Embed(title="Evaluation Result", description=f"```py\n{pages[self.current_page]}\n```", color=discord.Color.og_blurple())
-            embed.set_footer(text=f"Page {self.current_page + 1}/{len(pages)}")
+            embed.set_footer(text=f"Page {self.current_page + 1}/{self.total_pages}")
             self.update_button_states()
             await interaction.response.edit_message(embed=embed, view=self)
 
