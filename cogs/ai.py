@@ -36,7 +36,6 @@ class AI(commands.Cog):
 - **Voice Channel Count**: {voice_channels}
 - **Voice Channels' Names**: {', '.join([channel.name for channel in guild.voice_channels])}
 - **Role Count**: {roles}
-- **Roles' Names**: {', '.join([role.name for role in guild.roles])}
 - **Server Owner**: {owner}
 - **Server Owner ID**: {guild.owner_id}
 - **Server ID**: {guild.id}
