@@ -34,6 +34,29 @@ CREATE TABLE IF NOT EXISTS blocklist (
 );
 
 
+CREATE TABLE IF NOT EXISTS command_permissions (
+    id SERIAL PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    command_name TEXT NOT NULL,
+    target_type TEXT CHECK (target_type IN ('user', 'channel', 'role')) NOT NULL,
+    target_id BIGINT NOT NULL,
+    status BOOLEAN NOT NULL,
+    reason TEXT DEFAULT 'No reason provided',
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (guild_id, command_name, target_type, target_id)
+);
+
+CREATE TABLE IF NOT EXISTS server_command_permissions (
+    id SERIAL PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    command_name TEXT NOT NULL,
+    status BOOLEAN NOT NULL,
+    reason TEXT DEFAULT 'No reason provided',
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (guild_id, command_name)
+);
+
+
 CREATE TABLE IF NOT EXISTS prefixes (
     guild_id BIGINT PRIMARY KEY,
     prefix TEXT NOT NULL
