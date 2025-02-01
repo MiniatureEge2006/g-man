@@ -101,7 +101,7 @@ class FFmpeg(commands.Cog):
                 os.remove(file)
 
         except Exception as e:
-            await ctx.send(f"An error occurred: `{e}`")
+            raise commands.CommandError(f"An error occurred: `{e}`")
 
 
     async def read_output(self, stream):

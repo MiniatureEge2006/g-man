@@ -233,6 +233,8 @@ async def on_command_error(ctx, error):
     command_name = ctx.command.qualified_name if ctx.command else "Unknown"
     command_content = ctx.message.content
     logger.error(f"\n--- Command Error Log ---\nTimestamp: {timestamp}\nUser: {user}\nGuild: {guild}\nChannel: {channel}\nCommand: {command_name}\nCommand Content: {command_content}\nError: {error}\n--- End Command Error Log ---")
+    embed = discord.Embed(title="Command Error", color=discord.Color.red(), timestamp=discord.utils.utcnow())
+    embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
     if isinstance(error, commands.CheckFailure):
         return
     if isinstance(error, commands.CommandNotFound):
@@ -240,20 +242,23 @@ async def on_command_error(ctx, error):
         return
     if isinstance(error, commands.MissingRequiredArgument):
         logger.warning(f"Missing required argument for command {ctx.command.qualified_name}: {ctx.message.content} ({error.param.name} is required)")
-        await ctx.send(f"Missing required argument for command {ctx.command.qualified_name}. ({error.param.name} is required)")
+        embed.description = f"Missing required argument: `{error.param.name}`"
+        await ctx.send(embed=embed)
         return
     if isinstance(error, commands.BadArgument):
         logger.warning(f"Bad argument for command {ctx.command.qualified_name}: {ctx.message.content} ({error})")
-        await ctx.send(f"Bad argument for command {ctx.command.qualified_name}. ({error})")
+        embed.description = f"Bad argument: `{error}`"
+        await ctx.send(embed=embed)
         return
     if isinstance(error, commands.MissingPermissions):
         logger.warning(f"Missing permissions for command {ctx.command.qualified_name}: {ctx.message.content} ({error})")
-        await ctx.send(f"`{ctx.command.qualified_name}` requires the following permissions: `{', '.join(error.missing_permissions).capitalize()}`")
+        embed.description = f"`{command_name}` requires the following permissions: `{', '.join(error.missing_permissions).capitalize()}`"
+        await ctx.send(embed=embed)
         return
     else:
         logger.critical(f"An unexpected error occurred: {traceback.format_exception(type(error), error, error.__traceback__)}")
-    
-    await ctx.send(f"An error occurred while processing your command. ```\n{error}```")
+        embed.description = f"An unexpected error occurred: {error}"
+    await ctx.send(embed=embed)
     
 @bot.event
 async def on_command_completion(ctx):

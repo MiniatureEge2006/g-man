@@ -96,7 +96,7 @@ class Exif(commands.Cog):
             os.remove(file_path)
         
         except Exception as e:
-            await ctx.send(f"An error occurred: `{e}`")
+            raise commands.CommandError(f"An error occurred: `{e}`")
     
 
     async def download_media(self, ctx: commands.Context, url: str) -> str:

@@ -60,9 +60,10 @@ class Audio(commands.Cog):
                 if results:
                     url = results[0]['webpage_url']
             
-        with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-            info = ydl.extract_info(url, download=True)
-            file_path = ydl.prepare_filename(info)
+        loop = asyncio.get_event_loop()
+        info = await loop.run_in_executor(None, self.extract_info, url)
+
+        file_path = yt_dlp.YoutubeDL(YDL_OPTIONS).prepare_filename(info)
         
         if ctx.voice_client is None:
             await self.connect_to_channel(ctx)
@@ -102,6 +103,10 @@ class Audio(commands.Cog):
             embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
             await ctx.send(embed=embed)
     
+    def extract_info(self, url):
+        with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+            return ydl.extract_info(url, download=True)
+
     async def cleanup_file_and_play_next(self, ctx, file_path):
         if os.path.exists(file_path):
             await asyncio.sleep(1)

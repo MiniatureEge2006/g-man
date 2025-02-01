@@ -91,7 +91,7 @@ class Ytdlp(commands.Cog):
                 max_size = self.get_max_file_size(boost_count)
 
                 if file_size > max_size:
-                    await ctx.send(f"File is too large to send. ({file_size} bytes/{self.human_readable_size(int(file_size))})")
+                    raise commands.CommandError(f"File is too large to send. ({file_size} bytes/{self.human_readable_size(int(file_size))})")
                 else:
                     elapsed_time = time.time() - start_time
                     video_url = info.get('webpage_url', 'Unknown URL')
@@ -110,9 +110,9 @@ class Ytdlp(commands.Cog):
 
             os.remove(final_file)
         except FileNotFoundError as e:
-            await ctx.send(f"File handling error: `{e}`")
+            raise commands.CommandError(f"File handling error: `{e}`")
         except Exception as e:
-            await ctx.send(f"Download failed: ```ansi\n{e}```")
+            raise commands.CommandError(f"Download failed: ```ansi\n{e}```")
 
     async def extract_info(self, ydl_opts, url):
         loop = asyncio.get_event_loop()

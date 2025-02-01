@@ -68,7 +68,7 @@ class ImageMagick(commands.Cog):
                 os.remove(local_input_file)
         
         except Exception as e:
-            await ctx.send(f"An error occurred: `{e}`")
+            raise commands.CommandError(f"An error occurred: `{e}`")
 
 
     async def run_imagemagick(self, args: list):
