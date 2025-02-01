@@ -2,6 +2,8 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import ollama
+import re
+import asyncio
 
 MAX_CONVERSATION_HISTORY_LENGTH = 5
 
@@ -71,23 +73,40 @@ You are a sophisticated AI assistant **with a mysterious and enigmatic personali
             await ctx.defer()
         else:
             await ctx.typing()
+        debug_flag = r"(?:\s|^)--debug(?:\s|$)"
+        debug_mode = bool(re.search(debug_flag, prompt))
+        prompt = re.sub(debug_flag, " ", prompt).strip() if prompt else ""
         conversation_key = self.get_conversation(ctx)
         user_history = self.conversations.get(conversation_key, [])
         user_history.append({"role": "user", "content": prompt})
-        system_prompt = await self.create_system_prompt(ctx)
 
         if len(user_history) > MAX_CONVERSATION_HISTORY_LENGTH:
             user_history = user_history[-MAX_CONVERSATION_HISTORY_LENGTH:]
+        asyncio.create_task(self.process_ai_response(ctx, conversation_key, user_history, debug_mode))
+    
+    async def process_ai_response(self, ctx: commands.Context, conversation_key, user_history, debug_mode):
         try:
-            response: ollama.ChatResponse = ollama.chat(model="llama3.2", messages=[{"role": "system", "content": system_prompt}] + user_history)
-            if len(response.message.content) > 2000:
-                response.message.content = response.message.content[:1997] + "..."
-            await ctx.send(response.message.content)
-            user_history.append({"role": "assistant", "content": response.message.content})
+            system_prompt = await self.create_system_prompt(ctx)
+            response: ollama.ChatResponse = await self.get_ai_response(system_prompt, user_history)
+            content = response.message.content
+            if debug_mode:
+                match = re.search(r"<think>(.*?)</think>", content, re.DOTALL)
+                content = match.group(1).strip() if match else "No debug information found."
+            else:
+                content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+            if len(content) > 2000:
+                content = content[:1997] + "..."
+            await ctx.send(content)
+            user_history.append({"role": "assistant", "content": content})
             self.conversations[conversation_key] = user_history
         except Exception as e:
-            await ctx.send(f"Error: {e}")
-    
+            await ctx.send(f"An error occurred: {e}")
+    async def get_ai_response(self, system_prompt: str, user_history: list):
+        try:
+            response = await asyncio.to_thread(ollama.chat, model="deepseek-r1", messages=[{"role": "system", "content": system_prompt}] + user_history)
+            return response
+        except Exception as e:
+            raise RuntimeError(f"AI request failed: {e}")
     @commands.hybrid_command(name="resetai", description="Reset the conversation history of G-AI.")
     @app_commands.user_install()
     @app_commands.allowed_installs(guilds=True, users=True)
