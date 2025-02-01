@@ -80,7 +80,6 @@ class Ytdlp(commands.Cog):
                     await ctx.send(f"Error extracting JSON info: {e}")
                 os.remove(json_file_path)
             else:
-                await ctx.send(f"-# Downloading from `{url}` with options `{ydl_opts}`...")
                 info = await task
                 final_file = info.get('final_file')
 
