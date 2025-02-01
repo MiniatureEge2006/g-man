@@ -7,6 +7,7 @@ from yt_dlp.utils import download_range_func
 import yt_dlp
 import shlex
 import json
+import asyncio
 
 class Ytdlp(commands.Cog):
     def __init__(self, bot):
@@ -34,90 +35,95 @@ class Ytdlp(commands.Cog):
             except Exception as e:
                 await ctx.send(f"Error parsing options: `{e}`")
                 return
-        
+        task = asyncio.create_task(self.extract_info(ydl_opts, url))
         try:
             start_time = time.time()
 
             if ydl_opts.get("listformats", False):
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                    formats = info.get('formats', [])
-                    if not formats:
-                        await ctx.send("No formats available for this URL.")
-                        return
+                info = await task
+                formats = info.get('formats', [])
+                if not formats:
+                    await ctx.send("No formats available for this URL.")
+                    return
                     
-                    format_list = [
-                    (
-                    f"ID: {fmt.get('format_id')} | Ext: {fmt.get('ext')} | "
-                    f"Res: {fmt.get('resolution', 'N/A')} | FPS: {fmt.get('fps', 'N/A')} | "
-                    f"Video Codec: {fmt.get('vcodec', 'N/A')} | Audio Codec: {fmt.get('acodec', 'N/A')} | "
-                    f"Bitrate: {fmt.get('tbr', 'N/A')}k | Size: {self.human_readable_size(fmt.get('filesize') or fmt.get('filesize_approx') or 0)} | "
-                    f"Protocol: {fmt.get('protocol', 'N/A')} | "
-                    f"Notes: {fmt.get('format_note', 'N/A')} | "
-                    f"Container: {fmt.get('container', 'N/A')}"
-                    )
-                    for fmt in formats
+                format_list = [
+                (
+                f"ID: {fmt.get('format_id')} | Ext: {fmt.get('ext')} | "
+                f"Res: {fmt.get('resolution', 'N/A')} | FPS: {fmt.get('fps', 'N/A')} | "
+                f"Video Codec: {fmt.get('vcodec', 'N/A')} | Audio Codec: {fmt.get('acodec', 'N/A')} | "
+                f"Bitrate: {fmt.get('tbr', 'N/A')}k | Size: {self.human_readable_size(fmt.get('filesize') or fmt.get('filesize_approx') or 0)} | "
+                f"Protocol: {fmt.get('protocol', 'N/A')} | "
+                f"Notes: {fmt.get('format_note', 'N/A')} | "
+                f"Container: {fmt.get('container', 'N/A')}"
+                )
+                for fmt in formats
                 ]
 
-                    format_message = "\n".join(format_list)
-                    if len(format_message) > 2000:
-                        file_path = f"vids/formats-{info.get('id', 'Unknown ID')}.txt"
-                        with open(file_path, 'w') as f:
-                            f.write(format_message)
-                        await ctx.send(f"Available formats for {info.get('title', 'Unknown Title')}:", file=discord.File(file_path))
-                        os.remove(file_path)
-                    else:
-                        await ctx.send(f"Available formats for {info.get('title', 'Unknown Title')}:\n```{format_message}```")
+                format_message = "\n".join(format_list)
+                if len(format_message) > 2000:
+                    file_path = f"vids/formats-{info.get('id', 'Unknown ID')}.txt"
+                    with open(file_path, 'w') as f:
+                        f.write(format_message)
+                    await ctx.send(f"Available formats for {info.get('title', 'Unknown Title')}:", file=discord.File(file_path))
+                    os.remove(file_path)
+                else:
+                    await ctx.send(f"Available formats for {info.get('title', 'Unknown Title')}:\n```{format_message}```")
                 return
             if ydl_opts.get("json", False):
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                    json_file_path = f"vids/info-{info.get('id', 'Unknown ID')}.json"
-                    try:
-                        with open(json_file_path, 'w', encoding='utf-8') as json_file:
-                            json.dump(info, json_file, indent=4)
-                        await ctx.send(f"JSON info extracted for {info.get('title', 'Unknown Title')}:", file=discord.File(json_file_path))
-                    except Exception as e:
-                        await ctx.send(f"Error extracting JSON info: {e}")
-                    os.remove(json_file_path)
+                info = await task
+                json_file_path = f"vids/info-{info.get('id', 'Unknown ID')}.json"
+                try:
+                    with open(json_file_path, 'w', encoding='utf-8') as json_file:
+                        json.dump(info, json_file, indent=4)
+                    await ctx.send(f"JSON info extracted for {info.get('title', 'Unknown Title')}:", file=discord.File(json_file_path))
+                except Exception as e:
+                    await ctx.send(f"Error extracting JSON info: {e}")
+                os.remove(json_file_path)
             else:
                 await ctx.send(f"-# Downloading from `{url}` with options `{ydl_opts}`...")
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=True)
-                    final_file = (
-                    info.get('requested_downloads', [{}])[0].get('filepath')
-                    or ydl.prepare_filename(info)
-                    )
+                info = await task
+                final_file = info.get('final_file')
 
-                    if not os.path.exists(final_file):
-                        raise FileNotFoundError(f"The file '{final_file}' does not exist.")
-                    file_size = os.path.getsize(final_file)
-                    boost_count = ctx.guild.premium_subscription_count if ctx.guild else 0
-                    max_size = self.get_max_file_size(boost_count)
+                if not final_file or not os.path.exists(final_file):
+                    raise FileNotFoundError(f"The file '{final_file}' does not exist.")
+                file_size = os.path.getsize(final_file)
+                boost_count = ctx.guild.premium_subscription_count if ctx.guild else 0
+                max_size = self.get_max_file_size(boost_count)
 
-                    if file_size > max_size:
-                        await ctx.send(f"File is too large to send. ({file_size} bytes/{self.human_readable_size(int(file_size))})")
-                    else:
-                        elapsed_time = time.time() - start_time
-                        video_url = info.get('webpage_url', 'Unknown URL')
-                        title = info.get('title', 'Unknown Title')
-                        id = info.get('id', 'Unknown Video ID')
-                        width = info.get('width', 'Unknown Width')
-                        height = info.get('height', 'Unknown Height')
-                        resolution = f"{width}x{height}"
-                        uploader = info.get('uploader', 'Unknown Uploader')
-                        uploader_url = info.get('uploader_url', 'Unknown URL')
-                        uploader_id = info.get('uploader_id', 'Unknown ID')
-                        duration = info.get('duration_string', 'Unknown')
-                        duration_seconds = info.get('duration', 'Unknown')
-                        format_id = info.get('format_id', 'Unknown Format IDs')
-                        await ctx.send(f"-# [{title} ({id})](<{video_url}> '{os.path.basename(final_file)}') by [{uploader}](<{uploader_url}> '{uploader_id}'), {resolution}, {duration} ({duration_seconds} seconds) Duration, Format IDs: `{format_id}`, {file_size} bytes ({self.human_readable_size(file_size)}), took {elapsed_time:.2f} seconds", file=discord.File(final_file))
+                if file_size > max_size:
+                    await ctx.send(f"File is too large to send. ({file_size} bytes/{self.human_readable_size(int(file_size))})")
+                else:
+                    elapsed_time = time.time() - start_time
+                    video_url = info.get('webpage_url', 'Unknown URL')
+                    title = info.get('title', 'Unknown Title')
+                    id = info.get('id', 'Unknown Video ID')
+                    width = info.get('width', 'Unknown Width')
+                    height = info.get('height', 'Unknown Height')
+                    resolution = f"{width}x{height}"
+                    uploader = info.get('uploader', 'Unknown Uploader')
+                    uploader_url = info.get('uploader_url', 'Unknown URL')
+                    uploader_id = info.get('uploader_id', 'Unknown ID')
+                    duration = info.get('duration_string', 'Unknown')
+                    duration_seconds = info.get('duration', 'Unknown')
+                    format_id = info.get('format_id', 'Unknown Format IDs')
+                    await ctx.send(f"-# [{title} ({id})](<{video_url}> '{os.path.basename(final_file)}') by [{uploader}](<{uploader_url}> '{uploader_id}'), {resolution}, {duration} ({duration_seconds} seconds) Duration, Format IDs: `{format_id}`, {file_size} bytes ({self.human_readable_size(file_size)}), took {elapsed_time:.2f} seconds", file=discord.File(final_file))
 
-                os.remove(final_file)
+            os.remove(final_file)
         except FileNotFoundError as e:
             await ctx.send(f"File handling error: `{e}`")
         except Exception as e:
             await ctx.send(f"Download failed: ```ansi\n{e}```")
+
+    async def extract_info(self, ydl_opts, url):
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._extract_info, ydl_opts, url)
+
+    def _extract_info(self, ydl_opts, url):
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url)
+            final_file = info.get('requested_downloads', [{}])[0].get('filepath') or ydl.prepare_filename(info)
+            info['final_file'] = final_file
+            return info
 
     def parse_time_to_seconds(self, time_str):
         time_parts = time_str.split(":")
