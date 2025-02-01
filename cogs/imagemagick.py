@@ -8,6 +8,7 @@ import shlex
 import aiohttp
 from urllib.parse import urlparse
 from pathlib import Path
+import asyncio
 
 class ImageMagick(commands.Cog):
     def __init__(self, bot):
@@ -38,24 +39,18 @@ class ImageMagick(commands.Cog):
             input_file = split_args[0]
             output_file = split_args[-1]
 
-            if is_valid_url(input_file):
-                filename = get_filename(input_file)
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(input_file) as resp:
-                        if resp.status == 200:
-                            local_input_file = os.path.join(processing_dir, filename)
-                            with open(local_input_file, 'wb') as f:
-                                f.write(await resp.read())
-                            split_args[0] = local_input_file
-                        else:
-                            await ctx.send("Failed to download the input image.")
-                            return
+            if self.is_valid_url(input_file):
+                filename = self.get_filename(input_file)
+                local_input_file = os.path.join(processing_dir, filename)
+                file_downloaded = await self.download_file(input_file, local_input_file)
+                if not file_downloaded:
+                    await ctx.send("Failed to download the input file.")
+                    return
+                split_args[0] = local_input_file
             
             cmd = ["magick"] + split_args
 
-            print("Executing ImageMagick command:", " ".join(cmd))
-
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = await self.run_imagemagick(cmd)
 
             if result.returncode != 0:
                 error_message = result.stderr
@@ -76,14 +71,34 @@ class ImageMagick(commands.Cog):
             await ctx.send(f"An error occurred: `{e}`")
 
 
-def is_valid_url(url: str) -> bool:
-    parsed = urlparse(url)
-    return bool(parsed.scheme and parsed.netloc)
+    async def run_imagemagick(self, args: list):
+        process = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdout, stderr = await process.communicate()
+        result = subprocess.CompletedProcess(args, process.returncode, stdout.decode('utf-8'), stderr.decode('utf-8'))
+        return result
 
-def get_filename(url: str) -> str:
-    parsed_url = urlparse(url)
-    filename = Path(parsed_url.path).name
-    return filename
+    async def download_file(self, url: str, file_path: str) -> bool:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as resp:
+                    if resp.status == 200:
+                        with open(file_path, 'wb') as f:
+                            f.write(await resp.read())
+                        return True
+                    else:
+                        return False
+        except Exception as e:
+            print(f"Error downloading the media from {url}: {e}")
+            return False
+
+    def is_valid_url(self, url: str) -> bool:
+        parsed = urlparse(url)
+        return bool(parsed.scheme and parsed.netloc)
+
+    def get_filename(self, url: str) -> str:
+        parsed_url = urlparse(url)
+        filename = Path(parsed_url.path).name
+        return filename
 
 
 async def setup(bot):

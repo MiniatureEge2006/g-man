@@ -8,6 +8,7 @@ import aiohttp
 import shlex
 from urllib.parse import urlparse
 from pathlib import Path
+import asyncio
 
 
 class FFmpeg(commands.Cog):
@@ -40,20 +41,16 @@ class FFmpeg(commands.Cog):
             for idx, arg in enumerate(split_args):
                 if arg == "-i" and idx + 1 < len(split_args):
                     input_url = split_args[idx + 1]
-                    if is_valid_url(input_url):
-                        filename = get_filename(input_url)
+                    if self.is_valid_url(input_url):
+                        filename = self.get_filename(input_url)
                         file_path = os.path.join(processing_dir, filename)
-                        async with aiohttp.ClientSession() as session:
-                            async with session.get(input_url) as resp:
-                                if resp.status == 200:
-                                    with open(file_path, 'wb') as f:
-                                        f.write(await resp.read())
-                                    input_files.append(file_path)
-
-                                    split_args[idx + 1] = file_path
-                                else:
-                                    await ctx.send(f"Failed to download the media from `{input_url}`")
-                                    return
+                        file_downloaded = await self.download_file(input_url, file_path)
+                        if file_downloaded:
+                            input_files.append(file_path)
+                            split_args[idx + 1] = file_path
+                        else:
+                            await ctx.send(f"Failed to download the media from `{input_url}`")
+                            return
             filter_options = ["-filter_complex", "-vf", "-af"]
             for option in filter_options:
                 if option in split_args:
@@ -67,20 +64,25 @@ class FFmpeg(commands.Cog):
 
             
 
-            print("Executing FFmpeg command:", " ".join(cmd))
-
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
             
-            print("FFmpeg Output:", result.stdout)
-            print("FFmpeg Error:", result.stderr)
+            output_task = asyncio.create_task(self.read_output(process.stdout))
+            error_task = asyncio.create_task(self.read_stderr(process.stderr))
 
-            if result.returncode != 0:
-                error_message = result.stderr
+
+            await asyncio.gather(output_task, error_task)
+            await process.wait()
+
+            output = await output_task
+            error_output = await error_task
+
+            if process.returncode != 0:
+                error_message = error_output
                 if len(error_message) > 2000:
                     error_file_path = os.path.join(processing_dir, "ffmpeg_error.txt")
                     with open(error_file_path, 'w') as f:
                         f.write(error_message)
-                    await ctx.send("FFmpeg encountered an error. See the attached log file.", file=discord.File(error_file_path))
+                    await ctx.send("FFmpeg encountered an error.", file=discord.File(error_file_path))
                     os.remove(error_file_path)
                 else:
                     await ctx.send(f"FFmpeg encountered an error: ```{error_message}```")
@@ -102,14 +104,50 @@ class FFmpeg(commands.Cog):
             await ctx.send(f"An error occurred: `{e}`")
 
 
-def is_valid_url(url: str) -> bool:
-    parsed = urlparse(url)
-    return bool(parsed.scheme and parsed.netloc)
+    async def read_output(self, stream):
+            output = []
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                decoded_line = line.decode('utf-8').strip()
+                print(decoded_line)
+                output.append(decoded_line)
+            return '\n'.join(output)
+    
+    async def read_stderr(self, stream):
+            error_output = []
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                decoded_line = line.decode('utf-8').strip()
+                print(decoded_line)
+                error_output.append(decoded_line)
+            return '\n'.join(error_output)
 
-def get_filename(url: str) -> str:
-    parsed_url = urlparse(url)
-    filename = Path(parsed_url.path).name
-    return filename
+    async def download_file(self, url: str, file_path: str) -> bool:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as resp:
+                    if resp.status == 200:
+                        with open(file_path, 'wb') as f:
+                            f.write(await resp.read())
+                        return True
+                    else:
+                        return False
+        except Exception as e:
+            print(f"Error downloading the media from {url}: {e}")
+            return False
+
+    def is_valid_url(self, url: str) -> bool:
+        parsed = urlparse(url)
+        return bool(parsed.scheme and parsed.netloc)
+
+    def get_filename(self, url: str) -> str:
+        parsed_url = urlparse(url)
+        filename = Path(parsed_url.path).name
+        return filename
 
 async def setup(bot):
     await bot.add_cog(FFmpeg(bot))
