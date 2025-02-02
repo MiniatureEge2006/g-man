@@ -23,10 +23,7 @@ class FFmpeg(commands.Cog):
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def ffmpeg_command(self, ctx: commands.Context, *, args: str):
         
-        if ctx.interaction:
-            await ctx.defer()
-        else:
-            await ctx.typing()
+        await ctx.typing()
 
         try:
             start_time = time.time()

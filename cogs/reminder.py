@@ -42,10 +42,7 @@ class Reminder(commands.Cog):
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     @app_commands.describe(user="The user you want to set a reminder for.", time="The time you want to set the reminder for.", reminder_text="What you want to be reminded of.")
     async def remind(self, ctx: commands.Context, user: discord.Member = None, time: str = None, *, reminder_text: str):
-        if ctx.interaction:
-            await ctx.defer()
-        else:
-            await ctx.typing()
+        await ctx.typing()
         if not time or not reminder_text:
             await ctx.send("Please provide both a time and a reminder message.")
             return
@@ -58,7 +55,7 @@ class Reminder(commands.Cog):
             target_user = ctx.author
         reminder_time = dateparser.parse(time, settings={"TIMEZONE": "UTC", "RETURN_AS_TIMEZONE_AWARE": True})
         if not reminder_time:
-            await ctx.send("Invalid time format. Please use a format like `tomorrow at 3pm`, `in 1 hour`, or `2 weeks")
+            await ctx.send("Invalid time format. Please use a format like `tomorrow at 3pm`, `in 1 hour`, or `2 weeks`.")
             return
         current_time = datetime.now(timezone.utc)
         if reminder_time <= current_time:
@@ -72,11 +69,9 @@ class Reminder(commands.Cog):
     @app_commands.user_install()
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    @app_commands.describe(user="The user whose reminders you want to view.", global_view="View reminders for an user globally.")
     async def reminders(self, ctx: commands.Context, user: discord.Member = None, global_view: bool = False):
-        if ctx.interaction:
-            await ctx.defer()
-        else:
-            await ctx.typing()
+        await ctx.typing()
         query = ""
         params = []
         target_user = user or ctx.author
@@ -101,7 +96,7 @@ class Reminder(commands.Cog):
             return
         embed = discord.Embed(title=f"{len(reminders)} {'Global ' if global_view else ''}Reminder(s) for {target_user.display_name}", color=discord.Color.blue())
         for reminder in reminders:
-            guild_name = self.bot.get_guild(reminder['guild_id']).name if reminder.get('guild_id') else "(DM)"
+            guild_name = self.bot.get_guild(reminder.get('guild_id')).name if reminder.get('guild_id') and self.bot.get_guild(reminder.get('guild_id')) else "DMs"
             timestamp = int(reminder['reminder_time'].timestamp())
             embed.add_field(name=f"ID: {reminder['reminder_id']}", value=f"Server: {guild_name}\nMessage: {reminder['reminder']}\nTime: <t:{timestamp}:F> (<t:{timestamp}:R>, {reminder['reminder_time'].strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p')}))", inline=False)
         await ctx.send(embed=embed)
@@ -110,10 +105,7 @@ class Reminder(commands.Cog):
     @commands.hybrid_command(name="serverreminders", description="View all reminders for the server.")
     @app_commands.allowed_installs(guilds=True, users=False)
     async def serverreminders(self, ctx: commands.Context):
-        if ctx.interaction:
-            await ctx.defer()
-        else:
-            await ctx.typing()
+        await ctx.typing()
         if not ctx.guild:
             await ctx.send("This command can only be used in a server.")
             return
@@ -136,10 +128,7 @@ class Reminder(commands.Cog):
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     @app_commands.describe(reminder_id="The ID of the reminder to delete.", user="The user whose reminders you want to delete if you have manage server permissions.")
     async def deletereminder(self, ctx: commands.Context, reminder_id: int, user: discord.Member = None):
-        if ctx.interaction:
-            await ctx.defer()
-        else:
-            await ctx.typing()
+        await ctx.typing()
         if ctx.guild is None:
             target_user_id = ctx.author.id
         else:
@@ -160,10 +149,7 @@ class Reminder(commands.Cog):
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     @app_commands.describe(user="The user whose reminders you want to clear if you have manage server permissions.", server="Clear all reminders for the server if you have manage server permissions.")
     async def clearreminders(self, ctx: commands.Context, server: bool = False, user: discord.Member = None):
-        if ctx.interaction:
-            await ctx.defer()
-        else:
-            await ctx.typing()
+        await ctx.typing()
         if ctx.guild is None:
             if user or server:
                 await ctx.send("You can only clear other users' or server reminders in a server.")
@@ -211,7 +197,7 @@ class Reminder(commands.Cog):
                         else:
                             dm_channel = await user.create_dm()
                             await dm_channel.send(f"{user.mention}, reminder from <t:{int(reminder_time.timestamp())}:R> (<t:{int(reminder_time.timestamp())}:F>, {reminder_time.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)')}): `{reminder['reminder']}`")
-                    except (discord.Forbidden, AttributeError) as e:
+                    except (discord.Forbidden, AttributeError):
                         pass
                 delete_query = "DELETE FROM reminders WHERE reminder_id = $1;"
                 await self.db_pool.execute(delete_query, reminder['reminder_id'])

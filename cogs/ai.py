@@ -49,10 +49,7 @@ class AI(commands.Cog):
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     @app_commands.describe(prompt="The prompt to send to G-AI.")
     async def ai(self, ctx: commands.Context, *, prompt: str):
-        if ctx.interaction:
-            await ctx.defer()
-        else:
-            await ctx.typing()
+        await ctx.typing()
         debug_flag = r"(?:\s|^)--debug(?:\s|$)"
         debug_mode = bool(re.search(debug_flag, prompt))
         prompt = re.sub(debug_flag, " ", prompt).strip() if prompt else ""
@@ -92,10 +89,7 @@ class AI(commands.Cog):
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def resetai(self, ctx: commands.Context):
-        if ctx.interaction:
-            await ctx.defer()
-        else:
-            await ctx.typing()
+        await ctx.typing()
         conversation_key = self.get_conversation(ctx)
         if conversation_key in self.conversations:
             del self.conversations[conversation_key]

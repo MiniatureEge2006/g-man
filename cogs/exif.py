@@ -18,10 +18,7 @@ class Exif(commands.Cog):
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def exif(self, ctx: commands.Context, url: str = None):
-        if ctx.interaction:
-            await ctx.defer()
-        else:
-            await ctx.typing()
+        await ctx.typing()
         
         try:
             if not url and not ctx.message.attachments:

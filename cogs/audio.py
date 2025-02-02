@@ -142,16 +142,14 @@ class Audio(commands.Cog):
     @commands.hybrid_command(name="join", description="Join a voice channel.")
     @app_commands.allowed_installs(guilds=True, users=False)
     async def join(self, ctx: commands.Context):
-        if ctx.interaction:
-            await ctx.defer()
+        await ctx.typing()
         
         await self.connect_to_channel(ctx)
     
     @commands.hybrid_command(name="leave", description="Leave the current voice channel.")
     @app_commands.allowed_installs(guilds=True, users=False)
     async def leave(self, ctx: commands.Context):
-        if ctx.interaction:
-            await ctx.defer()
+        await ctx.typing()
         if ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
             await ctx.send("You are not in the same voice channel as me.")
             return
@@ -167,10 +165,7 @@ class Audio(commands.Cog):
     @app_commands.describe(url="The URL of the audio/song to play.", filters="A comma-separated list of filters to apply to the audio.")
     @app_commands.allowed_installs(guilds=True, users=False)
     async def play(self, ctx: commands.Context, url: str, *, filters: str = None):
-        if ctx.interaction:
-            await ctx.defer()
-        else:
-            await ctx.typing()
+        await ctx.typing()
         
         filters_list = filters.split(',') if filters else []
         queue = self.get_queue(ctx.guild.id)
@@ -192,8 +187,7 @@ class Audio(commands.Cog):
     @app_commands.describe(mode="The mode to repeat. Can be 'single', 'queue', or 'none'.")
     @app_commands.allowed_installs(guilds=True, users=False)
     async def repeat(self, ctx: commands.Context, mode: str):
-        if ctx.interaction:
-            await ctx.defer()
+        await ctx.typing()
         if mode.lower() not in ["single", "queue", "none"]:
             await ctx.send("Invalid mode. Valid modes are 'single', 'queue', or 'none'.")
             return
@@ -207,8 +201,7 @@ class Audio(commands.Cog):
     @commands.hybrid_command(name="queue", description="Display the current queue.")
     @app_commands.allowed_installs(guilds=True, users=False)
     async def queue(self, ctx: commands.Context):
-        if ctx.interaction:
-            await ctx.defer()
+        await ctx.typing()
         queue = self.get_queue(ctx.guild.id)
         if queue:
             embed = discord.Embed(
@@ -227,8 +220,7 @@ class Audio(commands.Cog):
     @commands.hybrid_command(name="skip", description="Skip the currently playing audio/song.")
     @app_commands.allowed_installs(guilds=True, users=False)
     async def skip(self, ctx: commands.Context):
-        if ctx.interaction:
-            await ctx.defer()
+        await ctx.typing()
         if ctx.voice_client and ctx.voice_client.is_playing() and ctx.author.voice and ctx.author.voice.channel == ctx.voice_client.channel:
             ctx.voice_client.stop()
             await ctx.send("Skipped playback.")
@@ -241,8 +233,7 @@ class Audio(commands.Cog):
     @commands.hybrid_command(name="stop", description="Stop the currently playing audio.")
     @app_commands.allowed_installs(guilds=True, users=False)
     async def stop(self, ctx: commands.Context):
-        if ctx.interaction:
-            await ctx.defer()
+        await ctx.typing()
         
         if ctx.voice_client and ctx.voice_client.is_playing() and ctx.author.voice and ctx.author.voice.channel == ctx.voice_client.channel:
             queue = self.get_queue(ctx.guild.id)
@@ -258,8 +249,7 @@ class Audio(commands.Cog):
     @commands.hybrid_command(name="clear", description="Clear the queue.")
     @app_commands.allowed_installs(guilds=True, users=False)
     async def clear(self, ctx: commands.Context):
-        if ctx.interaction:
-            await ctx.defer()
+        await ctx.typing()
         if ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
             await ctx.send("You are not in the same voice channel as me.")
             return
@@ -270,8 +260,7 @@ class Audio(commands.Cog):
     @commands.hybrid_command(name="pause", description="Pause the currently playing audio.")
     @app_commands.allowed_installs(guilds=True, users=False)
     async def pause(self, ctx: commands.Context):
-        if ctx.interaction:
-            await ctx.defer()
+        await ctx.typing()
         
         if ctx.voice_client and ctx.voice_client.is_playing() and ctx.author.voice and ctx.author.voice.channel == ctx.voice_client.channel:
             ctx.voice_client.pause()
@@ -285,8 +274,7 @@ class Audio(commands.Cog):
     @commands.hybrid_command(name="resume", description="Resume the currently paused audio.")
     @app_commands.allowed_installs(guilds=True, users=False)
     async def resume(self, ctx: commands.Context):
-        if ctx.interaction:
-            await ctx.defer()
+        await ctx.typing()
         
         if ctx.voice_client and ctx.voice_client.is_paused() and ctx.author.voice and ctx.author.voice.channel == ctx.voice_client.channel:
             ctx.voice_client.resume()
@@ -300,8 +288,7 @@ class Audio(commands.Cog):
     @commands.hybrid_command(name="nowplaying", description="Display information about the currently playing audio/song.", aliases=["np"])
     @app_commands.allowed_installs(guilds=True, users=False)
     async def nowplaying(self, ctx: commands.Context):
-        if ctx.interaction:
-            await ctx.defer()
+        await ctx.typing()
         if ctx.voice_client and ctx.voice_client.is_playing():
             current = self.currently_playing.get(ctx.guild.id)
             if current:

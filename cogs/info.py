@@ -3,7 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 import aiohttp
 import bot_info
-from datetime import datetime, timezone
+from datetime import datetime
 from webcolors import hex_to_name, name_to_hex
 from PIL import Image, ImageDraw
 import io
@@ -520,10 +520,7 @@ class Info(commands.Cog):
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def weatherinfo(self, ctx: commands.Context, *, location: str):
-        if ctx.interaction:
-            await ctx.defer()
-        else:
-            await ctx.typing()
+        await ctx.typing()
         api_key = bot_info.data['openweather_api_key']
         base_url = "https://api.openweathermap.org/data/2.5/weather"
         geocode_url = "https://api.openweathermap.org/geo/1.0/direct"
@@ -585,10 +582,7 @@ class Info(commands.Cog):
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def colorinfo(self, ctx: commands.Context, color: str = None):
-        if ctx.interaction:
-            await ctx.defer()
-        else:
-            await ctx.typing()
+        await ctx.typing()
         try:
             if color is None or color.lower() == "random":
                 r = random.randint(0, 255)
@@ -696,10 +690,7 @@ class Info(commands.Cog):
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def gradientinfo(self, ctx: commands.Context, *, colors: str = None):
-        if ctx.interaction:
-            await ctx.defer()
-        else:
-            await ctx.typing()
+        await ctx.typing()
         try:
             if not colors or colors.lower() == "random":
                 num_colors = random.randint(2, 10)

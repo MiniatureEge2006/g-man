@@ -20,10 +20,7 @@ class YouTube(commands.Cog):
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def youtube(self, ctx: commands.Context, *, query: str):
-        if ctx.interaction:
-            await ctx.defer()
-        else:
-            await ctx.typing()
+        await ctx.typing()
         search_url = "https://www.googleapis.com/youtube/v3/search"
         video_url = "https://www.googleapis.com/youtube/v3/videos"
         params = {

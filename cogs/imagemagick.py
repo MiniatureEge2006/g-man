@@ -20,10 +20,7 @@ class ImageMagick(commands.Cog):
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def imagemagick(self, ctx: commands.Context, *, args: str):
-        if ctx.interaction:
-            await ctx.defer()
-        else:
-            await ctx.typing()
+        await ctx.typing()
         
 
         try:

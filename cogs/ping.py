@@ -10,7 +10,7 @@ class Ping(commands.Cog):
         self.start_time = time.time()
     
 
-    @commands.hybrid_command(name="ping", description="Get info and latency about G-Man.")
+    @commands.hybrid_command(name="ping", description="Get info and latency about G-Man.", aliases=["pong", "latency", "pingpong", "whatsmylatency"])
     @app_commands.user_install()
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)

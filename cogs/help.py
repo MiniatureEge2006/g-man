@@ -8,7 +8,7 @@ class Help(commands.Cog):
         self.color = discord.Color.og_blurple()
     
 
-    @commands.hybrid_command(name="help", description="Get a list of my commands.")
+    @commands.hybrid_command(name="help", description="Get a list of my commands.", aliases=["h", "commands", "c", "cmds", "pleasehelpme"])
     @app_commands.describe(command_or_category="The command or category in which you want to see.")
     @app_commands.user_install()
     @app_commands.allowed_installs(guilds=True, users=True)

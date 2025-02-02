@@ -19,10 +19,7 @@ class Ytdlp(commands.Cog):
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def ytdlp(self, ctx: commands.Context, url: str, *, options: str = ''):
-        if ctx.interaction:
-            await ctx.defer()
-        else:
-            await ctx.typing()
+        await ctx.typing()
         ydl_opts = {
             'noplaylist': True,
             'outtmpl': 'vids/%(extractor)s-%(id)s.%(ext)s'
