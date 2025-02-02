@@ -61,3 +61,14 @@ CREATE TABLE IF NOT EXISTS prefixes (
     guild_id BIGINT PRIMARY KEY,
     prefix TEXT NOT NULL
 );
+
+
+CREATE TABLE IF NOT EXISTS reminders (
+    id SERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    guild_id BIGINT,
+    channel_id BIGINT,
+    reminder_id INTEGER,
+    reminder TEXT NOT NULL,
+    reminder_time TIMESTAMPTZ NOT NULL
+);

@@ -76,7 +76,7 @@ class AI(commands.Cog):
                 content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
             if len(content) > 2000:
                 content = content[:1997] + "..."
-            await ctx.send(content)
+            await ctx.reply(content)
             user_history.append({"role": "assistant", "content": content})
             self.conversations[conversation_key] = user_history
         except Exception as e:

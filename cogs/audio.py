@@ -9,7 +9,7 @@ import asyncio
 from collections import deque
 from datetime import datetime
 
-YDL_OPTIONS = {'format': 'bestaudio/best', 'noplaylist': True, 'outtmpl': 'vids/%(extractor)s-%(id)s-%(title)s.%(ext)s', 'restrictfilenames': True, 'sleep_interval': 5}
+YDL_OPTIONS = {'format': 'bestaudio/best', 'noplaylist': True, 'outtmpl': 'vids/%(extractor)s-%(id)s-%(title)s.%(ext)s', 'restrictfilenames': True}
 spotify = spotipy.Spotify(auth_manager=spotipy.SpotifyClientCredentials(client_id=bot_info.data['spotify_client_id'], client_secret=bot_info.data['spotify_client_secret']))
 
 class Audio(commands.Cog):
@@ -24,14 +24,24 @@ class Audio(commands.Cog):
             self.queues[guild_id] = deque()
         return self.queues[guild_id]
 
-    async def connect_to_channel(self, ctx: commands.Context):
+    async def connect_to_channel(self, ctx: commands.Context) -> bool:
+        if ctx.voice_client:
+            if ctx.voice_client.is_playing():
+                if not (ctx.author.voice and ctx.author.voice.channel == ctx.voice_client.channel):
+                    await ctx.send("You must be in the same voice channel as me to play audio.")
+                    return False
+            if ctx.author.voice and ctx.author.voice.channel != ctx.voice_client.channel:
+                await ctx.voice_client.move_to(ctx.author.voice.channel)
+                await ctx.send(f"Moved to {ctx.author.voice.channel.name}.")
+            return True
         if ctx.author.voice:
             channel = ctx.author.voice.channel
             await channel.connect()
             await ctx.send(f"Connected to {channel.name}.")
+            return True
         else:
             await ctx.send("You are not connected to a voice channel.")
-            return
+            return False
     
     async def play_next(self, ctx: commands.Context):
         guild_id = ctx.guild.id
@@ -65,8 +75,22 @@ class Audio(commands.Cog):
 
         file_path = yt_dlp.YoutubeDL(YDL_OPTIONS).prepare_filename(info)
         
-        if ctx.voice_client is None:
-            await self.connect_to_channel(ctx)
+        if ctx.voice_client:
+            if ctx.voice_client.is_playing() and ctx.author.voice.channel != ctx.voice_client.channel:
+                await ctx.send("You must be in the same voice channel as me to play audio.")
+                return
+            if ctx.author.voice and ctx.author.voice.channel != ctx.voice_client.channel:
+                moved = await self.connect_to_channel(ctx)
+                if not moved:
+                    return
+        else:
+            if ctx.author.voice and ctx.author.voice.channel:
+                connected = await self.connect_to_channel(ctx)
+                if not connected:
+                    return
+            else:
+                await ctx.send("You are not connected to a voice channel.")
+                return
         
         voice_client = ctx.voice_client
         if voice_client:
@@ -126,8 +150,8 @@ class Audio(commands.Cog):
     async def leave(self, ctx: commands.Context):
         if ctx.interaction:
             await ctx.defer()
-        if ctx.author.voice is None:
-            await ctx.send("You are not connected to a voice channel.")
+        if ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You are not in the same voice channel as me.")
             return
         if ctx.voice_client:
             queue = self.get_queue(ctx.guild.id)
@@ -143,12 +167,22 @@ class Audio(commands.Cog):
     async def play(self, ctx: commands.Context, url: str, *, filters: str = None):
         if ctx.interaction:
             await ctx.defer()
+        else:
+            await ctx.typing()
         
         filters_list = filters.split(',') if filters else []
         queue = self.get_queue(ctx.guild.id)
-        if ctx.voice_client and ctx.voice_client.is_playing():
+        if ctx.voice_client and ctx.voice_client.is_playing() and ctx.author.voice and ctx.author.voice.channel == ctx.voice_client.channel:
             queue.append((url, filters_list))
             await ctx.send(f"Added {url} to the queue.")
+        elif ctx.voice_client and ctx.voice_client.is_playing() and (ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel):
+            await ctx.send("You must be in the same voice channel as me to play audio.")
+            return
+        elif ctx.voice_client is None or (ctx.author.voice and ctx.author.voice.channel != ctx.voice_client.channel):
+            connected = await self.connect_to_channel(ctx)
+            if not connected:
+                return
+            await self.play_audio(ctx, url, filters=filters_list)
         else:
             await self.play_audio(ctx, url, filters=filters_list)
     
@@ -160,6 +194,9 @@ class Audio(commands.Cog):
             await ctx.defer()
         if mode.lower() not in ["single", "queue", "none"]:
             await ctx.send("Invalid mode. Valid modes are 'single', 'queue', or 'none'.")
+            return
+        if ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You are not in the same voice channel as me.")
             return
         self.loop_mode[ctx.guild.id] = mode.lower()
         await ctx.send(f"Loop mode set to {mode.lower()}.")
@@ -179,6 +216,9 @@ class Audio(commands.Cog):
                 timestamp=discord.utils.utcnow()
             )
             await ctx.send(embed=embed)
+        elif ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You are not in the same voice channel as me.")
+            return
         else:
             await ctx.send("The queue is empty.")
     
@@ -187,9 +227,12 @@ class Audio(commands.Cog):
     async def skip(self, ctx: commands.Context):
         if ctx.interaction:
             await ctx.defer()
-        if ctx.voice_client and ctx.voice_client.is_playing():
+        if ctx.voice_client and ctx.voice_client.is_playing() and ctx.author.voice and ctx.author.voice.channel == ctx.voice_client.channel:
             ctx.voice_client.stop()
             await ctx.send("Skipped playback.")
+        elif ctx.voice_client and ctx.voice_client.is_playing() and ctx.author.voice and ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You must be in the same voice channel as me to skip the audio.")
+            return
         else:
             await ctx.send("Nothing is currently playing.")
     
@@ -199,11 +242,14 @@ class Audio(commands.Cog):
         if ctx.interaction:
             await ctx.defer()
         
-        if ctx.voice_client:
+        if ctx.voice_client and ctx.voice_client.is_playing() and ctx.author.voice and ctx.author.voice.channel == ctx.voice_client.channel:
             queue = self.get_queue(ctx.guild.id)
             queue.clear()
             ctx.voice_client.stop()
             await ctx.send("Stopped playback and cleared the queue.")
+        elif ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You must be in the same voice channel as me to stop the audio.")
+            return
         else:
             await ctx.send("I am not connected to a voice channel.")
     
@@ -212,6 +258,9 @@ class Audio(commands.Cog):
     async def clear(self, ctx: commands.Context):
         if ctx.interaction:
             await ctx.defer()
+        if ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You are not in the same voice channel as me.")
+            return
         queue = self.get_queue(ctx.guild.id)
         queue.clear()
         await ctx.send("Cleared the queue.")
@@ -222,9 +271,12 @@ class Audio(commands.Cog):
         if ctx.interaction:
             await ctx.defer()
         
-        if ctx.voice_client and ctx.voice_client.is_playing():
+        if ctx.voice_client and ctx.voice_client.is_playing() and ctx.author.voice and ctx.author.voice.channel == ctx.voice_client.channel:
             ctx.voice_client.pause()
             await ctx.send("Paused playback.")
+        elif ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You must be in the same voice channel as me to pause the audio.")
+            return
         else:
             await ctx.send("Nothing is currently playing.")
     
@@ -234,9 +286,12 @@ class Audio(commands.Cog):
         if ctx.interaction:
             await ctx.defer()
         
-        if ctx.voice_client and ctx.voice_client.is_paused():
+        if ctx.voice_client and ctx.voice_client.is_paused() and ctx.author.voice and ctx.author.voice.channel == ctx.voice_client.channel:
             ctx.voice_client.resume()
             await ctx.send("Resumed playback.")
+        elif ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You must be in the same voice channel as me to resume the audio.")
+            return
         else:
             await ctx.send("Nothing is currently paused.")
     
@@ -268,6 +323,9 @@ class Audio(commands.Cog):
                 embed.set_image(url=info.get('thumbnail', None))
                 embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
                 await ctx.send(embed=embed)
+        elif ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You are not in the same voice channel as me.")
+            return
         else:
             await ctx.send("Nothing is currently playing.")
     

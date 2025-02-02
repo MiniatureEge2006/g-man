@@ -43,7 +43,7 @@ async def set_prefix(guild_id, prefix):
         await conn.execute("INSERT INTO prefixes (guild_id, prefix) VALUES ($1, $2) ON CONFLICT (guild_id) DO UPDATE SET prefix = $2", guild_id, prefix)
 
 
-extensions = ['cogs.audio', 'cogs.help', 'cogs.ping', 'cogs.bitrate', 'cogs.filter', 'cogs.fun', 'cogs.corruption', 'cogs.bookmarks', 'cogs.utility', 'cogs.caption', 'cogs.exif', 'cogs.ffmpeg', 'cogs.imagemagick', 'cogs.ytdlp', 'cogs.youtube', 'cogs.info', 'cogs.ai']
+extensions = ['cogs.audio', 'cogs.help', 'cogs.ping', 'cogs.bitrate', 'cogs.filter', 'cogs.fun', 'cogs.corruption', 'cogs.bookmarks', 'cogs.utility', 'cogs.caption', 'cogs.exif', 'cogs.ffmpeg', 'cogs.imagemagick', 'cogs.ytdlp', 'cogs.youtube', 'cogs.info', 'cogs.ai', 'cogs.reminder']
 bot = commands.Bot(command_prefix=lambda bot, msg: get_prefix(msg), case_insensitive=True, strip_after_prefix=True, status=discord.Status.online, activity=discord.Game(name=f"{bot_info.data['prefix']}help"), help_command=None, intents=discord.Intents.all())
 
 
@@ -293,18 +293,25 @@ async def on_guild_available(guild):
     logger.info(f"Guild available: {guild.name} (ID: {guild.id})")
 
 
-@bot.command()
+@bot.command(name="sync", description="Sync slash commands.")
 @bot_info.is_owner()
-async def sync(ctx: commands.Context):
+async def sync(ctx: commands.Context, guild_id: int = None):
     logger = logging.getLogger()
     message = await ctx.send("Syncing slash commands...")
     try:
-        await bot.tree.sync()
+        if guild_id:
+            guild = discord.Object(id=guild_id)
+            await bot.tree.sync(guild=guild)
+            logger.info(f"Synced slash commands for guild {guild.id}.")
+            await message.edit(content=f"Synced slash commands for guild {guild.id}.")
+        else:
+            await bot.tree.sync()
+            logger.info("Synced slash commands globally.")
+            await message.edit(content="Synced slash commands globally.")
     except Exception as e:
         logger.error(f"Error syncing slash commands: {e}")
         await message.edit(content=f"Error syncing slash commands: {e}")
-    await message.edit(content="Slash commands synced.")
-    logger.info("Slash commands synced.")
+
 
 
 @bot.command(name="command", description="Enable or disable a command.", aliases=["cmd"])
