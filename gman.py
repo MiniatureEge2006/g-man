@@ -469,11 +469,47 @@ async def command_list(ctx: commands.Context):
     embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url if ctx.author.avatar else None)
     await ctx.send(embed=embed)
 
+@bot.command(name="blocklist", description="List all blocked users, channels, roles, and servers.")
+@commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
+async def blocklist(ctx: commands.Context):
+    async with bot.db.acquire() as conn:
+        records = await conn.fetch("SELECT type, entity_id, reason FROM blocklist")
+        global_blocked_records = await conn.fetch("SELECT discord_id, reason FROM global_blocked_users")
+        server_blocked_records = await conn.fetch("SELECT guild_id, reason FROM global_blocked_servers")
+        if not (records or global_blocked_records or server_blocked_records):
+            await ctx.send("The blocklist is empty.")
+            return
+        formatted_records = "\n".join(f"**Type:** {record['type'].capitalize()} | **ID:** {record['entity_id']} | **Reason:** {record['reason']}" for record in records)
+        embed = discord.Embed(title="Blocklist", color=discord.Color.red())
+        embed.add_field(name="Blocked Entries", value=formatted_records, inline=False)
+        if str(ctx.author.id) in bot_info.data['owners']:
+            formatted_global_records = "\n".join(f"**User ID:** {record['discord_id']} | **Reason:** {record['reason']}" for record in global_blocked_records)
+            formatted_server_records = "\n".join(f"**Server ID:** {record['guild_id']} | **Reason:** {record['reason']}" for record in server_blocked_records)
+            embed.add_field(name="Global/Server Blocklist", value=f"**Global:**\n{formatted_global_records}\n\n**Server:**\n{formatted_server_records}", inline=False)
+        embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
+        embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url if ctx.author.avatar else None)
+        await ctx.send(embed=embed)
+
+@bot.command(name="allowlist", description="List all allowed users, channels, roles, and servers.")
+@commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
+async def allowlist(ctx: commands.Context):
+    async with bot.db.acquire() as conn:
+        records = await conn.fetch("SELECT type, entity_id, reason FROM allowlist")
+        if not records:
+            await ctx.send("The allowlist is empty.")
+            return
+        formatted_records = "\n".join(f"**Type:** {record['type'].capitalize()} | **ID:** {record['entity_id']} | **Reason:** {record['reason']}" for record in records)
+        embed = discord.Embed(title="Allowlist", color=discord.Color.green())
+        embed.add_field(name="Allowed Entries", value=formatted_records, inline=False)
+        embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
+        embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url if ctx.author.avatar else None)
+        await ctx.send(embed=embed)
+
 @bot.command(name="block", description="Blocks a user, channel, or role from using the bot.")
 @commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
-async def block(ctx: commands.Context, type: str, type_id: int, *, reason="No reason provided"):
+async def block(ctx: commands.Context, type: str, target: commands.UserConverter | commands.MemberConverter | commands.TextChannelConverter | commands.RoleConverter | commands.GuildConverter | int, *, reason="No reason provided"):
     valid_types = ["global", "user", "channel", "role", "server"]
-    if type_id == ctx.author.id:
+    if target.id == ctx.author.id:
         await ctx.send("You can't block yourself.")
         return
     if type not in ["global", "user", "channel", "role", "server"]:
@@ -482,6 +518,7 @@ async def block(ctx: commands.Context, type: str, type_id: int, *, reason="No re
     if type in ["global", "server"] and str(ctx.author.id) not in bot_info.data['owners']:
         await ctx.send(f"{type.capitalize()} blocks can only be set by bot owners.")
         return
+    type_id = target.id if hasattr(target, "id") else target
     async with bot.db.acquire() as conn:
         if type == "server":
             exists = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM global_blocked_servers WHERE guild_id = $1)", type_id)
@@ -507,7 +544,7 @@ async def block(ctx: commands.Context, type: str, type_id: int, *, reason="No re
 
 @bot.command(name="unblock", description="Unblocks a user, channel, or role from using the bot.")
 @commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
-async def unblock(ctx: commands.Context, type: str, type_id: int):
+async def unblock(ctx: commands.Context, type: str, target: commands.UserConverter | commands.MemberConverter | commands.TextChannelConverter | commands.RoleConverter | commands.GuildConverter | int):
     valid_types = ["global", "user", "channel", "role", "server"]
     if type not in valid_types:
         await ctx.send(f"Invalid type. Valid types: {', '.join(valid_types)}")
@@ -515,6 +552,7 @@ async def unblock(ctx: commands.Context, type: str, type_id: int):
     if type in ["global", "server"] and str(ctx.author.id) not in bot_info.data['owners']:
         await ctx.send(f"{type.capitalize()} blocks can only be removed by bot owners.")
         return
+    type_id = target.id if hasattr(target, "id") else target
     async with bot.db.acquire() as conn:
         if type == "server":
             result = await conn.execute("DELETE FROM global_blocked_servers WHERE guild_id = $1", type_id)
@@ -540,11 +578,12 @@ async def unblock(ctx: commands.Context, type: str, type_id: int):
 
 @bot.command(name="allow", description="Allows a user, channel, or role to use the bot.")
 @commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
-async def allow(ctx: commands.Context, type: str, type_id: int, *, reason="No reason provided"):
+async def allow(ctx: commands.Context, type: str, target: commands.MemberConverter | commands.TextChannelConverter | commands.RoleConverter, *, reason="No reason provided"):
     valid_types = ["user", "channel", "role"]
     if type not in valid_types:
         await ctx.send("Invalid type. Valid types: `user`, `channel`, or `role`.")
         return
+    type_id = target.id if hasattr(target, "id") else target
     async with bot.db.acquire() as conn:
         exists = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM allowlist WHERE type = $1 AND entity_id = $2)", type, type_id)
         if exists:
@@ -555,11 +594,12 @@ async def allow(ctx: commands.Context, type: str, type_id: int, *, reason="No re
 
 @bot.command(name="deny", description="Denies a user, channel, or role from using the bot. (Not to be confused with `block`.)")
 @commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
-async def deny(ctx: commands.Context, type: str, type_id: int):
+async def deny(ctx: commands.Context, type: str, target: commands.MemberConverter | commands.TextChannelConverter | commands.RoleConverter):
     valid_types = ["user", "channel", "role"]
     if type not in valid_types:
         await ctx.send("Invalid type. Valid types: `user`, `channel`, or `role`.")
         return
+    type_id = target.id if hasattr(target, "id") else target
     async with bot.db.acquire() as conn:
         exists = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM allowlist WHERE type = $1 AND entity_id = $2)", type, type_id)
         if not exists:
