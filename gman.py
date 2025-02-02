@@ -12,6 +12,7 @@ import asyncpg
 import discord
 from discord import app_commands
 from discord.ext import commands
+from typing import Literal, Optional
 import media_cache
 import os
 import re
@@ -295,22 +296,36 @@ async def on_guild_available(guild):
 
 @bot.command(name="sync", description="Sync slash commands.")
 @bot_info.is_owner()
-async def sync(ctx: commands.Context, guild_id: int = None):
+async def sync(ctx: commands.Context, guilds: commands.Greedy[discord.Object], spec: Optional[Literal["~", "*", "^"]] = None) -> None:
     logger = logging.getLogger()
-    message = await ctx.send("Syncing slash commands...")
-    try:
-        if guild_id:
-            guild = discord.Object(id=guild_id)
-            await bot.tree.sync(guild=guild)
-            logger.info(f"Synced slash commands for guild {guild.id}.")
-            await message.edit(content=f"Synced slash commands for guild {guild.id}.")
+    message = await ctx.send("Syncing...")
+    if not guilds:
+        if spec == "~":
+            synced = await ctx.bot.tree.sync(guild=ctx.guild)
+        elif spec == "*":
+            ctx.bot.tree.copy_global_to(guild=ctx.guild)
+            synced = await ctx.bot.tree.sync(guild=ctx.guild)
+        elif spec == "^":
+            ctx.bot.tree.clear_commands(guild=ctx.guild)
+            await ctx.bot.tree.sync(guild=ctx.guild)
+            synced = []
         else:
-            await bot.tree.sync()
-            logger.info("Synced slash commands globally.")
-            await message.edit(content="Synced slash commands globally.")
-    except Exception as e:
-        logger.error(f"Error syncing slash commands: {e}")
-        await message.edit(content=f"Error syncing slash commands: {e}")
+            synced = await ctx.bot.tree.sync()
+        logger.info(f"Synced {len(synced)} commands {'globally' if spec is None else 'to the current guild'}.")
+        await message.edit(content=f"Synced {len(synced)} commands {'globally' if spec is None else 'to the current guild'}.")
+        return
+    ret = 0
+    for guild in guilds:
+        try:
+            await ctx.bot.tree.sync(guild=guild)
+        except discord.HTTPException:
+            logger.warning(f"Failed to sync commands to {guild.id}")
+            pass
+        else:
+            ret += 1
+    
+    await ctx.send(f"Synced the tree to {ret}/{len(guilds)} guilds.")
+    
 
 
 

@@ -17,6 +17,7 @@ colorlog
 asyncpg
 spotipy
 isodate
+dateparser
 ollama
 future==0.18.2
 idna==3.3

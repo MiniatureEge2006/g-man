@@ -119,8 +119,10 @@ class Audio(commands.Cog):
             embed.add_field(name="Length", value=info.get('duration_string', 'Unknown'), inline=True)
             embed.add_field(name="Author", value=info.get('uploader', 'Unknown'), inline=True)
             embed.add_field(name="Channel", value=info.get('uploader_url', 'Unknown'), inline=True)
-            embed.add_field(name="Views", value=f"{info.get('view_count', 'Unknown'):,}", inline=True)
-            embed.add_field(name="Likes", value=f"{info.get('like_count', 'Unknown'):,}", inline=True)
+            if info.get('view_count'):
+                embed.add_field(name="Views", value=f"{info['view_count']:,}", inline=True)
+            if info.get('like_count'):
+                embed.add_field(name="Likes", value=f"{info['like_count']:,}", inline=True)
             embed.add_field(name="Filters", value=", ".join(filters) if filters else "None", inline=True)
             embed.add_field(name="Published At", value=upload_date, inline=True)
             embed.set_image(url=info.get('thumbnail'))
@@ -313,11 +315,13 @@ class Audio(commands.Cog):
                 )
                 raw_date = info.get('upload_date')
                 upload_date = datetime.strptime(raw_date, '%Y%m%d').strftime('%B %d, %Y') if raw_date else "Unknown"
-                embed.add_field(name="Length", value=info['duration_string'] if info['duration_string'] else "Unknown", inline=True)
-                embed.add_field(name="Author", value=info['uploader'] if info['uploader'] else "Unknown", inline=True)
-                embed.add_field(name="Channel", value=info['uploader_url'] if info['uploader_url'] else "Unknown", inline=True)
-                embed.add_field(name="Views", value=f"{info['view_count']:,}" if info['view_count'] else "Unknown", inline=True)
-                embed.add_field(name="Likes", value=f"{info['like_count']:,}" if info['like_count'] else "Unknown", inline=True)
+                embed.add_field(name="Length", value=info.get('duration_string', 'Unknown'), inline=True)
+                embed.add_field(name="Author", value=info.get('uploader', 'Unknown'), inline=True)
+                embed.add_field(name="Channel", value=info.get('uploader_url', 'Unknown'), inline=True)
+                if info.get('view_count'):
+                    embed.add_field(name="Views", value=f"{info['view_count']:,}")
+                if info.get('like_count'):
+                    embed.add_field(name="Likes", value=f"{info['like_count']:,}")
                 embed.add_field(name="Filters", value=", ".join(filters) if filters else "None", inline=True)
                 embed.add_field(name="Published At", value=upload_date, inline=True)
                 embed.set_image(url=info.get('thumbnail', None))
