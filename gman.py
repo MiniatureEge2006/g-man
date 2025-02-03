@@ -234,7 +234,7 @@ async def on_command_error(ctx, error):
     command_name = ctx.command.qualified_name if ctx.command else "Unknown"
     command_content = ctx.message.content
     logger.error(f"\n--- Command Error Log ---\nTimestamp: {timestamp}\nUser: {user}\nGuild: {guild}\nChannel: {channel}\nCommand: {command_name}\nCommand Content: {command_content}\nError: {error}\n--- End Command Error Log ---")
-    embed = discord.Embed(title="Command Error", color=discord.Color.red(), timestamp=discord.utils.utcnow())
+    embed = discord.Embed(title=":warning: Command Error", color=discord.Color.red(), timestamp=discord.utils.utcnow())
     embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
     if isinstance(error, commands.CheckFailure):
         return
