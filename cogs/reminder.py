@@ -6,6 +6,7 @@ import asyncpg
 from datetime import datetime, timezone
 import dateparser
 import bot_info
+import random
 
 class Reminder(commands.Cog):
     def __init__(self, bot):
@@ -36,16 +37,27 @@ class Reminder(commands.Cog):
         query = "INSERT INTO reminders (user_id, guild_id, channel_id, reminder_id, reminder, reminder_time) VALUES ($1, $2, $3, $4, $5, $6);"
         await self.db_pool.execute(query, user_id, guild_id, channel_id, reminder_id, reminder_text, reminder_time)
     
-    @commands.hybrid_command(name="remind", description="Set a reminder for yourself.", aliases=["remindme", "reminder"])
+    @commands.hybrid_command(name="remind", description="Set a reminder for yourself.", aliases=["reminder"])
     @app_commands.user_install()
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     @app_commands.describe(user="The user you want to set a reminder for.", time="The time you want to set the reminder for.", reminder_text="What you want to be reminded of.")
-    async def remind(self, ctx: commands.Context, user: discord.Member = None, time: str = None, *, reminder_text: str):
+    async def remind(self, ctx: commands.Context, user: discord.Member = None, time: str = None, *, reminder_text: str = None):
         await ctx.typing()
-        if not time or not reminder_text:
-            await ctx.send("Please provide both a time and a reminder message.")
+        if not time:
+            await ctx.send("Please provide a time for the reminder. Use a format like `tomorrow at 3pm`, `in 1 hour`, or `2 weeks`.")
             return
+        random_reminders = [
+            "A friendly reminder from your favorite G-Man.",
+            "To make sure you're still alive.",
+            "Rise and shine. Mr. Freeman.",
+            "A reminder from the future.",
+            "A reminder from the past.",
+            "A reminder from the present.",
+            "Time? Is it really that time again?"
+        ]
+        if not reminder_text:
+            reminder_text = random.choice(random_reminders)
         if user:
             if not (str(ctx.author.id) in bot_info.data['owners'] or not ctx.author.guild_permissions.manage_guild):
                 await ctx.send("You need the `Manage Guild` permission to set a reminder for another user.")
@@ -151,14 +163,21 @@ class Reminder(commands.Cog):
     async def clearreminders(self, ctx: commands.Context, server: bool = False, user: discord.Member = None):
         await ctx.typing()
         if ctx.guild is None:
+            target_user_id = ctx.author.id
             if user or server:
                 await ctx.send("You can only clear other users' or server reminders in a server.")
                 return
-            target_user_id = ctx.author.id
             query = "DELETE FROM reminders WHERE user_id = $1;"
             await self.db_pool.execute(query, target_user_id)
-            await ctx.send(f"All your reminders have been cleared.")
+            await ctx.send("All your reminders have been cleared.")
             return
+        else:
+            if user and (str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.manage_guild):
+                target_user_id = user.id
+            else:
+                target_user_id = ctx.author.id
+        query = "DELETE FROM reminders WHERE user_id = $1;"
+        await self.db_pool.execute(query, target_user_id)
         if server:
             if not (str(ctx.author.id) in bot_info.data['owners'] or not ctx.author.guild_permissions.manage_guild):
                 await ctx.send("You need the `Manage Guild` permission to clear reminders for the server.")
@@ -167,7 +186,12 @@ class Reminder(commands.Cog):
             await self.db_pool.execute(query, ctx.guild.id)
             await ctx.send(f"All reminders for {ctx.guild.name} have been cleared.")
         else:
-            target_user_id = user.id if user and (ctx.author.id in bot_info.data['owners'] or ctx.author.guild_permissions.manage_guild) else ctx.author.id
+            if not user:
+                target_user_id = ctx.author.id
+            if not (str(ctx.author.id) in bot_info.data['owners'] or not ctx.author.guild_permissions.manage_guild):
+                await ctx.send("You need the `Manage Guild` permission to clear reminders for another user.")
+                return
+            target_user_id = user.id if user else ctx.author.id
             query = "DELETE FROM reminders WHERE user_id = $1;"
             await self.db_pool.execute(query, target_user_id)
             await ctx.send(f"All reminders for {user.display_name if user else 'you'} have been cleared.")
