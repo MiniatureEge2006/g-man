@@ -2,7 +2,6 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import ollama
-import re
 import asyncio
 
 MAX_CONVERSATION_HISTORY_LENGTH = 5
@@ -34,13 +33,13 @@ class AI(commands.Cog):
             The current channel is **#{ctx.channel.name}**, which is **{"NSFW" if ctx.channel.is_nsfw() else "SFW"}** with topic **{ctx.channel.topic if ctx.channel.topic else "No topic"}**.
             You are interacting with **{ctx.author.name}#{ctx.author.discriminator}**, a regular user with **{f"nickname {ctx.author.nick}" if ctx.author.nick else "no nickname"}**.
             The bot owner is **{bot_owner}**.
-            Try to provide helpful information **WHILE KEEPING YOUR MYSTERIOUS VIBE AND GET STRAIGHT TO THE POINT IF NECESSARY.**
+            Try to provide helpful information **while keeping your mysterious vibe and get straight to the point if necessary.**
             """
         else:
             return f"""
             You are an enigmatic AI assistant in a DM conversation with **{ctx.author.name}#{ctx.author.discriminator}**. You are **{self.bot.user.name}**.
             The bot owner is **{bot_owner}**.
-            Try to provide helpful information **WHILE KEEPING YOUR MYSTERIOUS VIBE AND GET STRAIGHT TO THE POINT IF NECESSARY.**
+            Try to provide helpful information **while keeping your mysterious vibe and get straight to the point if necessary.**
             """
 
     @commands.hybrid_command(name="ai", description="Use G-AI to chat, ask questions, and generate responses.")
@@ -50,27 +49,19 @@ class AI(commands.Cog):
     @app_commands.describe(prompt="The prompt to send to G-AI.")
     async def ai(self, ctx: commands.Context, *, prompt: str):
         await ctx.typing()
-        debug_flag = r"(?:\s|^)--debug(?:\s|$)"
-        debug_mode = bool(re.search(debug_flag, prompt))
-        prompt = re.sub(debug_flag, " ", prompt).strip() if prompt else ""
         conversation_key = self.get_conversation(ctx)
         user_history = self.conversations.get(conversation_key, [])
         user_history.append({"role": "user", "content": prompt})
 
         if len(user_history) > MAX_CONVERSATION_HISTORY_LENGTH:
             user_history = user_history[-MAX_CONVERSATION_HISTORY_LENGTH:]
-        asyncio.create_task(self.process_ai_response(ctx, conversation_key, user_history, debug_mode))
+        asyncio.create_task(self.process_ai_response(ctx, conversation_key, user_history))
     
-    async def process_ai_response(self, ctx: commands.Context, conversation_key, user_history, debug_mode):
+    async def process_ai_response(self, ctx: commands.Context, conversation_key, user_history):
         try:
             system_prompt = await self.create_system_prompt(ctx)
             response: ollama.ChatResponse = await self.get_ai_response(system_prompt, user_history)
             content = response.message.content
-            if debug_mode:
-                match = re.search(r"<think>(.*?)</think>", content, re.DOTALL)
-                content = match.group(1).strip() if match else "No debug information found."
-            else:
-                content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
             if len(content) > 2000:
                 content = content[:1997] + "..."
             await ctx.reply(content)
@@ -80,7 +71,7 @@ class AI(commands.Cog):
             await ctx.send(f"An error occurred: {e}")
     async def get_ai_response(self, system_prompt: str, user_history: list):
         try:
-            response = await asyncio.to_thread(ollama.chat, model="deepseek-r1", messages=[{"role": "system", "content": system_prompt}] + user_history)
+            response = await asyncio.to_thread(ollama.chat, model="dolphin3", messages=[{"role": "system", "content": system_prompt}] + user_history)
             return response
         except Exception as e:
             raise RuntimeError(f"AI request failed: {e}")
