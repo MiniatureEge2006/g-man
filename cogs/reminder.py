@@ -160,7 +160,7 @@ class Reminder(commands.Cog):
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     @app_commands.describe(user="The user whose reminders you want to clear if you have manage server permissions.", server="Clear all reminders for the server if you have manage server permissions.")
-    async def clearreminders(self, ctx: commands.Context, server: bool = False, user: discord.Member = None):
+    async def clearreminders(self, ctx: commands.Context, user: discord.Member = None, server: bool = False):
         await ctx.typing()
         if ctx.guild is None:
             target_user_id = ctx.author.id
