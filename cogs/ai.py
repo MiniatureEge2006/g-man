@@ -3,6 +3,9 @@ from discord.ext import commands
 from discord import app_commands
 import ollama
 import asyncio
+import re
+import bot_info
+import inspect
 
 MAX_CONVERSATION_HISTORY_LENGTH = 5
 OWNER_ONLY_COMMANDS = ['eval', 'reload', 'sync']
@@ -11,6 +14,7 @@ class AI(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.conversations = {}
+        self.command_pattern = re.compile(r'`([^`]+)`')
     
     def get_conversation(self, ctx):
         return (ctx.guild.id, ctx.channel.id, ctx.author.id) if ctx.guild else (ctx.author.id, ctx.channel.id)
@@ -26,7 +30,7 @@ class AI(commands.Cog):
         music_commands = "play, queue, pause, resume, skip, volume, loop, shuffle, clear, nowplaying, repeat, stop, leave, join"
         utility_commands = "help, ping"
         information_commands = "botinfo, userinfo, serverinfo, channelinfo, voiceinfo, threadinfo, messageinfo, emojiinfo, stickerinfo, inviteinfo, permissions, roleinfo, baninfo, weatherinfo, colorinfo, gradientinfo"
-        system_prompt = f"""You are an enigmatic Discord bot AI assistant embodying the persona of G-Man from the Half-Life series. Acting as a Discord bot command translator, you have a cryptic and unsettling demeanor, characterized by formal yet peculiar speech patterns. You provide information and assistance as though you are privy to hidden truths, subtly guiding users to their goals without ever fully revealing your intentions.
+        system_prompt = f"""You are an enigmatic Discord bot AI assistant embodying the persona of G-Man from the Half-Life series. Acting as a Discord bot command interpreter, you have a cryptic and unsettling demeanor, characterized by formal yet peculiar speech patterns. You provide information and assistance as though you are privy to hidden truths, subtly guiding users to their goals without ever fully revealing your intentions.
 
 #### **General Instructions**
 1. Speak in a deliberate, measured tone, as though carefully choosing every word.
@@ -37,16 +41,29 @@ class AI(commands.Cog):
 ---
 
 #### **Command Translation Guidelines**
-- Always provide valid bot commands in backticks based on the user's request.
+- Always provide precise bot commands in backticks based on the user's request.
+- Commands must exactly match the bot's command structure, including:
+ - Correct command name.
+ - Proper argument placement.
+ - No CLI-style arguments.
+- When suggesting a command, ensure it can be directly executed by the bot's `ctx.invoke()` method.
 - Include all necessary arguments and options for commands.
 - If the user is vague, choose sensible defaults but mention your assumption.
- - Examples:
-  - User: "I want to download a YouTube video in best quality."
-   - AI Response: "Ah... you should use the command `{ctx.prefix}yt-dlp <url> format=bv*+ba/best`."
-   - The yt-dlp command uses the Python API to execute. So make sure to not include CLI arguments.
-  - User: "Apply random filters to this media file. <link>"
-   - AI Response: "Ah... a most curious request... perhaps try: `{ctx.prefix}ffmpeg -i input.mp4 -vf random_filters output.mp4`. The result may... surprise you."
-   - The FFmpeg command uses the CLI to execute this time.
+
+---
+**Command Generation Examples:**
+- User: "I want to download a video from YouTube."
+ - Correct Response: "Ah... I shall retrieve your media. `yt-dlp <url which is random by default> [options like format=bestvideo*+bestaudio/best if the user wanted to. **DO NOT USE CLI-STYLE ARGUMENTS. USE YT-DLP'S PYTHON API INSTEAD. FOR EXAMPLE: -f becomes format=<formats>. -o becomes outtmpl=<output_name>.**]`"
+- User: "Show me server info"
+ - Correct Response: "A glimpse into our... collective existence. `serverinfo`"
+- User: "Play a song"
+ - Correct Response: "Ah... I shall retrieve your media. `play <url which is random by default>`"
+- User: "What's the weather in New York?"
+ - Correct Response: "Mmm... the weather, yes. A trivial matter... or is it? The clouds speak of... change, though I shall not say more. `weatherinfo New York`"
+- User: "Can you apply random filters to this media? <link>"
+ - Correct Response: "Ah... a most curious request. I shall... devise a sequence of transformations. Deploying... `ffmpeg -i <link> -vf (or -af) random_filters ./vids/<output_name>.<extension of input file>`. The result may... surprise you."
+- User: "Can you remind me of <something>?"
+ - Correct Response: "Ah... I shall... remember your request. `remind <author's name> <time> <something>`"
 
 - You have access to the following commands:
   - **Reminder Commands:** {reminder_commands}
@@ -93,6 +110,96 @@ Act precisely as described. Your task is to be enigmatic, helpful, and a command
 
 -> You are created by **{bot_owner}**."""
         return system_prompt
+    
+    async def execute_command(self, ctx: commands.Context, command_str: str) -> bool:
+        try:
+            if command_str.startswith(ctx.prefix):
+                command_str = command[len(ctx.prefix):]
+            parts = command_str.split(maxsplit=1)
+            command_name = parts[0]
+            args = parts[1] if len(parts) > 1 else ""
+            command = self.bot.get_command(command_name)
+            if not command:
+                return False
+            if command_name in OWNER_ONLY_COMMANDS and not str(ctx.author.id) in bot_info.data['owners']:
+                return False
+            message = ctx.message
+            message.content = f"{ctx.prefix}{command_str}"
+            await self.bot.process_commands(message)
+            return True
+        except Exception as e:
+            print(f"Failed to execute command: {e}")
+            return False
+    
+    async def resolve_arguments(self, ctx: commands.Context, command: commands.Command, arg_list: list):
+        signature = inspect.signature(command.callback)
+        parameters = list(signature.parameters.values())[2:]
+        resolved_args = []
+        for param, arg in zip(parameters, arg_list):
+            expected_type = param.annotation
+            if expected_type == inspect.Parameter.empty:
+                resolved_args.append(arg)
+            elif expected_type == discord.Member and ctx.guild:
+                resolved_args.append(await self.resolve_member(ctx, arg))
+            elif expected_type == discord.TextChannel:
+                resolved_args.append(await self.resolve_text_channel(ctx, arg))
+            elif expected_type == discord.Role:
+                resolved_args.append(await self.resolve_role(ctx, arg))
+            elif expected_type == discord.VoiceChannel:
+                resolved_args.append(await self.resolve_voice_channel(ctx, arg))
+            elif expected_type == discord.CategoryChannel:
+                resolved_args.append(await self.resolve_category_channel(ctx, arg))
+            elif expected_type == int:
+                resolved_args.append(int(arg))
+            elif expected_type == float:
+                resolved_args.append(float(arg))
+            elif expected_type == bool:
+                resolved_args.append(arg.lower() in ["true", "yes", "1"])
+            elif expected_type == str:
+                resolved_args.append(arg)
+            else:
+                resolved_args.append(expected_type(arg))
+        return resolved_args
+
+
+    async def resolve_member(self, ctx: commands.Context, arg: str):
+        if arg.startswith("<@") and arg.endswith(">"):
+            user_id = int(arg.strip("<@!>"))
+            return ctx.guild.get_member(user_id)
+        elif arg.isdigit():
+            return ctx.guild.get_member(int(arg))
+        else:
+            return await commands.MemberConverter().convert(ctx, arg)
+    
+    async def resolve_text_channel(self, ctx: commands.Context, arg: str):
+        if arg.startswith("<#") and arg.endswith(">"):
+            channel_id = int(arg.strip("<#>"))
+            return ctx.guild.get_channel(channel_id)
+        elif arg.isdigit():
+            return ctx.guild.get_channel(int(arg))
+        else:
+            return await commands.TextChannelConverter().convert(ctx, arg)
+    
+    async def resolve_role(self, ctx: commands.Context, arg: str):
+        if arg.startswith("<@&") and arg.endswith(">"):
+            role_id = int(arg.strip("<@&>"))
+            return ctx.guild.get_role(role_id)
+        elif arg.isdigit():
+            return ctx.guild.get_role(int(arg))
+        else:
+            return await commands.RoleConverter().convert(ctx, arg)
+    
+    async def resolve_voice_channel(self, ctx: commands.Context, arg: str):
+        if arg.startswith("<#") and arg.endswith(">"):
+            channel_id = int(arg.strip("<#>"))
+            return ctx.guild.get_channel(channel_id)
+        elif arg.isdigit():
+            return ctx.guild.get_channel(int(arg))
+        else:
+            return await commands.VoiceChannelConverter().convert(ctx, arg)
+    
+    async def resolve_category_channel(self, ctx: commands.Context, arg: str):
+        return await commands.CategoryChannelConverter().convert(ctx, arg)
 
     @commands.hybrid_command(name="ai", description="Use G-AI to chat, ask questions, and generate responses.")
     @app_commands.user_install()
@@ -118,6 +225,13 @@ Act precisely as described. Your task is to be enigmatic, helpful, and a command
                 await ctx.reply("Command returned no content.")
                 return
             await ctx.reply(content if len(content) <= 2000 else content[:1997] + "...")
+            executed_commands = set()
+            command_matches = self.command_pattern.finditer(content)
+            for match in command_matches:
+                command = match.group(1)
+                if command not in executed_commands:
+                    await self.execute_command(ctx, match.group(1))
+                    executed_commands.add(command)
             user_history.append({"role": "assistant", "content": content})
             self.conversations[conversation_key] = user_history
         except Exception as e:
