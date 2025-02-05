@@ -83,7 +83,7 @@ class YouTube(commands.Cog):
                         )
                         embed.set_image(url=f'{snippet["thumbnails"]["high"]["url"]}')
                         embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
-                        embed.set_footer(text=f"YouTube search results for '{query}'")
+                        embed.set_footer(text=f"YouTube search results for '{query}' | Page {self.current_page + 1} of {len(self.embeds)}")
                         embeds.append(embed)
                     elif kind == "youtube#channel":
                         title = snippet["title"]
@@ -100,7 +100,7 @@ class YouTube(commands.Cog):
                         )
                         embed.set_image(url=snippet["thumbnails"]["high"]["url"])
                         embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
-                        embed.set_footer(text=f"YouTube search results for '{query}'")
+                        embed.set_footer(text=f"YouTube search results for '{query}' | Page {self.current_page + 1} of {len(self.embeds)}")
                         embeds.append(embed)
                     elif kind == "youtube#playlist":
                         title = snippet["title"]
