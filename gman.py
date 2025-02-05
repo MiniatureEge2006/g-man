@@ -367,11 +367,14 @@ async def command_permission(ctx: commands.Context, command: str, target_type: s
             await ctx.send("Invalid reset action. Please provide a target for server, user, channel, or role.")
             return
         return
+    converter = commands.MemberConverter() if target_type == "user" else commands.TextChannelConverter() if target_type == "channel" else commands.RoleConverter()
+    converted = await converter.convert(ctx, str(target))
+    converted_name = converted.name if converted else target
     if target_type == "server":
-        query = "INSERT INTO server_command_permissions (guild_id, command_name, status, reason) VALUES ($1, $2, $3, $4) ON CONFLICT (guild_id, command_name) DO UPDATE SET status = EXCLUDED.status, reason = EXCLUDED.reason;"
+        query = "INSERT INTO server_command_permissions (guild_id, command_name, status, reason, added_by, added_at) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (guild_id, command_name) DO UPDATE SET status = EXCLUDED.status, reason = EXCLUDED.reason;"
         try:
             async with bot.db.acquire() as conn:
-                await conn.execute(query, ctx.guild.id, command, status, reason)
+                await conn.execute(query, ctx.guild.id, command, status, reason, ctx.author.id, datetime.datetime.now())
         except Exception as e:
             await ctx.send(f"Error: {e}")
             return
@@ -389,20 +392,20 @@ async def command_permission(ctx: commands.Context, command: str, target_type: s
             await ctx.send("Invalid role provided. Please provide a valid role.")
             return
         target = target.id
-        query = "INSERT INTO command_permissions (guild_id, command_name, target_type, target_id, status, reason) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (guild_id, command_name, target_type, target_id) DO UPDATE SET status = EXCLUDED.status, reason = EXCLUDED.reason;"
+        query = "INSERT INTO command_permissions (guild_id, command_name, target_type, target_id, status, reason, added_by, added_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (guild_id, command_name, target_type, target_id) DO UPDATE SET status = EXCLUDED.status, reason = EXCLUDED.reason;"
         try:
             async with bot.db.acquire() as conn:
-                await conn.execute(query, ctx.guild.id, command, target_type, target, status, reason)
+                await conn.execute(query, ctx.guild.id, command, target_type, target, status, reason, ctx.author.id, datetime.datetime.now())
         except Exception as e:
             await ctx.send(f"Error: {e}")
             return
     status_str = "allowed" if status else "denied"
-    target_name = f"entire server" if target_type == "server" else f"{target_type} with ID {target}"
+    target_name = f"entire server" if target_type == "server" else f"{target_type} {converted_name}"
     await ctx.send(f"Command `{command}` has been {status_str} for {target_name}. Reason: `{reason}`")
 
 @bot.command(name="commandclear", description="Clear all command permissions for a command.", aliases=["cmdclear"])
 @commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.manage_guild)
-async def command_clear(ctx: commands.Context, command: str, target_type: str, target: commands.MemberConverter | commands.TextChannelConverter | commands.RoleConverter | None = None):
+async def command_clear(ctx: commands.Context, command: str, target_type: str):
     if target_type == "server":
         query = "DELETE FROM server_command_permissions WHERE guild_id = $1 AND command_name = $2"
         try:
@@ -415,37 +418,22 @@ async def command_clear(ctx: commands.Context, command: str, target_type: str, t
         except Exception as e:
             await ctx.send(f"Error clearing server-wide command permissions: {e}")
         return
-    query = "DELETE FROM command_permissions WHERE guild_id = $1 AND command_name = $2"
-    params = [ctx.guild.id, command]
-    if target_type and target:
-        if target_type == "user":
-            query += " AND target_type = $3 AND target_id = $4"
-            params.extend([target_type, target.id])
-        elif target_type == "channel":
-            query += " AND target_type = $3 AND target_id = $4"
-            params.extend([target_type, target.id])
-        elif target_type == "role":
-            query += " AND target_type = $3 AND target_id = $4"
-            params.extend([target_type, target.id])
-        else:
-            await ctx.send("Invalid target type. Valid types: `server`, `user`, `channel`, or `role`.")
-            return
-    else:
-        query += ";"
+    query = "DELETE FROM command_permissions WHERE guild_id = $1 AND command_name = $2 AND target_type = $3"
     try:
         async with bot.db.acquire() as conn:
-            result = await conn.execute(query, *params)
+            result = await conn.execute(query, ctx.guild.id, command, target_type)
             if result == "DELETE 0":
-                await ctx.send(f"No command permissions found for command `{command}` with the specified target.")
+                await ctx.send(f"No command permissions found for command `{command}` for {target_type}.")
             else:
-                await ctx.send(f"Command permissions for command `{command}` have been cleared.")
+                await ctx.send(f"Command permissions for command `{command}` have been cleared for {target_type}.")
     except Exception as e:
         await ctx.send(f"Error clearing command permissions: {e}")
+    return
 
 @bot.command(name="commandlist", description="List all command permissions for a command.", aliases=["cmdlist"])
 @commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.manage_guild)
 async def command_list(ctx: commands.Context):
-    query = "SELECT command_name, target_type, target_id, status, reason FROM command_permissions WHERE guild_id = $1"
+    query = "SELECT command_name, target_type, target_id, status, reason, added_by, added_at FROM command_permissions WHERE guild_id = $1 UNION ALL SELECT command_name, 'server' AS target_type, NULL AS target_id, status, reason, added_by, added_at FROM server_command_permissions WHERE guild_id = $1;"
     async with bot.db.acquire() as conn:
         result = await conn.fetch(query, ctx.guild.id)
     if not result:
@@ -454,8 +442,15 @@ async def command_list(ctx: commands.Context):
     allow_entries = []
     block_entries = []
     for row in result:
-        target_name = "Server-wide" if row["target_type"] == "server" else f"{row['target_type'].capitalize()} with ID {row['target_id']}"
-        entry_str = f"`{row['command_name']}` - {target_name} | Reason: `{row['reason']}`"
+        converter = commands.MemberConverter() if row["target_type"] == "user" else commands.TextChannelConverter() if row["target_type"] == "channel" else commands.RoleConverter()
+        converted_name = await converter.convert(ctx, str(row["target_id"]))
+        converted_mention = converted_name.mention if converted_name else str(row["target_id"])
+        added_by_user = ctx.guild.get_member(row["added_by"])
+        added_by_name_unknown = await bot.fetch_user(row["added_by"])
+        added_by_name = added_by_user.mention if added_by_user else added_by_name_unknown.mention
+        added_at = f"<t:{int(row['added_at'].timestamp())}:R>"
+        target_name = "Server-wide" if row["target_type"] == "server" else f"{row['target_type'].capitalize()} with ID {row['target_id']} ({converted_mention})"
+        entry_str = f"`{row['command_name']}` - {target_name} | Reason: `{row['reason']}` | Added by: {added_by_name} | Added at: {added_at}"
         if row["status"]:
             allow_entries.append(entry_str)
         else:
@@ -518,6 +513,9 @@ async def block(ctx: commands.Context, type: str, target: commands.UserConverter
     if type in ["global", "server"] and str(ctx.author.id) not in bot_info.data['owners']:
         await ctx.send(f"{type.capitalize()} blocks can only be set by bot owners.")
         return
+    converter = commands.UserConverter() if type == "global" else commands.MemberConverter() if type == "user" else commands.TextChannelConverter() if type == "channel" else commands.RoleConverter() if type == "role" else commands.GuildConverter()
+    converted = await converter.convert(ctx, str(target))
+    converted_name = converted.name if converted else target
     type_id = target.id if hasattr(target, "id") else target
     async with bot.db.acquire() as conn:
         if type == "server":
@@ -526,21 +524,21 @@ async def block(ctx: commands.Context, type: str, target: commands.UserConverter
                 await ctx.send("This server is already globally blocked.")
                 return
             await conn.execute("INSERT INTO global_blocked_servers (guild_id, reason) VALUES ($1, $2) ON CONFLICT (guild_id) DO UPDATE SET reason = $2", type_id, reason)
-            await ctx.send(f"Globally blocked server with ID {type_id}. Reason: `{reason}`")
+            await ctx.send(f"Globally blocked server {converted_name}. Reason: `{reason}`")
         elif type == "global":
             exists = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM global_blocked_users WHERE discord_id = $1)", type_id)
             if exists:
                 await ctx.send("This user is already globally blocked.")
                 return
             await conn.execute("INSERT INTO global_blocked_users (discord_id, reason) VALUES ($1, $2) ON CONFLICT (discord_id) DO UPDATE SET reason = $2", type_id, reason)
-            await ctx.send(f"Globally blocked user with ID {type_id}. Reason: `{reason}`")
+            await ctx.send(f"Globally blocked user {converted_name}. Reason: `{reason}`")
         else:
             exists = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM blocklist WHERE type = $1 AND entity_id = $2)", type, type_id)
             if exists:
                 await ctx.send(f"{type.capitalize()} with ID {type_id} is already blocked.")
                 return
             await conn.execute("INSERT INTO blocklist (type, entity_id, reason) VALUES ($1, $2, $3) ON CONFLICT (type, entity_id) DO UPDATE SET reason = $3", type, type_id, reason)
-            await ctx.send(f"Blocked {type} with ID {type_id}. Reason: `{reason}`")
+            await ctx.send(f"Blocked {type} {converted_name}. Reason: `{reason}`")
 
 @bot.command(name="unblock", description="Unblocks a user, channel, or role from using the bot.")
 @commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
@@ -552,6 +550,9 @@ async def unblock(ctx: commands.Context, type: str, target: commands.UserConvert
     if type in ["global", "server"] and str(ctx.author.id) not in bot_info.data['owners']:
         await ctx.send(f"{type.capitalize()} blocks can only be removed by bot owners.")
         return
+    converter = commands.UserConverter() if type == "global" else commands.MemberConverter() if type == "user" else commands.TextChannelConverter() if type == "channel" else commands.RoleConverter() if type == "role" else commands.GuildConverter()
+    converted = await converter.convert(ctx, str(target))
+    converted_name = converted.name if converted else target
     type_id = target.id if hasattr(target, "id") else target
     async with bot.db.acquire() as conn:
         if type == "server":
@@ -560,21 +561,21 @@ async def unblock(ctx: commands.Context, type: str, target: commands.UserConvert
                 await ctx.send("This server is not globally blocked.")
                 return
             else:
-                await ctx.send(f"Unblocked server with ID {type_id}.")
+                await ctx.send(f"Unblocked server {converted_name}.")
         elif type == "global":
             result = await conn.execute("DELETE FROM global_blocked_users WHERE discord_id = $1", type_id)
             if result == "DELETE 0":
                 await ctx.send("This user is not globally blocked.")
                 return
             else:
-                await ctx.send(f"Unblocked user with ID {type_id}.")
+                await ctx.send(f"Unblocked user {converted_name}.")
         else:
             result = await conn.execute("DELETE FROM blocklist WHERE type = $1 AND entity_id = $2", type, type_id)
             if result == "DELETE 0":
-                await ctx.send(f"{type.capitalize()} with ID {type_id} is not blocked.")
+                await ctx.send(f"{type.capitalize()} {converted_name} is not blocked.")
                 return
             else:    
-                await ctx.send(f"Unblocked {type} with ID {type_id}.")
+                await ctx.send(f"Unblocked {type} {converted_name}.")
 
 @bot.command(name="allow", description="Allows a user, channel, or role to use the bot.")
 @commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
@@ -583,14 +584,17 @@ async def allow(ctx: commands.Context, type: str, target: commands.MemberConvert
     if type not in valid_types:
         await ctx.send("Invalid type. Valid types: `user`, `channel`, or `role`.")
         return
+    converter = commands.MemberConverter() if type == "user" else commands.TextChannelConverter() if type == "channel" else commands.RoleConverter()
+    converted = await converter.convert(ctx, str(target))
+    converted_name = converted.name if converted else target
     type_id = target.id if hasattr(target, "id") else target
     async with bot.db.acquire() as conn:
         exists = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM allowlist WHERE type = $1 AND entity_id = $2)", type, type_id)
         if exists:
-            await ctx.send(f"{type.capitalize()} with ID {type_id} is already allowed.")
+            await ctx.send(f"{type.capitalize()} {converted_name} is already allowed.")
             return
         await conn.execute("INSERT INTO allowlist (type, entity_id, reason) VALUES ($1, $2, $3) ON CONFLICT (type, entity_id) DO NOTHING", type, type_id, reason)
-    await ctx.send(f"Allowed {type} with ID {type_id}. Reason: `{reason}`")
+    await ctx.send(f"Allowed {type} {converted_name}. Reason: `{reason}`")
 
 @bot.command(name="deny", description="Denies a user, channel, or role from using the bot. (Not to be confused with `block`.)")
 @commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
@@ -599,14 +603,17 @@ async def deny(ctx: commands.Context, type: str, target: commands.MemberConverte
     if type not in valid_types:
         await ctx.send("Invalid type. Valid types: `user`, `channel`, or `role`.")
         return
+    converter = commands.MemberConverter() if type == "user" else commands.TextChannelConverter() if type == "channel" else commands.RoleConverter()
+    converted = await converter.convert(ctx, str(target))
+    converted_name = converted.name if converted else target
     type_id = target.id if hasattr(target, "id") else target
     async with bot.db.acquire() as conn:
         exists = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM allowlist WHERE type = $1 AND entity_id = $2)", type, type_id)
         if not exists:
-            await ctx.send(f"{type.capitalize()} with ID {type_id} is not allowed.")
+            await ctx.send(f"{type.capitalize()} {converted_name} is not allowed.")
             return
         await conn.execute("DELETE FROM allowlist WHERE type = $1 AND entity_id = $2", type, type_id)
-    await ctx.send(f"Denied {type} with ID {type_id}.")
+    await ctx.send(f"Denied {type} {converted_name}.")
 
 @bot.command(name="setprefix", description="Sets the prefix for a guild.")
 async def setprefix(ctx: commands.Context, prefix: str):

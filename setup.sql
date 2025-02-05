@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS command_permissions (
     target_id BIGINT NOT NULL,
     status BOOLEAN NOT NULL,
     reason TEXT DEFAULT 'No reason provided',
+    added_by BIGINT,
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (guild_id, command_name, target_type, target_id)
 );
@@ -52,6 +53,7 @@ CREATE TABLE IF NOT EXISTS server_command_permissions (
     command_name TEXT NOT NULL,
     status BOOLEAN NOT NULL,
     reason TEXT DEFAULT 'No reason provided',
+    added_by BIGINT,
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (guild_id, command_name)
 );
