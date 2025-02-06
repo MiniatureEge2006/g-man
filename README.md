@@ -1,4 +1,6 @@
-**This project is a fork of the original g_man bot. (https://github.com/nkrasn/g_man) So credits to them for making this bot.**
+![gman](https://github.com/user-attachments/assets/f0f40d23-6de0-4ab3-b185-be5c4d32c812)
+# Rise and shine. Mr. Freeman. Rise. And. Shine.
+**This project is a fork of the original g_man bot. (https://github.com/nkrasn/g_man) So credits to nkrasn for making this bot.**
 
 # g_man
 A Discord bot for editing videos, useful for simple edits or making memes. It can apply a large variety of filters, modify bitrate, and create glitch art. <br>
@@ -11,8 +13,16 @@ Filters are applied using FFMPEG, with some corruption commands using tomato.py 
 * Apply premade sequences of filters, such as !tutorial to convert a video into an old-school YouTube tutorial.
 * Corrupt videos in various ways, such as datamoshing and modifying random chunks of bytes in the video file.
 * Save your videos using a personal bookmark system, and load your bookmarks in any server g_man is in.
-* Slash commands.
+* Slash commands with user install support.
+* An FFMPEG, ImageMagick, and YT-DLP wrapper commands. (there's also a caption command that is premade with FFMPEG.)
+* Media EXIF command which uses FFPROBE.
 * A block/allowlisting system along with bot owners being able to globally block users or servers.
+* A command block/allowlisting system that works similar to the block and allowlist system.
+* Many information commands such as userinfo, serverinfo and channelinfo. (there's more of course.)
+* A reminder system.
+* A YouTube search command.
+* Music commands with FFMPEG audio filters support along with a queue system.
+* And lastly, an AI chatbot command that will do things like helping you execute commands in human language and general purpose stuff.
 
 ## Usage/Commands
 You can now just type `!help` in a channel to see all the commands.
@@ -20,11 +30,11 @@ You can now just type `!help` in a channel to see all the commands.
 ## Requirements
 * Static build of ffmpeg (version 4.2 or above)
 * A PostgreSQL database
-  * see the `setup.sql` file and run the query. This is required for the block/allowlisting system.
-* A MongoDB database
-  * The bot looks for a database called `gman`. It uses a collection called `inventory` for the bookmark system and `videos` for keeping track of videos sent.
+  * see the `setup.sql` file and run the query. This is required for the prefix, command/bot block/allowlisting system, and the reminder system.
+* ~~A MongoDB database~~ **This is deprecated and I will rewrite the way the old commands work.**
+  * ~~The bot looks for a database called `gman`. It uses a collection called `inventory` for the bookmark system and `videos` for keeping track of videos sent.~~
 * AviGlitch, see https://github.com/ucnv/aviglitch for installation instructions. This is needed for the !mosh command.
-* All the Python packages in requirements.txt (As of right now, the latest Python version is supported.)
+* All the Python packages in requirements.txt
 
 You can install the Python packages, preferably in a virtual environment, by running
 ```
@@ -35,8 +45,7 @@ pip install -r requirements.txt
 ```
 pip3 install -r requirements.txt
 ```
-<br>
-
+<br> If the pip installation didn't work, try to install the packages seperately because I suck at finding a good compatible version for the requirements.txt file.
 ## Installation
 * Download/install all requirements.
 * Set up these folders with the following contents (if a folder doesn't exist, create it):
