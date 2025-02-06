@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS allowlist (
     type TEXT NOT NULL CHECK (type IN ('user', 'channel', 'role')),
     entity_id BIGINT UNIQUE NOT NULL,
     reason TEXT,
+    added_by BIGINT,
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (type, entity_id)
 );
@@ -29,6 +30,7 @@ CREATE TABLE IF NOT EXISTS blocklist (
     type TEXT NOT NULL CHECK (type IN ('user', 'channel', 'role')),
     entity_id BIGINT UNIQUE NOT NULL,
     reason TEXT,
+    added_by BIGINT,
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (type, entity_id)
 );

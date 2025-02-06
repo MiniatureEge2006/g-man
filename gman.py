@@ -464,38 +464,80 @@ async def command_list(ctx: commands.Context):
     embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url if ctx.author.avatar else None)
     await ctx.send(embed=embed)
 
-@bot.command(name="blocklist", description="List all blocked users, channels, roles, and servers.")
+@bot.command(name="blocklist", description="List all blocked users, channels, and roles.")
 @commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
 async def blocklist(ctx: commands.Context):
     async with bot.db.acquire() as conn:
-        records = await conn.fetch("SELECT type, entity_id, reason FROM blocklist")
+        records = await conn.fetch("SELECT type, entity_id, reason, added_by, added_at FROM blocklist")
         global_blocked_records = await conn.fetch("SELECT discord_id, reason FROM global_blocked_users")
         server_blocked_records = await conn.fetch("SELECT guild_id, reason FROM global_blocked_servers")
         if not (records or global_blocked_records or server_blocked_records):
             await ctx.send("The blocklist is empty.")
             return
-        formatted_records = "\n".join(f"**Type:** {record['type'].capitalize()} | **ID:** {record['entity_id']} | **Reason:** {record['reason']}" for record in records)
+        formatted_records = []
+        for record in records:
+            entity_id = record['entity_id']
+            entity_type = record['type']
+            reason = record['reason']
+            added_by_user = ctx.guild.get_member(record['added_by'])
+            added_by_name_unknown = await bot.fetch_user(record['added_by'])
+            added_by_name = added_by_user.mention if added_by_user else added_by_name_unknown.mention
+            added_at = f"<t:{int(record['added_at'].timestamp())}:R>"
+            if entity_type == "user":
+                user = ctx.guild.get_member(entity_id)
+                entity_name = f"{user.name}#{user.discriminator} ({user.mention})" if user else entity_id
+            elif entity_type == "channel":
+                channel = ctx.guild.get_channel(entity_id)
+                entity_name = f"{channel.name} ({channel.mention})" if channel else entity_id
+            elif entity_type == "role":
+                role = ctx.guild.get_role(entity_id)
+                entity_name = f"{role.name} ({role.mention})" if role else entity_id
+            else:
+                entity_name = entity_id
+            formatted_records.append(f"**Type:** {entity_type.capitalize()} | **Name:** {entity_name} | **Reason:** `{reason}` | **Added by:** {added_by_name} | **Added at:** {added_at}")
+        formatted_text = "\n".join(formatted_records) if formatted_records else "None"
         embed = discord.Embed(title="Blocklist", color=discord.Color.red())
-        embed.add_field(name="Blocked Entries", value=formatted_records, inline=False)
+        embed.add_field(name="Blocked Entries", value=formatted_text, inline=False)
         if str(ctx.author.id) in bot_info.data['owners']:
-            formatted_global_records = "\n".join(f"**User ID:** {record['discord_id']} | **Reason:** {record['reason']}" for record in global_blocked_records)
-            formatted_server_records = "\n".join(f"**Server ID:** {record['guild_id']} | **Reason:** {record['reason']}" for record in server_blocked_records)
+            formatted_global_records = "\n".join(f"**User ID:** {record['discord_id']} | **Reason:** `{record['reason']}`" for record in global_blocked_records)
+            formatted_server_records = "\n".join(f"**Server ID:** {record['guild_id']} | **Reason:** `{record['reason']}`" for record in server_blocked_records)
             embed.add_field(name="Global/Server Blocklist", value=f"**Global:**\n{formatted_global_records}\n\n**Server:**\n{formatted_server_records}", inline=False)
         embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url if ctx.author.avatar else None)
         await ctx.send(embed=embed)
 
-@bot.command(name="allowlist", description="List all allowed users, channels, roles, and servers.")
+@bot.command(name="allowlist", description="List all allowed users, channels, and roles.")
 @commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
 async def allowlist(ctx: commands.Context):
     async with bot.db.acquire() as conn:
-        records = await conn.fetch("SELECT type, entity_id, reason FROM allowlist")
+        records = await conn.fetch("SELECT type, entity_id, reason, added_by, added_at FROM allowlist")
         if not records:
             await ctx.send("The allowlist is empty.")
             return
-        formatted_records = "\n".join(f"**Type:** {record['type'].capitalize()} | **ID:** {record['entity_id']} | **Reason:** {record['reason']}" for record in records)
+        formatted_records = []
+        for record in records:
+            entity_id = record['entity_id']
+            entity_type = record['type']
+            reason = record['reason']
+            added_by_user = ctx.guild.get_member(record['added_by'])
+            added_by_name_unknown = await bot.fetch_user(record['added_by'])
+            added_by_name = added_by_user.mention if added_by_user else added_by_name_unknown.mention
+            added_at = f"<t:{int(record['added_at'].timestamp())}:R>"
+            if entity_type == "user":
+                user = ctx.guild.get_member(entity_id)
+                entity_name = f"{user.name}#{user.discriminator} ({user.mention})" if user else entity_id
+            elif entity_type == "channel":
+                channel = ctx.guild.get_channel(entity_id)
+                entity_name = f"{channel.name} ({channel.mention})" if channel else entity_id
+            elif entity_type == "role":
+                role = ctx.guild.get_role(entity_id)
+                entity_name = f"{role.name} ({role.mention})" if role else entity_id
+            else:
+                entity_name = entity_id
+            formatted_records.append(f"**Type:** {entity_type.capitalize()} | **Name:** {entity_name} | **Reason:** `{reason}` | **Added by:** {added_by_name} | **Added at:** {added_at}")
+        formatted_text = "\n".join(formatted_records) if formatted_records else "None"
         embed = discord.Embed(title="Allowlist", color=discord.Color.green())
-        embed.add_field(name="Allowed Entries", value=formatted_records, inline=False)
+        embed.add_field(name="Allowed Entries", value=formatted_text, inline=False)
         embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url if ctx.author.avatar else None)
         await ctx.send(embed=embed)
@@ -535,9 +577,9 @@ async def block(ctx: commands.Context, type: str, target: commands.UserConverter
         else:
             exists = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM blocklist WHERE type = $1 AND entity_id = $2)", type, type_id)
             if exists:
-                await ctx.send(f"{type.capitalize()} with ID {type_id} is already blocked.")
+                await ctx.send(f"{type.capitalize()} {converted_name} is already blocked.")
                 return
-            await conn.execute("INSERT INTO blocklist (type, entity_id, reason) VALUES ($1, $2, $3) ON CONFLICT (type, entity_id) DO UPDATE SET reason = $3", type, type_id, reason)
+            await conn.execute("INSERT INTO blocklist (type, entity_id, reason, added_by, added_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (type, entity_id) DO UPDATE SET reason = $3", type, type_id, reason, ctx.author.id, datetime.datetime.now())
             await ctx.send(f"Blocked {type} {converted_name}. Reason: `{reason}`")
 
 @bot.command(name="unblock", description="Unblocks a user, channel, or role from using the bot.")
@@ -593,7 +635,7 @@ async def allow(ctx: commands.Context, type: str, target: commands.MemberConvert
         if exists:
             await ctx.send(f"{type.capitalize()} {converted_name} is already allowed.")
             return
-        await conn.execute("INSERT INTO allowlist (type, entity_id, reason) VALUES ($1, $2, $3) ON CONFLICT (type, entity_id) DO NOTHING", type, type_id, reason)
+        await conn.execute("INSERT INTO allowlist (type, entity_id, reason, added_by, added_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (type, entity_id) DO NOTHING", type, type_id, reason, ctx.author.id, datetime.datetime.now())
     await ctx.send(f"Allowed {type} {converted_name}. Reason: `{reason}`")
 
 @bot.command(name="deny", description="Denies a user, channel, or role from using the bot. (Not to be confused with `block`.)")
