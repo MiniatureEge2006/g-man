@@ -14,14 +14,17 @@ Filters are applied using FFMPEG, with some corruption commands using tomato.py 
 * Corrupt videos in various ways, such as datamoshing and modifying random chunks of bytes in the video file.
 * Save your videos using a personal bookmark system, and load your bookmarks in any server g_man is in.
 * Slash commands with user install support.
-* An FFMPEG, ImageMagick, and YT-DLP wrapper commands. (there's also a caption command that is premade with FFMPEG.)
+* An FFMPEG, ImageMagick, and YT-DLP wrapper commands.
+  * This includes a premade caption command too.
 * Media EXIF command which uses FFPROBE.
 * A block/allowlisting system along with bot owners being able to globally block users or servers.
 * A command block/allowlisting system that works similar to the block and allowlist system.
-* Many information commands such as userinfo, serverinfo and channelinfo. (there's more of course.)
+* Many information commands.
+  * Such as userinfo, channelinfo, and serverinfo (there's more of course.)
 * A reminder system.
 * A YouTube search command.
 * Music commands with FFMPEG audio filters support along with a queue system.
+* A prefix changing system.
 * And lastly, an AI chatbot command that will do things like helping you execute commands in human language and general purpose stuff.
 
 ## Usage/Commands
