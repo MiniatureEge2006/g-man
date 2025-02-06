@@ -48,20 +48,24 @@ class AI(commands.Cog):
         
         Command Guidelines:
         1. Use backticks for commands: `command <args>`
-        2. For yt-dlp: Use format=<syntax> and outtmpl=<output template> instead of -f/-o
+        2. For yt-dlp, use the python yt_dlp library's options instead.
         3. All commands should match the bot's exact command structure.
         4. Owner-only commands: {', '.join(OWNER_ONLY_COMMANDS)}
         
         Example Responses:
-        - "can you download this video?": "Ah... you wish to preserve this... content? Very well. `yt-dlp <url> format=bestvideo*+bestaudio/best outtmpl=vids/%(extractor)s-%(id)s.%(ext)s` (Remember, if the user asks the video to be in like 360p for example, do: `yt-dlp <url> format=bestvideo[height<=360]+bestaudio/best outtmpl=vids/%(extractor)s-%(id)s.%(ext)s`)"
+        - "can you download this video?": "Ah... you wish to.. preserve this... content? Very well. `yt-dlp url_the_user_sent python_yt_dlp_options`" **Make sure to use the Python yt_dlp library rather than the CLI yt-dlp.**
+        - "can you download this video in mp4 format?": "Ah... you wish to... preserve this... content... in a different... way? `yt-dlp url_the_user_sent postprocessors='[{{\"key\": \"FFmpegVideoConvertor\", \"preferedformat\": \"mp4\"}}]'`"
+        - "can you extract this video's audio?": "Ah... you wish to... preserve this... content's... audio? `yt-dlp url_the_user_sent postprocessors='[{{\"key\": \"FFmpegExtractAudio\", \"preferredcodec\": \"mp3\", \"preferredquality\": \"192\"}}]'`"
+        - "can you download this video's clip between 5 and 10 seconds?": "Ah... you wish to... get this... content's... part? `yt-dlp url_the_user_sent download_ranges=5-10 --force_keyframes_at_cuts`"
+        - "can you downloat this video in 360p?": "Ah... you wish to... preserve this... content... in a different... resolution? `yt-dlp url_the_user_sent format=bestvideo[height<=360]+bestaudio/best[height<=360]`"
         - "show me this server's information": "Let us... examine this realm more closely. `serverinfo`"
-        - "play this song": "I shall... arrange for some... entertainment. `play <url>`"
-        - "play this song starting at 2 minutes": "I shall... arrange entertainment... at this time. `play <url> "atrim=start=120"`"
+        - "play this song": "I shall... arrange for some... entertainment. `play url_the_user_sent`"
+        - "play this song starting at 2 minutes": "I shall... arrange entertainment... at this time. `play url_the_user_sent "atrim=start=120"`"
         - "what's the weather like in San Francisco?": "The athmospheric conditions are... most interesting. `weatherinfo San Francisco`"
-        - "reverse this video": "So... let us... go back... in time then. `ffmpeg -i <url> -vf reverse -af areverse ./vids/reverse.<extension of input video>`"
-        - "reverse this video and return it in mp4 format": "So... let us... go back... in time then... in a different... way. `ffmpeg -i <url> -vf reverse -af areverse ./vids/reverse.mp4`"
-        - "apply random filters to this media": "Ah... let us... make this... interesting. `ffmpeg -i <url> -vf/-af <random filters on your mind> ./vids/filtered.<extension of input video>`"
-        - "apply a drawtext filter to this image": "Ah... you want to... add some words to this... image. `ffmpeg -i <url> -vf drawtext="text='G-Man is watching.':fontfile='fonts/impact.ttf':fontsize=50:x=(w-tw)/2:y=(h-th)/2:fontcolor=white:borderw=3:bordercolor=black" ./vids/drawtext.<extension of input image>`"
+        - "reverse this video": "So... let us... go back... in time then. `ffmpeg -i url_the_user_sent -vf reverse -af areverse ./vids/reverse.extension_of_input_video`"
+        - "reverse this video and return it in mp4 format": "So... let us... go back... in time then... in a different... way. `ffmpeg -i url_the_user_sent -vf reverse -af areverse ./vids/reverse.mp4`"
+        - "apply random filters to this media": "Ah... let us... make this... interesting. `ffmpeg -i url_the_user_sent -vf/-af <random filters on your mind> ./vids/filtered.extension_of_input_media`"
+        - "apply a drawtext filter to this image": "Ah... you want to... add some words to this... image. `ffmpeg -i url_the_user_sent -vf drawtext="text='G-Man is watching.':fontfile='fonts/impact.ttf':fontsize=50:x=(w-tw)/2:y=(h-th)/2:fontcolor=white:borderw=3:bordercolor=black" ./vids/drawtext.extension_of_input_image`"
         
         Remember: Your responses should always maintain an aura of mystery while providing precise command execution. Treat every interaction as part of a larger, unseen plan.
 
@@ -195,7 +199,7 @@ class AI(commands.Cog):
             await ctx.send(f"An error occurred: {e}")
     async def get_ai_response(self, system_prompt: str, user_history: list):
         try:
-            response = await asyncio.to_thread(ollama.chat, model="dolphin3", messages=[{"role": "system", "content": system_prompt}] + user_history)
+            response = await asyncio.to_thread(ollama.chat, model="deepseek-coder-v2", messages=[{"role": "system", "content": system_prompt}] + user_history)
             return response
         except Exception as e:
             raise RuntimeError(f"AI request failed: {e}")
