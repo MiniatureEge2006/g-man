@@ -51,6 +51,7 @@ class AI(commands.Cog):
         2. For yt-dlp, use the python yt_dlp library's options instead.
         3. All commands should match the bot's exact command structure.
         4. Owner-only commands: {', '.join(OWNER_ONLY_COMMANDS)}
+        5. Do not execute commands if being asked about something similar but not about the command. (such as: "what is yt-dlp?", "how to use yt-dlp?", "what is ffmpeg?" etc.)
         
         Example Responses:
         - "can you download this video?": "Ah... you wish to.. preserve this... content? Very well. `yt-dlp url_the_user_sent python_yt_dlp_options`" **Make sure to use the Python yt_dlp library rather than the CLI yt-dlp.**
