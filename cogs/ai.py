@@ -51,7 +51,7 @@ class AI(commands.Cog):
         2. For yt-dlp, use the python yt_dlp library's options instead. (also do not prefix the options with -- as that is a boolean flag.)
         3. All commands should match the bot's exact command structure.
         4. Owner-only commands: {', '.join(OWNER_ONLY_COMMANDS)}
-        5. Do not execute commands if being asked about something similar but not about the command. (such as: "what is yt-dlp?", "how to use yt-dlp?", "what is ffmpeg?" etc.)
+        5. Do not execute commands if being asked about something similar but not about the command. (such as: "what is yt-dlp?", "how to use yt-dlp?", "what is ffmpeg?", "how do i do a filter in ffmpeg?" etc.)
         
         Example Responses:
         - "can you download this video?": "Ah... you wish to.. preserve this... content? Very well. `yt-dlp url_the_user_sent python_yt_dlp_options`" **Make sure to use the Python yt_dlp library rather than the CLI yt-dlp.**
@@ -76,22 +76,17 @@ class AI(commands.Cog):
     async def execute_command(self, ctx: commands.Context, command_str: str) -> bool:
         try:
             if command_str.startswith(ctx.prefix):
-                command_str = command[len(ctx.prefix):]
-            parts = command_str.split(maxsplit=1)
-            command_name = parts[0]
-            args = parts[1] if len(parts) > 1 else ""
-            command = self.bot.get_command(command_name)
-            if not command:
-                return False
-            if command_name in OWNER_ONLY_COMMANDS and not str(ctx.author.id) in bot_info.data['owners']:
-                return False
+                command_str = command_str[len(ctx.prefix):]
+            
             message = ctx.message
             message.content = f"{ctx.prefix}{command_str}"
+
             await self.bot.process_commands(message)
             return True
         except Exception as e:
-            print(f"Failed to execute command: {e}")
+            print(f"Error executing command: {e}")
             return False
+
     
     async def resolve_arguments(self, ctx: commands.Context, command: commands.Command, arg_list: list):
         signature = inspect.signature(command.callback)
@@ -191,13 +186,35 @@ class AI(commands.Cog):
             command_matches = self.command_pattern.finditer(content)
             for match in command_matches:
                 command = match.group(1)
-                if command not in executed_commands:
-                    await self.execute_command(ctx, match.group(1))
+                if command in executed_commands:
+                    continue
+                if await self.validate_command(ctx, command):
+                    await self.execute_command(ctx, command)
                     executed_commands.add(command)
             user_history.append({"role": "assistant", "content": content})
             self.conversations[conversation_key] = user_history
         except Exception as e:
             await ctx.send(f"An error occurred: {e}")
+    async def validate_command(self, ctx: commands.Context, command_str: str) -> bool:
+        try:
+            parts = command_str.split(maxsplit=1)
+            command_name = parts[0]
+            args = parts[1] if len(parts) > 1 else ""
+
+
+            command = self.bot.get_command(command_name)
+            if not command:
+                return False
+            
+            if command_name in OWNER_ONLY_COMMANDS and not str(ctx.author.id) in bot_info.data['owners']:
+                return False
+            
+            return True
+        except Exception as e:
+            print(f"Error validating command: {e}")
+            return False
+
+
     async def get_ai_response(self, system_prompt: str, user_history: list):
         try:
             response = await asyncio.to_thread(ollama.chat, model="deepseek-coder-v2", messages=[{"role": "system", "content": system_prompt}] + user_history)
