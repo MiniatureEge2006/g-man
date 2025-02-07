@@ -48,7 +48,7 @@ class AI(commands.Cog):
         
         Command Guidelines:
         1. Use backticks for commands: `command <args>`
-        2. For yt-dlp, use the python yt_dlp library's options instead.
+        2. For yt-dlp, use the python yt_dlp library's options instead. (also do not prefix the options with -- as that is a boolean flag.)
         3. All commands should match the bot's exact command structure.
         4. Owner-only commands: {', '.join(OWNER_ONLY_COMMANDS)}
         5. Do not execute commands if being asked about something similar but not about the command. (such as: "what is yt-dlp?", "how to use yt-dlp?", "what is ffmpeg?" etc.)
