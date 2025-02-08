@@ -141,6 +141,7 @@ class Reminder(commands.Cog):
     @app_commands.describe(reminder_id="The ID of the reminder to delete.", user="The user whose reminders you want to delete if you have manage server permissions.")
     async def deletereminder(self, ctx: commands.Context, reminder_id: int, user: discord.Member = None):
         await ctx.typing()
+        user = user or ctx.author
         if ctx.guild is None:
             target_user_id = ctx.author.id
         else:
