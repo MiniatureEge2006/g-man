@@ -1,10 +1,10 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-import subprocess
 import os
 import aiohttp
 from urllib.parse import urlparse
+import asyncio
 
 DEFAULTS = {
     "font": "Futura Condensed Extra Bold.otf",
@@ -64,16 +64,17 @@ class Caption(commands.Cog):
 
         return f"{pad_filter},{drawtext_filter}"
     
-    def apply_caption(self, input_path: str, output_path: str, filter_graph: str):
+    async def apply_caption(self, input_path: str, output_path: str, filter_graph: str):
         cmd = [
             "ffmpeg",
             "-i", input_path,
             "-vf", filter_graph,
             output_path
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdout, stderr = await result.communicate()
         if result.returncode != 0:
-            raise RuntimeError(f"FFmpeg Error: {result.stderr}")
+            raise ValueError(f"Failed to apply caption: {stderr}")
     
     @commands.hybrid_command(name="caption", description="Caption media.")
     @app_commands.describe(url="Input URL to caption.", text="Text to caption the media with.", font="The font to use. (Default Futura Condensed Extra Bold.otf)", font_color="The font color to use. (Default #000000)", font_size="The font size to use. (Default 24)", padding_color="The padding color to use. (Default #FFFFFF)", padding_size="The padding size to use. (Default 24)", border_width="The border width to use. (Default 0)", border_color="The border color to use. (Default #000000)", position="The position to use. (Default center)")
@@ -94,7 +95,7 @@ class Caption(commands.Cog):
                 text, font, font_color, font_size, padding_color, padding_size, border_width, border_color, position
             )
 
-            self.apply_caption(input_path, output_path, filter_graph)
+            await self.apply_caption(input_path, output_path, filter_graph)
 
             await ctx.send(file=discord.File(output_path))
 

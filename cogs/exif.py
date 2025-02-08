@@ -3,10 +3,10 @@ from discord.ext import commands
 from discord import app_commands
 import os
 import aiohttp
-import subprocess
 import json
 import mimetypes
 from urllib.parse import urlparse
+import asyncio
 
 class Exif(commands.Cog):
     def __init__(self, bot):
@@ -27,7 +27,7 @@ class Exif(commands.Cog):
             
             file_path = await self.download_media(ctx, url)
 
-            metadata = self.get_metadata(file_path)
+            metadata = await self.get_metadata(file_path)
 
             if metadata:
                 mime_type = metadata.get("MIME Type", "unknown").lower()
@@ -121,7 +121,7 @@ class Exif(commands.Cog):
         parsed = urlparse(url)
         return bool(parsed.scheme and parsed.netloc)
     
-    def get_metadata(self, file_path: str) -> dict:
+    async def get_metadata(self, file_path: str) -> dict:
         try:
             cmd = [
                 "ffprobe",
@@ -131,12 +131,13 @@ class Exif(commands.Cog):
                 "-print_format", "json",
                 file_path
             ]
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            result = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            stdout, stderr = await result.communicate()
 
             if result.returncode != 0:
-                raise ValueError(f"FFprobe error: {result.stderr.strip()}")
+                raise ValueError(f"FFprobe error: {stderr}")
             
-            metadata = json.loads(result.stdout)
+            metadata = json.loads(stdout)
 
             flat_metadata = {}
 
