@@ -706,7 +706,7 @@ async def setup(bot):
     except Exception as e:
         print('Failed to load {} because: {}'.format(ex, e))
 
-@bot.hybrid_command(name="eval", description="Evaluate code.", aliases=["exec", "code"])
+@bot.hybrid_command(name="eval", description="Evaluate code.", aliases=["exec"])
 @app_commands.describe(code="The code to evaluate.")
 @app_commands.user_install()
 @app_commands.allowed_installs(guilds=True, users=True)
