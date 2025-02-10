@@ -103,23 +103,23 @@ class FFmpeg(commands.Cog):
     async def read_output(self, stream):
             output = []
             while True:
-                line = await stream.readline()
-                if not line:
+                chunk = await stream.read(4096)
+                if not chunk:
                     break
-                decoded_line = line.decode('utf-8').strip()
-                print(decoded_line)
-                output.append(decoded_line)
+                decoded_chunk = chunk.decode('utf-8', errors='ignore').strip()
+                print(decoded_chunk)
+                output.append(decoded_chunk)
             return '\n'.join(output)
     
     async def read_stderr(self, stream):
             error_output = []
             while True:
-                line = await stream.readline()
-                if not line:
+                chunk = await stream.read(4096)
+                if not chunk:
                     break
-                decoded_line = line.decode('utf-8').strip()
-                print(decoded_line)
-                error_output.append(decoded_line)
+                decoded_chunk = chunk.decode('utf-8', errors='ignore').strip()
+                print(decoded_chunk)
+                error_output.append(decoded_chunk)
             return '\n'.join(error_output)
 
     async def download_file(self, url: str, file_path: str) -> bool:
