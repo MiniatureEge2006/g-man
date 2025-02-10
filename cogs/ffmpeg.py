@@ -86,9 +86,14 @@ class FFmpeg(commands.Cog):
 
 
             output_file = [arg for arg in split_args if not arg.startswith("-")][-1]
+            file_size = os.path.getsize(output_file)
+            boost_count = ctx.guild.premium_subscription_count if ctx.guild else 0
+            max_size = self.get_max_file_size(boost_count)
+            if file_size > max_size:
+                raise commands.CommandError(f"File is too large to send. (Size: {file_size} bytes/{self.human_readable_size(file_size)}, Max Size: {max_size} bytes/{self.human_readable_size(max_size)})")
             if os.path.exists(output_file):
                 elapsed_time = time.time() - start_time
-                await ctx.send(f"-# FFmpeg processing completed in {elapsed_time:.2f} seconds.", file=discord.File(output_file))
+                await ctx.send(f"-# {file_size} bytes ({self.human_readable_size(file_size)}), FFmpeg processing completed in {elapsed_time:.2f} seconds.", file=discord.File(output_file))
                 os.remove(output_file)
             else:
                 await ctx.send("FFmpeg processing completed, but the output file could not be found.")
@@ -144,6 +149,20 @@ class FFmpeg(commands.Cog):
         parsed_url = urlparse(url)
         filename = Path(parsed_url.path).name
         return filename
+    
+    def get_max_file_size(self, boost_count: int) -> int:
+        if boost_count >= 14:
+            return 100 * 1024 * 1024 # 100 MB
+        elif boost_count >= 7:
+            return 50 * 1024 * 1024 # 50 MB
+        else:
+            return 10 * 1024 * 1024 # 10 MB
+    
+    def human_readable_size(self, size: int) -> str:
+        for unit in ["B", "KB", "MB", "GB", "TB"]:
+            if size < 1024:
+                return f"{size:.2f} {unit}"
+            size /= 1024
 
 async def setup(bot):
     await bot.add_cog(FFmpeg(bot))

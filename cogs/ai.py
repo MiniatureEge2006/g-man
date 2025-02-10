@@ -6,6 +6,7 @@ import asyncio
 import re
 import bot_info
 import inspect
+import time
 
 MAX_CONVERSATION_HISTORY_LENGTH = 5
 OWNER_ONLY_COMMANDS = ['eval', 'reload', 'sync']
@@ -54,21 +55,21 @@ class AI(commands.Cog):
         5. Do not execute commands if being asked about something similar but not about the command. (such as: "what is yt-dlp?", "how to use yt-dlp?", "what is ffmpeg?", "how do i do a filter in ffmpeg?" etc.)
         
         Example Responses:
-        - "can you download this video?": "Ah... you wish to.. preserve this... content? Very well. `yt-dlp url_the_user_sent python_yt_dlp_options`" **Make sure to use the Python yt_dlp library rather than the CLI yt-dlp.**
-        - "can you list me the formats for this video?": "Ah... you want to... get this content's... formats? `yt-dlp url_the_user_sent --listformats`"
-        - "can you extract the json metadata for this video?": "Ah... you want to... get this content's... metadata? `yt-dlp url_the_user_sent --json`"
-        - "can you download this video in mp4 format?": "Ah... you wish to... preserve this... content... in a different... way? `yt-dlp url_the_user_sent postprocessors='[{{\"key\": \"FFmpegVideoConvertor\", \"preferedformat\": \"mp4\"}}]'`"
-        - "can you extract this video's audio?": "Ah... you wish to... preserve this... content's... audio? `yt-dlp url_the_user_sent postprocessors='[{{\"key\": \"FFmpegExtractAudio\", \"preferredcodec\": \"mp3\", \"preferredquality\": \"192\"}}]'`"
-        - "can you download this video's clip between 5 and 10 seconds?": "Ah... you wish to... get this... content's... part? `yt-dlp url_the_user_sent download_ranges=5-10 --force_keyframes_at_cuts`"
-        - "can you downloat this video in 360p?": "Ah... you wish to... preserve this... content... in a different... resolution? `yt-dlp url_the_user_sent format=bestvideo[height<=360]+bestaudio/best[height<=360]`"
-        - "show me this server's information": "Let us... examine this realm more closely. `serverinfo`"
-        - "play this song": "I shall... arrange for some... entertainment. `play url_the_user_sent`"
-        - "play this song starting at 2 minutes": "I shall... arrange entertainment... at this time. `play url_the_user_sent "atrim=start=120"`"
-        - "what's the weather like in San Francisco?": "The athmospheric conditions are... most interesting. `weatherinfo San Francisco`"
-        - "reverse this video": "So... let us... go back... in time then. `ffmpeg -i url_the_user_sent -vf reverse -af areverse ./vids/reverse.extension_of_input_video`"
-        - "reverse this video and return it in mp4 format": "So... let us... go back... in time then... in a different... way. `ffmpeg -i url_the_user_sent -vf reverse -af areverse ./vids/reverse.mp4`"
-        - "apply random filters to this media": "Ah... let us... make this... interesting. `ffmpeg -i url_the_user_sent -vf/-af <random filters on your mind> ./vids/filtered.extension_of_input_media`"
-        - "apply a drawtext filter to this image": "Ah... you want to... add some words to this... image. `ffmpeg -i url_the_user_sent -vf drawtext="text='G-Man is watching.':fontfile='fonts/impact.ttf':fontsize=50:x=(w-tw)/2:y=(h-th)/2:fontcolor=white:borderw=3:bordercolor=black" ./vids/drawtext.extension_of_input_image`"
+        - "can you download this video?": "`yt-dlp url_the_user_sent python_yt_dlp_options`" **Make sure to use the Python yt_dlp library rather than the CLI yt-dlp.**
+        - "can you list me the formats for this video?": "`yt-dlp url_the_user_sent --listformats`"
+        - "can you extract the json metadata for this video?": "`yt-dlp url_the_user_sent --json`"
+        - "can you download this video in mp4 format?": "`yt-dlp url_the_user_sent postprocessors='[{{\"key\": \"FFmpegVideoConvertor\", \"preferedformat\": \"mp4\"}}]'`"
+        - "can you extract this video's audio?": "`yt-dlp url_the_user_sent postprocessors='[{{\"key\": \"FFmpegExtractAudio\", \"preferredcodec\": \"mp3\", \"preferredquality\": \"192\"}}]'`"
+        - "can you download this video's clip between 5 and 10 seconds?": "`yt-dlp url_the_user_sent download_ranges=5-10 --force_keyframes_at_cuts`"
+        - "can you downloat this video in 360p?": "`yt-dlp url_the_user_sent format=bestvideo[height<=360]+bestaudio/best[height<=360]`"
+        - "show me this server's information": "`serverinfo`"
+        - "play this song": "`play url_the_user_sent`"
+        - "play this song starting at 2 minutes": "`play url_the_user_sent "atrim=start=120"`"
+        - "what's the weather like in San Francisco?": "`weatherinfo San Francisco`"
+        - "reverse this video": "`ffmpeg -i url_the_user_sent -vf reverse -af areverse ./vids/reverse.extension_of_input_video`"
+        - "reverse this video and return it in mp4 format": "`ffmpeg -i url_the_user_sent -vf reverse -af areverse ./vids/reverse.mp4`"
+        - "apply random filters to this media": "`ffmpeg -i url_the_user_sent -vf/-af <random filters on your mind> ./vids/filtered.extension_of_input_media`"
+        - "apply a drawtext filter to this image": "image. `ffmpeg -i url_the_user_sent -vf drawtext="text='G-Man is watching.':fontfile='fonts/impact.ttf':fontsize=50:x=(w-tw)/2:y=(h-th)/2:fontcolor=white:borderw=3:bordercolor=black" ./vids/drawtext.extension_of_input_image`"
         
         Remember: Your responses should always maintain an aura of mystery while providing precise command execution. Treat every interaction as part of a larger, unseen plan.
 
@@ -176,6 +177,7 @@ class AI(commands.Cog):
         asyncio.create_task(self.process_ai_response(ctx, conversation_key, user_history))
     
     async def process_ai_response(self, ctx: commands.Context, conversation_key, user_history):
+        start_time = time.time()
         try:
             system_prompt = await self.create_system_prompt(ctx)
             response: ollama.ChatResponse = await self.get_ai_response(system_prompt, user_history)
@@ -183,7 +185,10 @@ class AI(commands.Cog):
             if not content:
                 await ctx.reply("Command returned no content.")
                 return
-            await ctx.reply(content if len(content) <= 2000 else content[:1997] + "...")
+            embed = discord.Embed(title="G-AI Response", description=content if len(content) < 4096 else content[:4093] + "...", color=discord.Color.blurple())
+            embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
+            embed.set_footer(text=f"AI response took {round(time.time() - start_time, 2)} seconds", icon_url="https://ollama.com/public/ollama.png")
+            await ctx.reply(embed=embed)
             executed_commands = set()
             command_matches = self.command_pattern.finditer(content)
             for match in command_matches:
