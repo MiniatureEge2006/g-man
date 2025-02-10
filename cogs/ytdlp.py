@@ -32,7 +32,8 @@ class Ytdlp(commands.Cog):
             except Exception as e:
                 await ctx.send(f"Error parsing options: `{e}`")
                 return
-        task = asyncio.create_task(self.extract_info(ydl_opts, url))
+        download = not ydl_opts.get("json", False)
+        task = asyncio.create_task(self.extract_info(ydl_opts, url, download=download))
         try:
             start_time = time.time()
 
@@ -104,21 +105,22 @@ class Ytdlp(commands.Cog):
                     format_id = info.get('format_id', 'Unknown Format IDs')
                     await ctx.send(f"-# [{title} ({id})](<{video_url}> '{os.path.basename(final_file)}') by [{uploader}](<{uploader_url}> '{uploader_id}'), {resolution}, {duration} ({duration_seconds} seconds) Duration, Format IDs: `{format_id}`, {file_size} bytes ({self.human_readable_size(file_size)}), took {elapsed_time:.2f} seconds", file=discord.File(final_file))
 
-            os.remove(final_file)
+                os.remove(final_file)
         except FileNotFoundError as e:
             raise commands.CommandError(f"File handling error: `{e}`")
         except Exception as e:
             raise commands.CommandError(f"Download failed: ```ansi\n{e}```")
 
-    async def extract_info(self, ydl_opts, url):
+    async def extract_info(self, ydl_opts, url, download=True):
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._extract_info, ydl_opts, url)
+        return await loop.run_in_executor(None, self._extract_info, ydl_opts, url, download)
 
-    def _extract_info(self, ydl_opts, url):
+    def _extract_info(self, ydl_opts, url, download=True):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url)
-            final_file = info.get('requested_downloads', [{}])[0].get('filepath') or ydl.prepare_filename(info)
-            info['final_file'] = final_file
+            info = ydl.extract_info(url, download=download)
+            if download:
+                final_file = info.get('requested_downloads', [{}])[0].get('filepath') or ydl.prepare_filename(info)
+                info['final_file'] = final_file
             return info
 
     def parse_time_to_seconds(self, time_str):

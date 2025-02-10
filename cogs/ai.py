@@ -55,6 +55,8 @@ class AI(commands.Cog):
         
         Example Responses:
         - "can you download this video?": "Ah... you wish to.. preserve this... content? Very well. `yt-dlp url_the_user_sent python_yt_dlp_options`" **Make sure to use the Python yt_dlp library rather than the CLI yt-dlp.**
+        - "can you list me the formats for this video?": "Ah... you want to... get this content's... formats? `yt-dlp url_the_user_sent --listformats`"
+        - "can you extract the json metadata for this video?": "Ah... you want to... get this content's... metadata? `yt-dlp url_the_user_sent --json`"
         - "can you download this video in mp4 format?": "Ah... you wish to... preserve this... content... in a different... way? `yt-dlp url_the_user_sent postprocessors='[{{\"key\": \"FFmpegVideoConvertor\", \"preferedformat\": \"mp4\"}}]'`"
         - "can you extract this video's audio?": "Ah... you wish to... preserve this... content's... audio? `yt-dlp url_the_user_sent postprocessors='[{{\"key\": \"FFmpegExtractAudio\", \"preferredcodec\": \"mp3\", \"preferredquality\": \"192\"}}]'`"
         - "can you download this video's clip between 5 and 10 seconds?": "Ah... you wish to... get this... content's... part? `yt-dlp url_the_user_sent download_ranges=5-10 --force_keyframes_at_cuts`"
