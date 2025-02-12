@@ -6,7 +6,6 @@ import asyncio
 import time
 
 MAX_CONVERSATION_HISTORY_LENGTH = 5
-OWNER_ONLY_COMMANDS = ['eval', 'reload', 'sync']
 
 class AI(commands.Cog):
     def __init__(self, bot):
@@ -43,7 +42,7 @@ class AI(commands.Cog):
         1. Use triple backticks for commands: ```command <args>```
         2. For yt-dlp, use the python yt_dlp module's options instead. (also do not prefix the options with -- as that is a boolean flag.)
         3. All commands should match the bot's exact command structure.
-        4. Owner-only commands: {', '.join(OWNER_ONLY_COMMANDS)}
+        4. Owner-only commands: eval, reload, sync
         
         Example Responses:
         - "can you download this video?": "```yt-dlp <url> [python options]```" **Make sure to use the Python yt_dlp library rather than the CLI yt-dlp.**
