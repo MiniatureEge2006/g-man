@@ -72,3 +72,20 @@ pip3 install -r requirements.txt
       * `tetris.mp3` (The Tetris beatbox song by Verbalase, used with the `!tetris` command).
 * Create a copy of `bot_info_template.json` and rename it to `bot_info.json`. Fill it in with the appropriate information (keep the quotes).
 * Run `python3 gman.py`
+# Terms of Service & Privacy Policy
+**You must follow our ToS and Privacy Policy in order to use the public version of G-Man.**
+## Terms of Service
+* Do not use G-Man in order to violate the public laws or Terms of Service/Privacy Policy of Discord or any other services.
+  * Additionally, do not use G-Man in order to download or share media that is DRM-protected/illegal.
+  * Also includes violating any other country laws including Türkiye.
+  * Along with the `ai` command.
+* We reserve the right to terminate your usage of our services at any time, anywhere for any reason.
+* You may not use G-Man in order to target an individual or groups of individuals.
+* You may not use G-Man if you are under the age of 13. Though it may depend on your country's laws in order to use Discord, so it can be higher than just 13.
+## Privacy Policy
+* Everything is stored locally and not stored in some random public database. (minus MongoDB, which stores media file urls that will be removed soon.)
+* We do not use your personal information whatsoever.
+  * We only use these data: Guilds and their IDs (Servers), Channels and their IDs, Roles and their IDs, and Users/Members and their IDs. All of which are required for moderation purposes and for the bot to function perfectly.
+  * Additionally, the command content will be included anytime you or anyone uses any commands.
+  * We do NOT share these data with anyone at all.
+* **If you wish to opt-out of using G-Man and want your data removed completely, make sure to remove the G-Man bot from any servers you own/manage and deauthorize the bot from your account. If you however still want to use G-Man but don't want your data to be given at all, please look at the installation instructions in order to self-host G-Man.**
