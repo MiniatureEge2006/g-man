@@ -73,45 +73,54 @@ async def reload_extensions(exs):
 
 @bot.check
 async def global_permissions_check(ctx: commands.Context):
-    if str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator:
+    if ctx.author.id in bot_info.data['owners']:
         return True
     return await command_permission_check(ctx)
 
 async def command_permission_check(ctx: commands.Context) -> bool:
-    async with bot.db.acquire() as conn:
-        server_query = "SELECT status, reason FROM server_command_permissions WHERE guild_id = $1 AND command_name = $2"
-        server_result = await conn.fetchrow(server_query, ctx.guild.id, ctx.command.name)
-        if server_result:
-            if not server_result["status"]:
-                await ctx.send(f"Command blocked. This server disabled this command. Reason: `{server_result['reason']}`")
-                return False
-        block_query = "SELECT status, target_type, reason FROM command_permissions WHERE guild_id = $1 AND command_name = $2 AND ((target_type = 'user' AND target_id = $3) OR (target_type = 'channel' AND target_id = $4) OR (target_type = 'role' AND target_id = ANY($5::BIGINT[])))"
+    try:
+        is_admin = ctx.author.guild_permissions.administrator
         role_ids = [role.id for role in ctx.author.roles]
-        block_result = await conn.fetch(block_query, ctx.guild.id, ctx.command.name, ctx.author.id, ctx.channel.id, role_ids)
-        for row in block_result:
-            if not row["status"]:
-                if row["target_type"] == "user":
-                    await ctx.send(f"Command blocked. You are part of the command blocklist. Reason: `{row['reason']}`")
-                elif row["target_type"] == "channel":
-                    await ctx.send(f"Command blocked. This channel is part of the command blocklist. Reason: `{row['reason']}`")
-                elif row["target_type"] == "role":
-                    await ctx.send(f"Command blocked. One of your roles is part of the command blocklist. Reason: `{row['reason']}`")
-                return False
-        allow_query = "SELECT status, target_type, target_id, reason FROM command_permissions WHERE guild_id = $1 AND command_name = $2 AND status = TRUE"
-        allow_result = await conn.fetch(allow_query, ctx.guild.id, ctx.command.name)
-        if allow_result:
-            allowed = False
-            for row in allow_result:
-                if row["target_type"] == "user" and ctx.author.id == row["target_id"]:
-                    allowed = True
-                elif row["target_type"] == "channel" and ctx.channel.id == row["target_id"]:
-                    allowed = True
-                elif row["target_type"] == "role" and row["target_id"] in role_ids:
-                    allowed = True
-            if not allowed:
-                await ctx.send(f"Command blocked. Either you, this channel, or one of your roles are not part of the allowlist. Reason: `{row['reason']}`")
-                return False
-    return True
+    except AttributeError:
+        is_admin = False
+        role_ids = []
+    guild_id = ctx.guild.id if ctx.guild else None
+    if guild_id:
+        async with bot.db.acquire() as conn:
+            server_query = "SELECT status, reason FROM server_command_permissions WHERE guild_id = $1 AND command_name = $2"
+            server_result = await conn.fetchrow(server_query, ctx.guild.id, ctx.command.name)
+            if server_result:
+                if not server_result["status"] and not is_admin:
+                    await ctx.send(f"Command blocked. This server disabled this command. Reason: `{server_result['reason']}`")
+                    return False
+            block_query = "SELECT status, target_type, reason FROM command_permissions WHERE guild_id = $1 AND command_name = $2 AND ((target_type = 'user' AND target_id = $3) OR (target_type = 'channel' AND target_id = $4) OR (target_type = 'role' AND target_id = ANY($5::BIGINT[])))"
+            block_result = await conn.fetch(block_query, ctx.guild.id, ctx.command.name, ctx.author.id, ctx.channel.id, role_ids)
+            for row in block_result:
+                if not row["status"] and not is_admin:
+                    if row["target_type"] == "user":
+                        await ctx.send(f"Command blocked. You are part of the command blocklist. Reason: `{row['reason']}`")
+                    elif row["target_type"] == "channel":
+                        await ctx.send(f"Command blocked. This channel is part of the command blocklist. Reason: `{row['reason']}`")
+                    elif row["target_type"] == "role":
+                        await ctx.send(f"Command blocked. One of your roles is part of the command blocklist. Reason: `{row['reason']}`")
+                    return False
+            allow_query = "SELECT status, target_type, target_id, reason FROM command_permissions WHERE guild_id = $1 AND command_name = $2 AND status = TRUE"
+            allow_result = await conn.fetch(allow_query, ctx.guild.id, ctx.command.name)
+            if allow_result:
+                allowed = False
+                for row in allow_result:
+                    if row["target_type"] == "user" and ctx.author.id == row["target_id"]:
+                        allowed = True
+                    elif row["target_type"] == "channel" and ctx.channel.id == row["target_id"]:
+                        allowed = True
+                    elif row["target_type"] == "role" and row["target_id"] in role_ids:
+                        allowed = True
+                if not allowed and not is_admin:
+                    await ctx.send(f"Command blocked. Either you, this channel, or one of your roles are not part of the allowlist. Reason: `{row['reason']}`")
+                    return False
+        return True
+    else:
+        return True
 
 @bot.before_invoke
 async def check_access(ctx: commands.Context):
