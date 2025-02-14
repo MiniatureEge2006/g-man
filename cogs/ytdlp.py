@@ -105,11 +105,15 @@ class Ytdlp(commands.Cog):
                     format_id = info.get('format_id', 'Unknown Format IDs')
                     await ctx.send(f"-# [{title} ({id})](<{video_url}> '{os.path.basename(final_file)}') by [{uploader}](<{uploader_url}> '{uploader_id}'), {resolution}, {duration} ({duration_seconds} seconds) Duration, Format IDs: `{format_id}`, {file_size} bytes ({self.human_readable_size(file_size)}), took {elapsed_time:.2f} seconds", file=discord.File(final_file))
 
-                os.remove(final_file)
         except FileNotFoundError as e:
             raise commands.CommandError(f"File handling error: `{e}`")
         except Exception as e:
             raise commands.CommandError(f"Download failed: ```ansi\n{e}```")
+        finally:
+            info = await task
+            final_file = info.get('final_file')
+            if final_file and os.path.exists(final_file):
+                os.remove(final_file)
 
     async def extract_info(self, ydl_opts, url, download=True):
         loop = asyncio.get_event_loop()

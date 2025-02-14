@@ -94,15 +94,18 @@ class FFmpeg(commands.Cog):
             if os.path.exists(output_file):
                 elapsed_time = time.time() - start_time
                 await ctx.send(f"-# {file_size} bytes ({self.human_readable_size(file_size)}), FFmpeg processing completed in {elapsed_time:.2f} seconds.", file=discord.File(output_file))
-                os.remove(output_file)
             else:
                 await ctx.send("FFmpeg processing completed, but the output file could not be found.")
             
-            for file in input_files:
-                os.remove(file)
 
         except Exception as e:
-            raise commands.CommandError(f"An error occurred: `{e}`")
+            raise commands.CommandError(f"Error: `{e}`")
+        finally:
+            for file in input_files:
+                if os.path.exists(file):
+                    os.remove(file)
+            if os.path.exists(output_file):
+                os.remove(output_file)
 
 
     async def read_output(self, stream):

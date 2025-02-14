@@ -61,15 +61,17 @@ class ImageMagick(commands.Cog):
             if os.path.exists(output_file):
                 elapsed_time = time.time() - start_time
                 await ctx.send(f"-# {file_size} bytes ({self.human_readable_size(file_size)}), ImageMagick completed in {elapsed_time:.2f} seconds.", file=discord.File(output_file))
-                os.remove(output_file)
             else:
                 await ctx.send("ImageMagick completed, but no output file was created.")
             
-            if "local_input_file" in locals() and os.path.exists(local_input_file):
-                os.remove(local_input_file)
         
         except Exception as e:
             raise commands.CommandError(f"An error occurred: `{e}`")
+        finally:
+            if "local_input_file" in locals() and os.path.exists(local_input_file):
+                os.remove(local_input_file)
+            if os.path.exists(output_file):
+                os.remove(output_file)
 
 
     async def run_imagemagick(self, args: list):

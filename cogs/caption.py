@@ -99,8 +99,6 @@ class Caption(commands.Cog):
 
             await ctx.send(file=discord.File(output_path))
 
-            os.remove(input_path)
-            os.remove(output_path)
         
         except Exception as e:
             error_message = str(e)
@@ -111,6 +109,12 @@ class Caption(commands.Cog):
                 os.remove("vids/error.txt")
             else:
                 await ctx.send(f"Error: {error_message}")
+
+        finally:
+            if os.path.exists(input_path):
+                os.remove(input_path)
+            if os.path.exists(output_path):
+                os.remove(output_path)
 
 async def setup(bot):
     await bot.add_cog(Caption(bot))

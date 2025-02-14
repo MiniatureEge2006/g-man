@@ -90,10 +90,13 @@ class Exif(commands.Cog):
             else:
                 await ctx.send("No metadata found in the file.")
             
-            os.remove(file_path)
         
         except Exception as e:
             raise commands.CommandError(f"An error occurred: `{e}`")
+
+        finally:
+            if os.path.exists(file_path):
+                os.remove(file_path)
     
 
     async def download_media(self, ctx: commands.Context, url: str) -> str:
