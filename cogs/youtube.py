@@ -16,7 +16,6 @@ class YouTube(commands.Cog):
     
     @commands.hybrid_command(name="youtube", description="Search YouTube.", aliases=["yt"])
     @app_commands.describe(query="The query to search for.")
-    @app_commands.user_install()
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def youtube(self, ctx: commands.Context, *, query: str):

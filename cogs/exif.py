@@ -14,7 +14,6 @@ class Exif(commands.Cog):
     
     @commands.hybrid_command(name="exif", description="Use FFprobe to extract exif metadata from media.", aliases=["ffprobe"])
     @app_commands.describe(url="Input URL to extract metadata from.")
-    @app_commands.user_install()
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def exif(self, ctx: commands.Context, url: str = None):

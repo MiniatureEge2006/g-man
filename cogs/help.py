@@ -10,7 +10,6 @@ class Help(commands.Cog):
 
     @commands.hybrid_command(name="help", description="Get a list of my commands.", aliases=["h", "commands", "c", "cmds", "pleasehelpme"])
     @app_commands.describe(command_or_category="The command or category in which you want to see.")
-    @app_commands.user_install()
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def help(self, ctx: commands.Context, *, command_or_category: str = None):

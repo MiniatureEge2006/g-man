@@ -78,7 +78,6 @@ class Caption(commands.Cog):
     
     @commands.hybrid_command(name="caption", description="Caption media.")
     @app_commands.describe(url="Input URL to caption.", text="Text to caption the media with.", font="The font to use. (Default Futura Condensed Extra Bold.otf)", font_color="The font color to use. (Default #000000)", font_size="The font size to use. (Default 24)", padding_color="The padding color to use. (Default #FFFFFF)", padding_size="The padding size to use. (Default 24)", border_width="The border width to use. (Default 0)", border_color="The border color to use. (Default #000000)", position="The position to use. (Default center)")
-    @app_commands.user_install()
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def caption(self, ctx: commands.Context, url: str, text: str, font: str = DEFAULTS["font"], font_color: str = DEFAULTS["font_color"], font_size: int = DEFAULTS["font_size"], padding_color: str = DEFAULTS["padding_color"], padding_size: int = DEFAULTS["padding_size"], border_width: int = DEFAULTS["border_width"], border_color: str = DEFAULTS["border_color"], position: str = DEFAULTS["position"]):

@@ -38,7 +38,6 @@ class Reminder(commands.Cog):
         await self.db_pool.execute(query, user_id, guild_id, channel_id, reminder_id, reminder_text, reminder_time)
     
     @commands.hybrid_command(name="remind", description="Set a reminder for yourself.", aliases=["reminder"])
-    @app_commands.user_install()
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     @app_commands.describe(user="The user you want to set a reminder for.", time="The time you want to set the reminder for.", reminder_text="What you want to be reminded of.")
@@ -78,7 +77,6 @@ class Reminder(commands.Cog):
         await ctx.reply(f"Okay, I'll remind you in <t:{int(reminder_time.timestamp())}:R> (<t:{int(reminder_time.timestamp())}:F>, {reminder_time.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)')}) about `{reminder_text}`." if user is ctx.author else f"Okay, I'll remind {target_user.mention} in <t:{int(reminder_time.timestamp())}:R> (<t:{int(reminder_time.timestamp())}:F>, {reminder_time.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)')}) about `{reminder_text}`.")
     
     @commands.hybrid_command(name="reminders", description="View your reminders.")
-    @app_commands.user_install()
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     @app_commands.describe(user="The user whose reminders you want to view.", global_view="View reminders for an user globally.")
@@ -135,7 +133,6 @@ class Reminder(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="deletereminder", description="Delete a reminder, optionally an user's reminders if you have manage server permissions.", aliases=["reminderdelete", "delreminder"])
-    @app_commands.user_install()
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     @app_commands.describe(reminder_id="The ID of the reminder to delete.", user="The user whose reminders you want to delete if you have manage server permissions.")
@@ -157,7 +154,6 @@ class Reminder(commands.Cog):
             await ctx.send(f"No reminder with ID {reminder_id} found for {user.display_name}.")
     
     @commands.hybrid_command(name="clearreminders", description="Clear all reminders for yourself or user/server if you have manage server permissions.", aliases=["remindersclear", "clreminders"])
-    @app_commands.user_install()
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     @app_commands.describe(user="The user whose reminders you want to clear if you have manage server permissions.", server="Clear all reminders for the server if you have manage server permissions.")

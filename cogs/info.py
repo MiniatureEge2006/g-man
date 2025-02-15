@@ -495,7 +495,6 @@ class Info(commands.Cog):
         await ctx.send(embed=embed)
     
     @commands.hybrid_command(name="botinfo", description="Displays information about the bot.")
-    @app_commands.user_install()
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def botinfo(self, ctx: commands.Context):
@@ -516,7 +515,6 @@ class Info(commands.Cog):
     
     @commands.hybrid_command(name="weatherinfo", description="Displays information about the weather in a location.", aliases=["weather"])
     @app_commands.describe(location="The location for which you want to know the weather.")
-    @app_commands.user_install()
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def weatherinfo(self, ctx: commands.Context, *, location: str):
@@ -578,7 +576,6 @@ class Info(commands.Cog):
     
     @commands.hybrid_command(name="colorinfo", description="Displays information about a color. Defaults to a random color.", aliases=["color"])
     @app_commands.describe(color="The color name or color code (HEX, RGB/A, HSL/A, HSV/A or CMYK)")
-    @app_commands.user_install()
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def colorinfo(self, ctx: commands.Context, color: str = None):
@@ -686,7 +683,6 @@ class Info(commands.Cog):
     
     @commands.hybrid_command(name="gradientinfo", description="Displays information about a gradient. Defaults to a random gradient.", aliases=["gradient"])
     @app_commands.describe(colors="Comma-separated list of colors in HEX format with optional positions (e.g., '#FF0000 0%, #00FF00 50%, #0000FF 100%')")
-    @app_commands.user_install()
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def gradientinfo(self, ctx: commands.Context, *, colors: str = None):

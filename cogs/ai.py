@@ -60,7 +60,6 @@ class AI(commands.Cog):
 
 
     @commands.hybrid_command(name="ai", description="Use G-AI to chat, ask questions, and generate responses.")
-    @app_commands.user_install()
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     @app_commands.describe(prompt="The prompt to send to G-AI.")
@@ -103,7 +102,7 @@ class AI(commands.Cog):
         except Exception as e:
             raise RuntimeError(f"AI request failed: {e}")
     @commands.hybrid_command(name="resetai", description="Reset the conversation history of G-AI.")
-    @app_commands.user_install()
+    
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def resetai(self, ctx: commands.Context):

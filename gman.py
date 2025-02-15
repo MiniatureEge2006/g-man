@@ -37,7 +37,7 @@ async def set_prefix(guild_id, prefix):
         await conn.execute("INSERT INTO prefixes (guild_id, prefix) VALUES ($1, $2) ON CONFLICT (guild_id) DO UPDATE SET prefix = $2", guild_id, prefix)
 
 
-extensions = ['cogs.audio', 'cogs.help', 'cogs.ping', 'cogs.caption', 'cogs.code', 'cogs.exif', 'cogs.ffmpeg', 'cogs.imagemagick', 'cogs.ytdlp', 'cogs.youtube', 'cogs.info', 'cogs.ai', 'cogs.reminder']
+extensions = ['cogs.audio', 'cogs.help', 'cogs.ping', 'cogs.caption', 'cogs.code', 'cogs.exif', 'cogs.ffmpeg', 'cogs.tutorial', 'cogs.imagemagick', 'cogs.ytdlp', 'cogs.youtube', 'cogs.info', 'cogs.ai', 'cogs.reminder']
 bot = commands.Bot(command_prefix=lambda bot, msg: get_prefix(msg), case_insensitive=True, strip_after_prefix=True, status=discord.Status.online, activity=discord.Game(name=f"{bot_info.data['prefix']}help"), help_command=None, intents=discord.Intents.all())
 
 
@@ -681,7 +681,6 @@ async def setup(bot):
 
 @bot.hybrid_command(name="eval", description="Evaluate code.", aliases=["exec"])
 @app_commands.describe(code="The code to evaluate.")
-@app_commands.user_install()
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @bot_info.is_owner()
