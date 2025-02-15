@@ -1,25 +1,18 @@
-import asyncio
 import contextlib
 import io
 import textwrap
 import bot_info
-import json
 import datetime
 import logging
 import colorlog
-import database as db
 import asyncpg
 import discord
 from discord import app_commands
 from discord.ext import commands
 from typing import Literal, Optional
-import media_cache
 import os
-import re
-import sys
 import traceback
 import random
-from urllib.parse import urlparse
 
 
 
@@ -44,7 +37,7 @@ async def set_prefix(guild_id, prefix):
         await conn.execute("INSERT INTO prefixes (guild_id, prefix) VALUES ($1, $2) ON CONFLICT (guild_id) DO UPDATE SET prefix = $2", guild_id, prefix)
 
 
-extensions = ['cogs.audio', 'cogs.help', 'cogs.ping', 'cogs.bitrate', 'cogs.filter', 'cogs.fun', 'cogs.corruption', 'cogs.bookmarks', 'cogs.utility', 'cogs.caption', 'cogs.code', 'cogs.exif', 'cogs.ffmpeg', 'cogs.imagemagick', 'cogs.ytdlp', 'cogs.youtube', 'cogs.info', 'cogs.ai', 'cogs.reminder']
+extensions = ['cogs.audio', 'cogs.help', 'cogs.ping', 'cogs.caption', 'cogs.code', 'cogs.exif', 'cogs.ffmpeg', 'cogs.imagemagick', 'cogs.ytdlp', 'cogs.youtube', 'cogs.info', 'cogs.ai', 'cogs.reminder']
 bot = commands.Bot(command_prefix=lambda bot, msg: get_prefix(msg), case_insensitive=True, strip_after_prefix=True, status=discord.Status.online, activity=discord.Game(name=f"{bot_info.data['prefix']}help"), help_command=None, intents=discord.Intents.all())
 
 
@@ -181,30 +174,6 @@ async def on_ready():
     logger.info(f"Bot {bot.user.name} is in {len(bot.guilds)} guilds, caching a total of {sum(1 for _ in bot.get_all_channels())} channels and {len(bot.users)} users.")
     logger.info(f"Bot {bot.user.name} has a total of {len(bot.commands)} commands with {len(bot.cogs)} cogs.")
 
-# Process commands
-@bot.event
-async def on_message(message):
-    logger = logging.getLogger()
-    # Adding URLs to the cache
-    if(len(message.attachments) > 0):
-        logger.info(message.attachments[0].url)
-        msg_url = message.attachments[0].url
-        parsed_url = urlparse(msg_url)
-        url_path = parsed_url.path
-        if(not url_path.endswith('_ignore.mp4') and url_path.split('.')[-1].lower() in media_cache.approved_filetypes):
-            media_cache.add_to_cache(message, msg_url)
-            logger.info("Added file!")
-    elif(re.match(media_cache.discord_cdn_regex, message.content) or re.match(media_cache.hosted_file_regex, message.content)):
-        media_cache.add_to_cache(message, message.content)
-        logger.info("Added discord cdn/hosted file url!")
-    elif(re.match(media_cache.yt_regex, message.content) or re.match(media_cache.twitter_regex, message.content) or re.match(media_cache.tumblr_regex, message.content) or re.match(media_cache.medaltv_regex, message.content) or re.match(media_cache.archive_regex, message.content)):
-        media_cache.add_to_cache(message, message.content)
-        logger.info("Added yt/twitter/tumblr url! " + message.content)
-    elif(re.match(media_cache.soundcloud_regex, message.content) or re.match(media_cache.bandcamp_regex, message.content)):
-        media_cache.add_to_cache(message, message.content)
-        logger.info("Added soundcloud/bandcamp url! " + message.content)
-
-    await bot.process_commands(message)
 
 @bot.event
 async def on_command(ctx):
@@ -226,11 +195,6 @@ async def on_command(ctx):
         f"--- End Command Log ---"
     )
     logger.info(log_message)
-
-# Forgetting videos that get deleted
-@bot.event
-async def on_message_delete(message):
-    db.vids.delete_one({'message_id':str(message.id)})
 
 # Command error
 @bot.event
@@ -863,14 +827,6 @@ def cleanup_code(content: str) -> str:
             content = content.lstrip("abcdefghijklmnopqrstuvwxyz")
     return content.strip()
 
-def read_json(filename):
-    with open(f"{filename}.json", "r") as file:
-        data = json.load(file)
-        return data
-
-def write_json(data, filename):
-    with open(f"{filename}.json", "w") as file:
-        json.dump(data, file)
 
 setup_logger()
 

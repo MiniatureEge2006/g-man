@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 import json
 
-# Load bot info (contains bot login, owners/admins, and MongoDB connection url)
+# Load bot info (contains bot login, owners/admins, and such)
 data = None
 with open('bot_info.json') as f:
     data = json.load(f)
