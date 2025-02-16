@@ -121,7 +121,10 @@ class Tutorial(commands.Cog):
             [bg2]drawtext=text='{wrapped_title[-1]}':fontfile=fonts/arial.ttf:fontsize={title_font_size}:x=(main_w-tw)/2:y=main_h/2-({title_font_size}*0)-{title_font_size/2}:alpha='-abs(t-1.7)+1.7':fontcolor=#f0f0f0:shadowcolor=black:shadowx=1:shadowy=1[bg3];
             [bg3]drawtext=text='{title_bottom[:19]}':fontfile=fonts/arial.ttf:fontsize={sub_font_size}:x=(main_w-tw)/2:y=main_h/2+({sub_font_size}):alpha='-abs(t-1.7-0.25)+1.7-0.25':fontcolor=#f0f0f0:shadowcolor=black:shadowx=1:shadowy=1[bg4];
             [1:v]scale=640:480,setsar=1:1[vid];
-            [bg4][vid]concat=n=2:v=1:a=0[outv]""",
+            [bg4][vid]concat=n=2:v=1:a=0[mainvid];
+            [0:v]drawtext=text='Thx for watching':fontfile=fonts/arial.ttf:fontsize=60:x=(main_w-tw)/2:y=(main_h-th)/2:fontcolor=#f0f0f0:shadowcolor=black:shadowx=2:shadowy=2:enable='between(t,0,3)':alpha='if(lt(t,1),t,if(gt(t,2),3-t,1))'[thanks];
+            [0:v]drawtext=text='Pls like and subscribe':fontfile=fonts/arial.ttf:fontsize=40:x=(main_w-tw)/2:y=(main_h-th)/2+70:fontcolor=#f0f0f0:shadowcolor=black:shadowx=2:shadowy=2:enable='between(t,0,3)':alpha='if(lt(t,1),t,if(gt(t,2),3-t,1))'[subscribe];
+            [mainvid][thanks][subscribe]concat=n=3:v=1:a=0[outv]""",
             '-map', '[outv]',
             '-map', '2:a',
             '-vsync', '2',
