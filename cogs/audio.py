@@ -18,6 +18,7 @@ class Audio(commands.Cog):
         self.queues = {}
         self.currently_playing = {}
         self.loop_mode = {}
+        self.metadata_cache = {}
     
     def get_queue(self, guild_id):
         if guild_id not in self.queues:
@@ -54,12 +55,6 @@ class Audio(commands.Cog):
         if queue:
             url, filters = queue.popleft()
             await self.play_audio(ctx, url, filters)
-        elif self.loop_mode.get(guild_id) == "queue":
-            for item in self.currently_playing.get(guild_id, {}).get("queue_snapshot", []):
-                queue.append(item)
-            if queue:
-                url, filters = queue.popleft()
-                await self.play_audio(ctx, url, filters)
 
     async def play_audio(self, ctx: commands.Context, url: str, filters=None):
         if 'spotify.com' in url:
@@ -69,12 +64,25 @@ class Audio(commands.Cog):
                 results = ydl.extract_info(f"ytsearch:{query}", download=False)['entries']
                 if results:
                     url = results[0]['webpage_url']
-            
-        loop = asyncio.get_event_loop()
-        info = await loop.run_in_executor(None, self.extract_info, url)
 
-        file_path = yt_dlp.YoutubeDL(YDL_OPTIONS).prepare_filename(info)
-        
+        cached_info = self.metadata_cache.get(url)
+        loop_mode_active = self.loop_mode.get(ctx.guild.id) == "single"
+
+        if cached_info and loop_mode_active:
+            info = cached_info
+            file_path = yt_dlp.YoutubeDL(YDL_OPTIONS).prepare_filename(info)
+        else:
+            loop = asyncio.get_event_loop()
+            info = await loop.run_in_executor(None, self.extract_info, url)
+            file_path = yt_dlp.YoutubeDL(YDL_OPTIONS).prepare_filename(info)
+            self.metadata_cache[url] = info
+
+        if not os.path.exists(file_path):
+            info = await loop.run_in_executor(None, self.extract_info, url)
+            self.metadata_cache[url] = info
+
+                    
+
         if ctx.voice_client:
             if ctx.voice_client.is_playing() and ctx.author.voice.channel != ctx.voice_client.channel:
                 await ctx.send("You must be in the same voice channel as me to play audio.")
@@ -105,8 +113,7 @@ class Audio(commands.Cog):
             self.currently_playing[ctx.guild.id] = {
                 'info': info,
                 'url': url,
-                'filters': filters,
-                'queue_snapshot': list(self.get_queue(ctx.guild.id))
+                'filters': filters
             }
             embed = discord.Embed(
                 title=f"Playing - {info['title'] or 'Unknown'}",
@@ -134,9 +141,10 @@ class Audio(commands.Cog):
             return ydl.extract_info(url, download=True)
 
     async def cleanup_file_and_play_next(self, ctx, file_path):
-        if os.path.exists(file_path):
-            await asyncio.sleep(1)
-            os.remove(file_path)
+        if self.loop_mode.get(ctx.guild.id) != "single":
+            if os.path.exists(file_path):
+                await asyncio.sleep(1)
+                os.remove(file_path)
         await self.play_next(ctx)
     
     @commands.hybrid_command(name="join", description="Join a voice channel.")
@@ -183,19 +191,36 @@ class Audio(commands.Cog):
         else:
             await self.play_audio(ctx, url, filters=filters_list)
     
-    @commands.hybrid_command(name="repeat", description="Repeat the currently playing audio/song or the queue.")
-    @app_commands.describe(mode="The mode to repeat. Can be 'single', 'queue', or 'none'.")
+    @commands.hybrid_command(name="repeat", description="Repeat the currently playing audio/song.", aliases=["loop"])
+    @app_commands.describe(mode="The mode to repeat. Can be 'single' or 'none'. Leave empty to toggle.")
     @app_commands.allowed_installs(guilds=True, users=False)
-    async def repeat(self, ctx: commands.Context, mode: str):
+    async def repeat(self, ctx: commands.Context, mode: str = None):
         await ctx.typing()
-        if mode.lower() not in ["single", "queue", "none"]:
-            await ctx.send("Invalid mode. Valid modes are 'single', 'queue', or 'none'.")
+        current_mode = self.loop_mode.get(ctx.guild.id)
+        if mode is None:
+            if current_mode == "single":
+                self.loop_mode.pop(ctx.guild.id, None)
+                await ctx.send("Repeat mode disabled.")
+            else:
+                self.loop_mode[ctx.guild.id] = "single"
+                await ctx.send("Repeat mode activated. The current song will now repeat.")
+            return
+        if not isinstance(mode, str):
+            await ctx.send("Invalid mode. Please provide 'single' or 'none'.")
+            return
+        mode = mode.lower()
+        if mode not in ["single", "none"]:
+            await ctx.send("Invalid mode. Valid modes are 'single' and 'none'.")
             return
         if ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
             await ctx.send("You are not in the same voice channel as me.")
             return
-        self.loop_mode[ctx.guild.id] = mode.lower()
-        await ctx.send(f"Loop mode set to {mode.lower()}.")
+        if mode == "none":
+            self.loop_mode.pop(ctx.guild.id, None)
+            await ctx.send("Repeat mode disabled.")
+        else:
+            self.loop_mode[ctx.guild.id] = mode
+            await ctx.send("Repeat mode activated. The current song will now repeat.")
     
 
     @commands.hybrid_command(name="queue", description="Display the current queue.")
