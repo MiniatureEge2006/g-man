@@ -172,13 +172,22 @@ class Audio(commands.Cog):
     @commands.hybrid_command(name="play", description="Play an audio/song from a given URL. Any URL that yt-dlp supports also works.", aliases=["p"])
     @app_commands.describe(url="The URL of the audio/song to play.", filters="A comma-separated list of filters to apply to the audio.")
     @app_commands.allowed_installs(guilds=True, users=False)
-    async def play(self, ctx: commands.Context, url: str, *, filters: str = None):
+    async def play(self, ctx: commands.Context, url: str = None, filters: str = None):
         await ctx.typing()
-        
+        if ctx.message.attachments:
+            source_url = ctx.message.attachments[0].url
+            if not filters:
+                message_content = ctx.message.content[len(ctx.prefix + ctx.invoked_with):].strip()
+                filters = message_content
+        else:
+            if not url:
+                await ctx.send("Please provide an URL or an attachment file.")
+                return
+            source_url = url
         filters_list = filters.split(',') if filters else []
         queue = self.get_queue(ctx.guild.id)
         if ctx.voice_client and ctx.voice_client.is_playing() and ctx.author.voice and ctx.author.voice.channel == ctx.voice_client.channel:
-            queue.append((url, filters_list))
+            queue.append((source_url, filters_list))
             await ctx.send(f"Added {url} to the queue.")
         elif ctx.voice_client and ctx.voice_client.is_playing() and (ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel):
             await ctx.send("You must be in the same voice channel as me to play audio.")
@@ -187,9 +196,9 @@ class Audio(commands.Cog):
             connected = await self.connect_to_channel(ctx)
             if not connected:
                 return
-            await self.play_audio(ctx, url, filters=filters_list)
+            await self.play_audio(ctx, source_url, filters=filters_list)
         else:
-            await self.play_audio(ctx, url, filters=filters_list)
+            await self.play_audio(ctx, source_url, filters=filters_list)
     
     @commands.hybrid_command(name="repeat", description="Repeat the currently playing audio/song.", aliases=["loop"])
     @app_commands.describe(mode="The mode to repeat. Can be 'single' or 'none'. Leave empty to toggle.")
