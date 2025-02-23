@@ -72,7 +72,7 @@ class AI(commands.Cog):
 
     async def get_ai_response(self, system_prompt: str, user_history: list):
         try:
-            response = await asyncio.to_thread(ollama.chat, model="qwen2.5-coder:14b", messages=[{"role": "system", "content": system_prompt}] + user_history)
+            response = await asyncio.to_thread(ollama.chat, model="llama3.2", messages=[{"role": "system", "content": system_prompt}] + user_history)
             return response
         except Exception as e:
             raise RuntimeError(f"AI request failed: {e}")
