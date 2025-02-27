@@ -58,7 +58,7 @@ class AI(commands.Cog):
                 await ctx.reply("Command returned no content.")
                 return
             if len(content) > 2000:
-                embed = discord.Embed(title="G-AI Response", description=content if len(content) < 4096 else content[:4093] + "...", color=discord.Color.blurple())
+                embed = discord.Embed(title="G-AI Response", description=content if len(content) < 4096 else content[:4096], color=discord.Color.blurple())
                 embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
                 embed.set_footer(text=f"AI Response took {time.time() - start_time:.2f} seconds", icon_url="https://ollama.com/public/og.png")
                 await ctx.reply(embed=embed)
