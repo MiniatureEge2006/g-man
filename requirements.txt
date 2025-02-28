@@ -8,6 +8,7 @@ chardet==4.0.0
 charset-normalizer==2.0.8
 discord.py==2.5.0
 dnspython==2.1.0
+roblox
 Pillow
 webcolors
 psutil
