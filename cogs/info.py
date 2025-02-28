@@ -190,7 +190,9 @@ class Info(commands.Cog):
             h = fmod(h * 60, 360)
         return round(h), round(s * 100), round(v * 100), round(a * 100)
 
-    @commands.command(name="userinfo", aliases=["user", "member", "memberinfo"], description="Displays information about a user. Defaults to the author.")
+    @commands.hybrid_command(name="userinfo", aliases=["user", "member", "memberinfo"], description="Displays information about a user. Defaults to the author.")
+    @app_commands.describe(member="Member or user to get information out of.")
+    @app_commands.allowed_installs(guilds=True, users=False)
     async def userinfo(self, ctx: commands.Context, *, member = None):
         member = member or ctx.author
 
@@ -261,7 +263,9 @@ class Info(commands.Cog):
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
     
-    @commands.command(name="serverinfo", aliases=["server", "guild", "guildinfo"], description="Displays information about a server. Defaults to the current server.")
+    @commands.hybrid_command(name="serverinfo", aliases=["server", "guild", "guildinfo"], description="Displays information about a server. Defaults to the current server.")
+    @app_commands.describe(guild="The server to get information out of.")
+    @app_commands.allowed_installs(guilds=True, users=False)
     async def serverinfo(self, ctx: commands.Context, *, guild: discord.Guild = None):
         if guild is None:
             guild = ctx.guild
@@ -294,7 +298,9 @@ class Info(commands.Cog):
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
     
-    @commands.command(name="channelinfo", aliases=["channel"], description="Displays information about a text channel. Defaults to the current channel.")
+    @commands.hybrid_command(name="channelinfo", aliases=["channel"], description="Displays information about a text channel. Defaults to the current channel.")
+    @app_commands.describe(channel="The text channel to get information out of.")
+    @app_commands.allowed_installs(guilds=True, users=False)
     async def channelinfo(self, ctx: commands.Context, *, channel: discord.TextChannel = None):
         channel = channel or ctx.channel
         embed = discord.Embed(
@@ -319,7 +325,9 @@ class Info(commands.Cog):
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
 
-    @commands.command(name="voiceinfo", aliases=["vc", "vcinfo", "voice"], description="Displays information about a voice channel. Defaults to the current voice channel the author is in.")
+    @commands.hybrid_command(name="voiceinfo", aliases=["vc", "vcinfo", "voice"], description="Displays information about a voice channel. Defaults to the current voice channel the author is in.")
+    @app_commands.describe(channel="The voice channel to get information out of.")
+    @app_commands.allowed_installs(guilds=True, users=False)
     async def voiceinfo(self, ctx: commands.Context, *, channel: discord.VoiceChannel = None):
         if channel is None:
             if ctx.author.voice and ctx.author.voice.channel:
@@ -349,7 +357,9 @@ class Info(commands.Cog):
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
     
-    @commands.command(name="threadinfo", aliases=["thread"], description="Displays information about a text channel's thread.")
+    @commands.hybrid_command(name="threadinfo", aliases=["thread"], description="Displays information about a text channel's thread.")
+    @app_commands.describe(thread="The discord channel threat to get information out of.")
+    @app_commands.allowed_installs(guilds=True, users=False)
     async def threadinfo(self, ctx: commands.Context, *, thread: discord.Thread):
         embed = discord.Embed(
             title=f"Thread Info - {thread.name}",
@@ -366,7 +376,9 @@ class Info(commands.Cog):
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
     
-    @commands.command(name="messageinfo", aliases=["msg", "message", "msginfo"], description="Displays information about a message.")
+    @commands.hybrid_command(name="messageinfo", aliases=["msg", "message", "msginfo"], description="Displays information about a message.")
+    @app_commands.describe(message="The text message to get information out of.")
+    @app_commands.allowed_installs(guilds=True, users=False)
     async def messageinfo(self, ctx: commands.Context, *, message: discord.Message):
         embed = discord.Embed(
             title=f"Message Info - {message.id}",
@@ -387,7 +399,9 @@ class Info(commands.Cog):
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
     
-    @commands.command(name="emojiinfo", aliases=["emoji"], description="Displays information about an emoji.")
+    @commands.hybrid_command(name="emojiinfo", aliases=["emoji"], description="Displays information about an emoji.")
+    @app_commands.describe(emoji="The server emoji to get information out of.")
+    @app_commands.allowed_installs(guilds=True, users=False)
     async def emojiinfo(self, ctx: commands.Context, *, emoji: discord.Emoji):
         embed = discord.Embed(
             title=f"Emoji Info - {emoji.name}",
@@ -403,7 +417,9 @@ class Info(commands.Cog):
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
     
-    @commands.command(name="stickerinfo", aliases=["sticker"], description="Displays information about a sticker.")
+    @commands.hybrid_command(name="stickerinfo", aliases=["sticker"], description="Displays information about a sticker.")
+    @app_commands.describe(sticker="The server sticker to get information out of.")
+    @app_commands.allowed_installs(guilds=True, users=False)
     async def stickerinfo(self, ctx: commands.Context, *, sticker: discord.GuildSticker):
         embed = discord.Embed(
             title=f"Sticker Info - {sticker.name}",
@@ -422,7 +438,9 @@ class Info(commands.Cog):
 
         await ctx.send(embed=embed)
     
-    @commands.command(name="inviteinfo", description="Displays information about an invite code.")
+    @commands.hybrid_command(name="inviteinfo", description="Displays information about an invite code.")
+    @app_commands.describe(invite="The discord server invite link to get information out of.")
+    @app_commands.allowed_installs(guilds=True, users=False)
     async def inviteinfo(self, ctx: commands.Context, *, invite: discord.Invite):
         embed = discord.Embed(
             title=f"Invite Info - {invite.code}",
@@ -441,7 +459,9 @@ class Info(commands.Cog):
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
     
-    @commands.command(name="permissions", aliases=["perms"], description="Displays a user's permissions in a channel. Defaults to the current channel and author.")
+    @commands.hybrid_command(name="permissions", aliases=["perms"], description="Displays a user's permissions in a channel. Defaults to the current channel and author.")
+    @app_commands.describe(member="The server member to get permission information.", channel="Optional text channel to get the permissions at.")
+    @app_commands.allowed_installs(guilds=True, users=False)
     async def permissions(self, ctx: commands.Context, member: discord.Member = None, channel: discord.TextChannel = None):
         member = member or ctx.author
         channel = channel or ctx.channel
@@ -457,7 +477,9 @@ class Info(commands.Cog):
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
     
-    @commands.command(name="roleinfo", aliases=["role"], description="Displays information about a role. Defaults to the everyone role.")
+    @commands.hybrid_command(name="roleinfo", aliases=["role"], description="Displays information about a role. Defaults to the everyone role.")
+    @app_commands.describe(role="The server role to get information out of.")
+    @app_commands.allowed_installs(guilds=True, users=False)
     async def roleinfo(self, ctx: commands.Context, *, role: discord.Role = None):
         role = role or ctx.guild.default_role
         embed = discord.Embed(
@@ -480,8 +502,10 @@ class Info(commands.Cog):
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed, file=discord.File(buffer, "role_color.png"))
 
-    @commands.command(name="baninfo", description="Displays information about a banned user.")
+    @commands.hybrid_command(name="baninfo", description="Displays information about a banned user.")
     @commands.has_permissions(ban_members=True)
+    @app_commands.describe(user="The banned user to get. ID only.")
+    @app_commands.allowed_installs(guilds=True, users=False)
     async def baninfo(self, ctx: commands.Context, *, user: discord.User):
         ban_entry = await ctx.guild.fetch_ban(user)
         embed = discord.Embed(
