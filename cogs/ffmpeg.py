@@ -103,6 +103,7 @@ class FFmpeg(commands.Cog):
             for file in input_files:
                 if os.path.exists(file):
                     os.remove(file)
+            output_file = [arg for arg in split_args if not arg.startswith("-")][-1]
             if os.path.exists(output_file):
                 os.remove(output_file)
 
