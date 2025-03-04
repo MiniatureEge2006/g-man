@@ -61,11 +61,15 @@ CREATE TABLE IF NOT EXISTS server_command_permissions (
 );
 
 
-CREATE TABLE IF NOT EXISTS prefixes (
+CREATE TABLE IF NOT EXISTS guild_prefixes (
     guild_id BIGINT PRIMARY KEY,
-    prefix TEXT NOT NULL
+    prefixes TEXT[] NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS user_prefixes (
+    user_id BIGINT PRIMARY KEY,
+    prefixes TEXT[] NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS reminders (
     id SERIAL PRIMARY KEY,
