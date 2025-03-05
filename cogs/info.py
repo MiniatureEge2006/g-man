@@ -358,7 +358,7 @@ class Info(commands.Cog):
         await ctx.send(embed=embed)
     
     @commands.hybrid_command(name="threadinfo", aliases=["thread"], description="Displays information about a text channel's thread.")
-    @app_commands.describe(thread="The discord channel threat to get information out of.")
+    @app_commands.describe(thread="The discord channel thread to get information out of.")
     @app_commands.allowed_installs(guilds=True, users=False)
     async def threadinfo(self, ctx: commands.Context, *, thread: discord.Thread):
         embed = discord.Embed(
