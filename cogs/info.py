@@ -368,7 +368,6 @@ class Info(commands.Cog):
         )
         embed.add_field(name="ID", value=thread.id, inline=True)
         embed.add_field(name="Owner", value=thread.owner.mention if thread.owner else "Unknown", inline=True)
-        embed.add_field(name="Participants", value=", ".join([member.mention for member in thread.members]) or "None", inline=False)
         embed.add_field(name="Message Count", value=thread.message_count, inline=True)
         embed.add_field(name="Created At", value=thread.created_at.strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)"), inline=True)
         embed.add_field(name="Archived", value=thread.archived, inline=True)
