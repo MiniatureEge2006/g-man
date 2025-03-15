@@ -4,6 +4,7 @@ from discord import app_commands
 import ollama
 import asyncio
 import time
+import base64
 
 MAX_CONVERSATION_HISTORY_LENGTH = 5
 
@@ -37,11 +38,14 @@ class AI(commands.Cog):
     @commands.hybrid_command(name="ai", description="Use G-AI to chat, ask questions, and generate responses.")
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    @app_commands.describe(prompt="The prompt to send to G-AI.")
-    async def ai(self, ctx: commands.Context, *, prompt: str):
+    @app_commands.describe(prompt="The prompt to send to G-AI.", attachment="The attachment to use for reading. (Must be .jpg or .png)")
+    async def ai(self, ctx: commands.Context, *, prompt: str, attachment: discord.Attachment = None):
         await ctx.typing()
         conversation_key = self.get_conversation(ctx)
         user_history = self.conversations.get(conversation_key, [])
+        if ctx.message.attachments or attachment:
+            img = base64.b64encode(await ctx.message.attachments[0].read()).decode()
+            user_history.append({"role": "user", "content": prompt, "images": [img]})
         user_history.append({"role": "user", "content": prompt})
 
         if len(user_history) > MAX_CONVERSATION_HISTORY_LENGTH:
@@ -72,7 +76,7 @@ class AI(commands.Cog):
 
     async def get_ai_response(self, system_prompt: str, user_history: list):
         try:
-            response = await asyncio.to_thread(ollama.chat, model="llama3.2", messages=[{"role": "system", "content": system_prompt}] + user_history)
+            response = await asyncio.to_thread(ollama.chat, model="gemma3", messages=[{"role": "system", "content": system_prompt}] + user_history)
             return response
         except Exception as e:
             raise RuntimeError(f"AI request failed: {e}")
