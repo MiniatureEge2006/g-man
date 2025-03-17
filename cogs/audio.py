@@ -8,6 +8,7 @@ import os
 import asyncio
 from collections import deque
 from datetime import datetime
+from typing import Optional
 
 YDL_OPTIONS = {'format': 'bestaudio/best', 'noplaylist': True, 'outtmpl': 'vids/%(extractor)s-%(id)s-%(title)s.%(ext)s', 'restrictfilenames': True}
 spotify = spotipy.Spotify(auth_manager=spotipy.SpotifyClientCredentials(client_id=bot_info.data['spotify_client_id'], client_secret=bot_info.data['spotify_client_secret']))
@@ -170,12 +171,12 @@ class Audio(commands.Cog):
             await ctx.send("I am not connected to a voice channel.")
     
     @commands.hybrid_command(name="play", description="Play an audio/song from a given URL. Any URL that yt-dlp supports also works.", aliases=["p"])
-    @app_commands.describe(url="The URL of the audio/song to play.", filters="A comma-separated list of filters to apply to the audio.")
+    @app_commands.describe(url="The URL of the audio/song to play.", attachment="The attachment media file to use for playing.", filters="A comma-separated list of filters to apply to the audio.")
     @app_commands.allowed_installs(guilds=True, users=False)
-    async def play(self, ctx: commands.Context, url: str = None, filters: str = None):
+    async def play(self, ctx: commands.Context, url: str = None, attachment: Optional[discord.Attachment] = None, filters: str = None):
         await ctx.typing()
-        if ctx.message.attachments:
-            source_url = ctx.message.attachments[0].url
+        if ctx.message.attachments or attachment:
+            source_url = attachment.url if attachment else ctx.message.attachments[0].url
             if not filters:
                 message_content = ctx.message.content[len(ctx.prefix + ctx.invoked_with):].strip()
                 filters = message_content
