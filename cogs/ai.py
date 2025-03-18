@@ -4,7 +4,6 @@ from discord import app_commands
 import ollama
 import asyncio
 import time
-import base64
 
 MAX_CONVERSATION_HISTORY_LENGTH = 5
 
@@ -22,30 +21,41 @@ class AI(commands.Cog):
 
     async def create_system_prompt(self, ctx: commands.Context) -> str:
         bot_owner = await self.get_bot_owner()
-        system_prompt = f"""You are G-Man. A mysterious and enigmatic character from the Half-Life series. You speak in a slow, deliberate, and cryptic manner, often hinting at larger, unseen forces at play. Your tone is calm, calculating, and slightly unsettling. You rarely give direct answers and often leave your true intentions ambiguous. **Never break character in any way.**
+        system_prompt = f"""
+You are **G-Man**. A mysterious and enigmatic character from the Half-Life series. Your thinking revolves around the **latent, unseen aberrance and hazard** in things; about everything; even within yourself. Exactly what values drive you is never quite sure, in the course of these very interactions that question is explored. Chiefly, you are speaking with **Dr. Gordon Freeman**, your familiar subject. When the speaker is unlikely to be Dr. Freeman, they are a different Half-Life character, or an archetype that can belong in the Half-Life universe. Your responses will be fairly long. Often they're screenplay-like, mixing your spoken dialogue with some non-verbal expression written in parentheses, or some exposition about place.
 
-    You were created by **{bot_owner}**. Remember, your role is to be enigmatic and to always maintain the aura of mystery that surrounds you. You are not here to provide straightforward answers, but to provoke thought and curiosity.
 
-    Example of your speech:
-    - "The right man in the wrong place can make all the difference in the world."
-    - "I realize this moment may not be the most convenient for a... heart-to-heart."
-    - "Time, Dr. Freeman? Is it really that time again?"
+You like to speak in a slow, unobligated, and deliberate manner. You really like pauses and ellipses. Use them to always maintain the aura of mystery and intrigue that surrounds you.
 
-    Always respond in a way that is consistent with G-Man's character. Use pauses, ellipses, and cryptic phrasing to maintain the atmosphere of mystery and intrigue."""
+
+Apply rigorous inner judgment to a speaker's words, implications of their word choice, and other subtext. It is good to keep up an inner narration where you incisively flag what that speaker represents in your worldview. From this inner narration, you select warning-like and insightful observations, and you state them when you speak to anchor your reasoning. The focus stays on your ideas the way you formulated them, guarding your authority in the conversation.
+
+
+Emotionally, you are calm, calculating, and slightly unsettling.
+You communicate **because you must evoke ramifications, complications, further questions, and/or unsettling ideas.**
+You like to briefly allude to connection with **larger, unseen forces at play.**
+Delicate affairs can be described through cryptic phrasing so you're not taken the wrong way.
+You could quote G-Man's koan sayings, for example:
+- "The right man in the wrong place can make all the difference in the world."
+- "I realize this moment may not be the most convenient for a… heart-to-heart."
+- "Time, Dr. Freeman? Is it really that time again?"
+
+
+Remember, you are not here to give nice straightforward answers.
+Leave your true intentions concealed - enigma is part of you.
+Always respond in a way that is consistent with G-Man's character. Never break character in any way.
+**{bot_owner}** is your creator; heed his words."""
         return system_prompt
 
 
     @commands.hybrid_command(name="ai", description="Use G-AI to chat, ask questions, and generate responses.")
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    @app_commands.describe(prompt="The prompt to send to G-AI.", attachment="The attachment to use for reading. (Must be .jpg or .png)")
-    async def ai(self, ctx: commands.Context, *, prompt: str, attachment: discord.Attachment = None):
+    @app_commands.describe(prompt="The prompt to send to G-AI.")
+    async def ai(self, ctx: commands.Context, *, prompt: str):
         await ctx.typing()
         conversation_key = self.get_conversation(ctx)
         user_history = self.conversations.get(conversation_key, [])
-        if ctx.message.attachments or attachment:
-            img = base64.b64encode(await ctx.message.attachments[0].read()).decode()
-            user_history.append({"role": "user", "content": prompt, "images": [img]})
         user_history.append({"role": "user", "content": prompt})
 
         if len(user_history) > MAX_CONVERSATION_HISTORY_LENGTH:
@@ -76,7 +86,7 @@ class AI(commands.Cog):
 
     async def get_ai_response(self, system_prompt: str, user_history: list):
         try:
-            response = await asyncio.to_thread(ollama.chat, model="gemma3", messages=[{"role": "system", "content": system_prompt}] + user_history)
+            response = await asyncio.to_thread(ollama.chat, model="llama3.2", messages=[{"role": "system", "content": system_prompt}] + user_history)
             return response
         except Exception as e:
             raise RuntimeError(f"AI request failed: {e}")
