@@ -13,8 +13,8 @@ class Ytdlp(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
     
-    @commands.hybrid_command(name="yt-dlp", aliases=["youtube-dl", "ytdl", "youtubedl", "ytdlp"], description="Use yt-dlp! (for a list of formats use --listformats or listformats=true)")
-    @app_commands.describe(url="Input URL. (e.g., YouTube, SoundCloud. DRM protected websites are NOT supported.)", options="yt-dlp Options. (e.g., download_ranges=10-15 --force_keyframes_at_cuts)")
+    @commands.hybrid_command(name="yt-dlp", aliases=["youtube-dl", "ytdl", "youtubedl", "ytdlp", "download", "dl"], description="Use yt-dlp! (for a list of formats use --listformats)")
+    @app_commands.describe(url="Input URL. (e.g., YouTube, SoundCloud. DRM protected websites are NOT supported.)", options="yt-dlp options. (e.g., --download-ranges 10-15 --force-keyframes-at-cuts)")
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def ytdlp(self, ctx: commands.Context, url: str, *, options: str = ''):
@@ -29,7 +29,7 @@ class Ytdlp(commands.Cog):
                 custom_opts = self.parse_options(options)
                 ydl_opts.update(custom_opts)
             except Exception as e:
-                await ctx.send(f"Error parsing options: `{e}`")
+                await ctx.send(f"Error parsing options: {e}")
                 return
         download = not ydl_opts.get("json", False)
         task = asyncio.create_task(self.extract_info(ydl_opts, url, download=download))
@@ -102,7 +102,8 @@ class Ytdlp(commands.Cog):
                     duration = info.get('duration_string', 'Unknown')
                     duration_seconds = info.get('duration', 'Unknown')
                     format_id = info.get('format_id', 'Unknown Format IDs')
-                    await ctx.send(f"-# [{title} ({id})](<{video_url}> '{os.path.basename(final_file)}') by [{uploader}](<{uploader_url}> '{uploader_id}'), {resolution}, {duration} ({duration_seconds} seconds) Duration, Format IDs: `{format_id}`, {file_size} bytes ({self.human_readable_size(file_size)}), took {elapsed_time:.2f} seconds", file=discord.File(final_file))
+                    format_details = info.get('format', 'Unknown Format Details')
+                    await ctx.send(f"-# [{title} ({id})](<{video_url}> '{os.path.basename(final_file)}') by [{uploader}](<{uploader_url}> '{uploader_id}'), {resolution}, {duration} ({duration_seconds} seconds) Duration, Format IDs: `{format_id} ({format_details})`, {file_size} bytes ({self.human_readable_size(file_size)}), took {elapsed_time:.2f} seconds", file=discord.File(final_file))
 
         except FileNotFoundError as e:
             raise commands.CommandError(f"File handling error: `{e}`")
@@ -144,45 +145,70 @@ class Ytdlp(commands.Cog):
 
     def parse_options(self, options: str) -> dict:
         parsed_opts = {}
-        for opt in shlex.split(options):
-            if "=" in opt:
-                key, value = opt.split("=", 1)
-                key = key.strip()
-                value = value.strip().strip('"')
+        
+        postprocessor_mapping = {
+            "convert": {
+                "key": "FFmpegVideoConvertor",
+                "params": ["preferedformat"],
+                "default": "mp4"
+            },
+            "remux": {
+                "key": "FFmpegVideoRemuxer",
+                "params": ["preferedformat"],
+                "default": "mp4"
+            },
+            "audio": {
+                "key": "FFmpegExtractAudio",
+                "params": ["preferredcodec"],
+                "default": "mp3"
+            }
+        }
 
-                if value.lower() == 'true':
-                    parsed_opts[key] = True
-                elif value.lower() == 'false':
-                    parsed_opts[key] = False
-                
-                if key == "postprocessors":
-                    try:
-                        parsed_value = json.loads(value)
-                        if not isinstance(parsed_value, list) or not all(isinstance(item, dict) for item in parsed_value):
-                            raise ValueError("Postprocessors must be a JSON-formatted list of dictionaries.")
-                        parsed_opts[key] = parsed_value
-                    except json.JSONDecodeError as e:
-                        raise ValueError(f"Error parsing postprocessors: {e}")
-                    continue
-                if key == "postprocessor_args":
-                    try:
-                        parsed_value = json.loads(value)
-                        if not isinstance(parsed_value, list) or not all(isinstance(item, str) for item in parsed_value):
-                            raise ValueError("postprocessor_args must be a list of strings.")
-                        parsed_opts[key] = parsed_value
-                    except json.JSONDecodeError as e:
-                        raise ValueError(f"Error parsing postprocessor_args: {e}")
-                    continue
-                if key == "format_sort":
+        options_list = shlex.split(options)
+        i = 0
+        while i < len(options_list):
+            opt = options_list[i]
+
+            if not (opt.startswith("-") or opt.startswith("--")):
+                raise ValueError(f"Options must start with '-' or '--'. Invalid option: `{opt}`")
+            
+            opt = opt[1:] if opt.startswith("-") and not opt.startswith("--") else opt[2:]
+
+            opt = opt.replace("-", "_")
+            
+            key = opt
+            if i + 1 < len(options_list) and not (options_list[i + 1].startswith("-") or options_list[i + 1].startswith("--")):
+                value = options_list[i + 1]
+                i += 1
+            else:
+                value = None
+            
+            if opt in postprocessor_mapping:
+                pp_info = postprocessor_mapping[opt]
+                pp_key = pp_info["key"]
+                pp_params = pp_info["params"]
+                pp_value = value if value is not None else pp_info["default"]
+
+                postprocessor = {
+                    "key": pp_key,
+                    "when": "post_process"
+                }
+                postprocessor.update({pp_params[0]: pp_value})
+                parsed_opts.setdefault("postprocessors", []).append(postprocessor)
+            else:
+                if opt == "format_sort":
+                    if value is None:
+                        raise ValueError("format_sort requires a value.")
                     try:
                         parsed_value = json.loads(value)
                         if not isinstance(parsed_value, list) or not all(isinstance(item, str) for item in parsed_value):
                             raise ValueError("format_sort must be a list of strings.")
                         parsed_opts[key] = parsed_value
                     except json.JSONDecodeError as e:
-                        raise ValueError(f"Error parsing format_sort: {e}")
-                    continue
-                if key == "download_ranges":
+                        raise ValueError(f"Error parsing format_sort: `{e}`")
+                elif opt == "download_ranges":
+                    if value is None:
+                        raise ValueError("download_ranges requires a value.")
                     try:
                         ranges = []
                         for rng in value.split(","):
@@ -194,16 +220,20 @@ class Ytdlp(commands.Cog):
                             else:
                                 start = self.parse_time_to_seconds(rng.strip())
                                 ranges.append((start, None))
-                        parsed_opts['download_ranges'] = download_range_func(None, ranges)
+                            parsed_opts[key] = download_range_func(None, ranges)
                     except ValueError as e:
                         raise ValueError(f"Invalid range format for download_ranges: `{e}`")
                 else:
-                    parsed_opts[key] = value
-            elif opt.startswith("--"):
-                key = opt[2:].strip()
-                parsed_opts[key] = True
-            else:
-                raise ValueError(f"Invalid option format: `{opt}`")
+                    if value is None:
+                        parsed_opts[key] = True
+                    else:
+                        if value.lower() == "true":
+                            parsed_opts[key] = True
+                        elif value.lower() == "false":
+                            parsed_opts[key] = False
+                        else:
+                            parsed_opts[key] = value
+            i += 1
         return parsed_opts
     
 
