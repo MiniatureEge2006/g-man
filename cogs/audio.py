@@ -10,7 +10,7 @@ from collections import deque
 from datetime import datetime
 from typing import Optional
 
-YDL_OPTIONS = {'format': 'bestaudio/best', 'noplaylist': True, 'outtmpl': 'vids/%(extractor)s-%(id)s-%(title)s.%(ext)s', 'restrictfilenames': True}
+YDL_OPTIONS = {'format': 'bestaudio/best', 'noplaylist': True, 'outtmpl': 'vids/%(extractor)s-%(id)s-%(title)s.%(ext)s', 'restrictfilenames': True, 'playlist_items': '1'}
 spotify = spotipy.Spotify(auth_manager=spotipy.SpotifyClientCredentials(client_id=bot_info.data['spotify_client_id'], client_secret=bot_info.data['spotify_client_secret']))
 
 class Audio(commands.Cog):
