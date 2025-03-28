@@ -202,14 +202,14 @@ async def on_ready():
 
 
 @bot.event
-async def on_command(ctx):
+async def on_command(ctx: commands.Context):
     logger = logging.getLogger()
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     user = f"{ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
     guild = f"{ctx.guild.name} (ID: {ctx.guild.id})" if ctx.guild else "DMs"
     channel = f"{ctx.channel.name} (ID: {ctx.channel.id})" if ctx.guild else f"DMs with {ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
     command_name = ctx.command.qualified_name
-    command_content = ctx.message.content
+    command_content = ctx.message.content if not ctx.interaction else "".join(f"/{ctx.interaction.command.qualified_name} " + " ".join(f"{k}:{v}" for k, v in ctx.interaction.namespace.__dict__.items() if v is not None))
     log_message = (
         f"\n--- Command Log ---\n"
         f"Timestamp: {timestamp}\n"
@@ -224,14 +224,14 @@ async def on_command(ctx):
 
 # Command error
 @bot.event
-async def on_command_error(ctx, error):
+async def on_command_error(ctx: commands.Context, error):
     logger = logging.getLogger()
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     user = f"{ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
     guild = f"{ctx.guild.name} (ID: {ctx.guild.id})" if ctx.guild else "DMs"
     channel = f"{ctx.channel.name} (ID: {ctx.channel.id})" if ctx.guild else f"DMs with {ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
     command_name = ctx.command.qualified_name if ctx.command else "Unknown"
-    command_content = ctx.message.content
+    command_content = ctx.message.content if not ctx.interaction else "".join(f"/{ctx.interaction.command.qualified_name} " + " ".join(f"{k}:{v}" for k, v in ctx.interaction.namespace.__dict__.items() if v is not None))
     logger.error(f"\n--- Command Error Log ---\nTimestamp: {timestamp}\nUser: {user}\nGuild: {guild}\nChannel: {channel}\nCommand: {command_name}\nCommand Content: {command_content}\nError: {error}\n--- End Command Error Log ---")
     embed = discord.Embed(title=":warning: Command Error", color=discord.Color.red(), timestamp=discord.utils.utcnow())
     embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
@@ -261,14 +261,14 @@ async def on_command_error(ctx, error):
     await ctx.send(embed=embed)
     
 @bot.event
-async def on_command_completion(ctx):
+async def on_command_completion(ctx: commands.Context):
     logger = logging.getLogger()
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     user = f"{ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
     guild = f"{ctx.guild.name} (ID: {ctx.guild.id})" if ctx.guild else "DMs"
     channel = f"{ctx.channel.name} (ID: {ctx.channel.id})" if ctx.guild else f"DMs with {ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
     command_name = ctx.command.qualified_name
-    command_content = ctx.message.content
+    command_content = ctx.message.content if not ctx.interaction else "".join(f"/{ctx.interaction.command.qualified_name} " + " ".join(f"{k}:{v}" for k, v in ctx.interaction.namespace.__dict__.items() if v is not None))
     logger.info(f"\n--- Command Success ---\nTimestamp: {timestamp}\nUser: {user}\nGuild: {guild}\nChannel: {channel}\nCommand: {command_name}\nCommand Content: {command_content}\n--- End Command Success ---")
 
 @bot.event
