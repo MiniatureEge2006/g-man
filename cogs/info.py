@@ -205,6 +205,10 @@ class Info(commands.Cog):
                 except commands.BadArgument:
                     await ctx.send("Could not find user. Please use an user ID instead.")
                     return
+        try:
+            user = await self.bot.fetch_user(member.id)
+        except discord.NotFound:
+            user = member
         embed = discord.Embed(
             title=f"User Info - {member.name}",
             color=getattr(member, "color", discord.Color.default()),
@@ -249,16 +253,20 @@ class Info(commands.Cog):
                         elif attribute in ["start", "end"]:
                             value = datetime.strftime(value, "%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)") if value else "Unknown"
                         embed.add_field(name=field_name, value=value, inline=True)
-        if member.banner:
-            embed.add_field(name="Banner URL", value=f"[Link]({member.banner.url})", inline=True)
-        if member.accent_color:
-            embed.add_field(name="Banner Color", value=f"{member.accent_color} rgb{member.accent_color.to_rgb()}", inline=True)
+        banner = "None"
+        if hasattr(user, "banner") and user.banner:
+            banner = f"[Banner URL]({user.banner.url})"
+            if hasattr(user, "display_banner") and user.display_banner != user.banner:
+                banner += f", [Guild Banner URL]({user.display_banner.url})"
+            embed.set_image(url=user.display_banner.url if hasattr(user, "display_banner") else user.banner.url)
+        if hasattr(user, "accent_color") and user.accent_color:
+            embed.add_field(name="Banner Color", value=f"{user.accent_color} rgb{user.accent_color.to_rgb()}", inline=True)
         avatar = "None"
         if member.avatar:
-            avatar = f"[Link]({member.avatar.url})"
+            avatar = f"[Avatar URL]({member.avatar.url})"
             if hasattr(member, "display_avatar") and member.display_avatar != member.avatar:
-                avatar += f" | [Link]({member.display_avatar.url}) (Guild Avatar)"
-        embed.add_field(name="Avatar URL", value=avatar, inline=True)
+                avatar += f", [Guild Avatar URL]({member.display_avatar.url})"
+        embed.add_field(name="URLs", value=f"{avatar} | {banner}", inline=True)
         embed.set_author(name=f"{member.name}#{member.discriminator}", icon_url=member.display_avatar.url, url=f"https://discord.com/users/{member.id}")
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
