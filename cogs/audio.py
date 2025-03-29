@@ -25,6 +25,23 @@ class Audio(commands.Cog):
         if guild_id not in self.queues:
             self.queues[guild_id] = deque()
         return self.queues[guild_id]
+    
+    @commands.Cog.listener()
+    async def on_voice_state_update(self, member, before, after):
+        voice_client = member.guild.voice_client
+        if voice_client is None:
+            return
+        await asyncio.sleep(5)
+        if len(voice_client.channel.members) == 1 and voice_client.channel.members[0] == self.bot.user:
+            guild_id = member.guild.id
+            if guild_id in self.queues:
+                self.queues[guild_id].clear()
+            if guild_id in self.currently_playing:
+                del self.currently_playing[guild_id]
+            if guild_id in self.loop_mode:
+                del self.loop_mode[guild_id]
+            
+            await voice_client.disconnect()
 
     async def connect_to_channel(self, ctx: commands.Context) -> bool:
         if ctx.voice_client:
