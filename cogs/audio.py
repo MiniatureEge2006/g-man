@@ -6,11 +6,13 @@ import spotipy
 import bot_info
 import os
 import asyncio
+import random
+from urllib.parse import urlparse, parse_qs
 from collections import deque
 from datetime import datetime
 from typing import Optional
 
-YDL_OPTIONS = {'format': 'bestaudio/best', 'noplaylist': True, 'outtmpl': 'vids/%(extractor)s-%(id)s-%(title)s.%(ext)s', 'restrictfilenames': True, 'playlist_items': '1'}
+YDL_OPTIONS = {'format': 'bestaudio/best', 'outtmpl': 'vids/%(extractor)s-%(id)s-%(title)s.%(ext)s', 'restrictfilenames': True, 'extract_flat': 'in_playlist'}
 spotify = spotipy.Spotify(auth_manager=spotipy.SpotifyClientCredentials(client_id=bot_info.data['spotify_client_id'], client_secret=bot_info.data['spotify_client_secret']))
 
 class Audio(commands.Cog):
@@ -19,6 +21,7 @@ class Audio(commands.Cog):
         self.queues = {}
         self.currently_playing = {}
         self.loop_mode = {}
+        self.original_queues = {}
         self.metadata_cache = {}
     
     def get_queue(self, guild_id):
@@ -65,14 +68,48 @@ class Audio(commands.Cog):
     async def play_next(self, ctx: commands.Context):
         guild_id = ctx.guild.id
         queue = self.get_queue(guild_id)
-        if self.loop_mode.get(guild_id) == "single":
-            current = self.currently_playing.get(guild_id)
-            if current:
-                await self.play_audio(ctx, current['url'], current['filters'])
-            return
+        
+        if self.loop_mode.get(guild_id) == "track":
+            if guild_id in self.currently_playing:
+                current = self.currently_playing[guild_id]
+                return await self.play_audio(ctx, current['url'], current['filters'])
+        
+        if not queue and self.loop_mode.get(guild_id) == "queue":
+            if guild_id in self.original_queues and self.original_queues[guild_id]:
+                self.queues[guild_id] = deque(self.original_queues[guild_id])
+                queue = self.get_queue(guild_id)
+                await ctx.send("Restarting queue loop.")
+                return await self.play_next(ctx)
+        
         if queue:
             url, filters = queue.popleft()
+            if self.loop_mode.get(guild_id) == "queue" and guild_id not in self.original_queues:
+                self.original_queues[guild_id] = list(queue) + [(url, filters)]
             await self.play_audio(ctx, url, filters)
+    
+    async def process_playlist(self, ctx: commands.Context, url: str, filters=None):
+        try:
+            with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+                info = ydl.extract_info(url, download=False)
+
+                if 'entries' not in info:
+                    return await self.play_audio(ctx, url, filters)
+                
+                entries = [e for e in info['entries'] if e]
+                queue = self.get_queue(ctx.guild.id)
+
+                for entry in entries:
+                    queue.append((entry['url'], filters))
+                
+                if self.loop_mode.get(ctx.guild.id) == "queue":
+                    self.original_queues[ctx.guild.id] = list(queue)
+                
+                await ctx.send(f"Added {len(entries)} tracks from {info.get('title', 'Unknown Playlist')}.")
+                
+                if not ctx.voice_client or not ctx.voice_client.is_playing():
+                    await self.play_next(ctx)
+        except Exception as e:
+            await ctx.send(f"Error processing playlist: {e}")
 
     async def play_audio(self, ctx: commands.Context, url: str, filters=None):
         if 'spotify.com' in url:
@@ -187,8 +224,8 @@ class Audio(commands.Cog):
         else:
             await ctx.send("I am not connected to a voice channel.")
     
-    @commands.hybrid_command(name="play", description="Play an audio/song from a given URL. Any URL that yt-dlp supports also works.", aliases=["p"])
-    @app_commands.describe(url="The URL of the audio/song to play.", attachment="The attachment media file to use for playing.", filters="A comma-separated list of filters to apply to the audio.")
+    @commands.hybrid_command(name="play", description="Play an audio/song or playlist from a given URL. Any URL that yt-dlp supports also works.", aliases=["p"])
+    @app_commands.describe(url="The URL of the audio/song or playlist to play.", attachment="The attachment media file to use for playing.", filters="A comma-separated list of filters to apply to the audio.")
     @app_commands.allowed_installs(guilds=True, users=False)
     async def play(self, ctx: commands.Context, url: str = None, attachment: Optional[discord.Attachment] = None, filters: str = None):
         await ctx.typing()
@@ -203,10 +240,36 @@ class Audio(commands.Cog):
                 return
             source_url = url
         filters_list = filters.split(',') if filters else []
+
+        is_playlist = False
+        if source_url:
+            playlist_patterns = [
+                'youtube.com/playlist',
+                'youtube.com/watch?list=',
+                'youtube.com/playlist?list=',
+                'youtu.be/playlist?list=',
+                'spotify.com/playlist',
+                'spotify.com/album'
+            ]
+            is_playlist = any(pattern in source_url.lower() for pattern in playlist_patterns)
+
+            if 'youtube.com/watch' in source_url.lower() and 'list=' in source_url.lower():
+                parsed = urlparse(source_url)
+                query = parse_qs(parsed.query)
+                if 'v' in query:
+                    source_url = f"https://www.youtube.com/watch?v={query['v'][0]}"
+                    is_playlist = False
+        if is_playlist:
+            await self.process_playlist(ctx, source_url, filters_list)
+            return
+        
         queue = self.get_queue(ctx.guild.id)
         if ctx.voice_client and ctx.voice_client.is_playing() and ctx.author.voice and ctx.author.voice.channel == ctx.voice_client.channel:
             queue.append((source_url, filters_list))
             await ctx.send(f"Added {url} to the queue.")
+
+            if self.loop_mode.get(ctx.guild.id) == "queue":
+                self.original_queues[ctx.guild.id] = list(queue)
         elif ctx.voice_client and ctx.voice_client.is_playing() and (ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel):
             await ctx.send("You must be in the same voice channel as me to play audio.")
             return
@@ -218,36 +281,60 @@ class Audio(commands.Cog):
         else:
             await self.play_audio(ctx, source_url, filters=filters_list)
     
-    @commands.hybrid_command(name="repeat", description="Repeat the currently playing audio/song.", aliases=["loop"])
-    @app_commands.describe(mode="The mode to repeat. Can be 'single' or 'none'. Leave empty to toggle.")
+    @commands.hybrid_command(name="shuffle", description="Shuffle the current queue/playlist.")
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def shuffle(self, ctx: commands.Context):
+        await ctx.typing()
+        if ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You must be in the same voice channel as me to shuffle the queue.")
+            return
+        
+        queue = self.get_queue(ctx.guild.id)
+        if len(queue) < 2:
+            await ctx.send("Queue needs at least 2 items to shuffle.")
+            return
+        
+        queue_list = list(queue)
+        random.shuffle(queue_list)
+        self.queues[ctx.guild.id] = deque(queue_list)
+
+        if self.loop_mode.get(ctx.guild.id) == "queue":
+            self.original_queues[ctx.guild.id] = queue_list
+        
+        await ctx.send("Queue shuffled.")
+
+    @commands.hybrid_command(name="repeat", description="Repeat the currently playing audio/song or playlist.", aliases=["loop"])
+    @app_commands.describe(mode="Loop mode (off/track/queue)")
     @app_commands.allowed_installs(guilds=True, users=False)
     async def repeat(self, ctx: commands.Context, mode: str = None):
         await ctx.typing()
-        current_mode = self.loop_mode.get(ctx.guild.id)
+        modes = {
+            "off": "Loop disabled.",
+            "track": "Set to single track loop.",
+            "queue": "Set to full queue/playlist loop."
+        }
+
         if mode is None:
-            if current_mode == "single":
-                self.loop_mode.pop(ctx.guild.id, None)
-                await ctx.send("Repeat mode disabled.")
+            current = self.loop_mode.get(ctx.guild.id, "off")
+            if current == "off":
+                new_mode = "track"
+            elif current == "track":
+                new_mode = "queue"
             else:
-                self.loop_mode[ctx.guild.id] = "single"
-                await ctx.send("Repeat mode activated. The current song will now repeat.")
-            return
-        if not isinstance(mode, str):
-            await ctx.send("Invalid mode. Please provide 'single' or 'none'.")
-            return
-        mode = mode.lower()
-        if mode not in ["single", "none"]:
-            await ctx.send("Invalid mode. Valid modes are 'single' and 'none'.")
-            return
-        if ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
-            await ctx.send("You are not in the same voice channel as me.")
-            return
-        if mode == "none":
-            self.loop_mode.pop(ctx.guild.id, None)
-            await ctx.send("Repeat mode disabled.")
+                new_mode = "off"
         else:
-            self.loop_mode[ctx.guild.id] = mode
-            await ctx.send("Repeat mode activated. The current song will now repeat.")
+            mode = mode.lower()
+            if mode not in modes:
+                return await ctx.send("Invalid mode. Use one of: off, track, or queue")
+            new_mode = mode
+        
+        self.loop_mode[ctx.guild.id] = new_mode
+
+        if new_mode == "queue":
+            queue = self.get_queue(ctx.guild.id)
+            self.original_queues[ctx.guild.id] = list(queue)
+        
+        await ctx.send(modes[new_mode])
     
 
     @commands.hybrid_command(name="queue", description="Display the current queue.")
