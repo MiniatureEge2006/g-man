@@ -361,7 +361,7 @@ class Info(commands.Cog):
         embed.add_field(name="Position", value=f"{channel.position}/{len(channel.guild.channels)}", inline=True)
         embed.add_field(name="Last Message ID", value=channel.last_message_id if channel.last_message else "None", inline=True)
         embed.add_field(name="Last Message Timestamp", value=channel.last_message.created_at.strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)") if channel.last_message else "None", inline=True)
-        embed.set_author(name=channel.name, icon_url=channel.members[0].display_avatar.url if channel.members else None, url=f"https://discord.com/users/{channel.members[0].id}" if channel.members else None)
+        embed.set_author(name=channel.name, icon_url=channel.members[0].display_avatar.url if channel.members else channel.guild.icon.url, url=f"https://discord.com/users/{channel.members[0].id}" if channel.members else None)
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
     
