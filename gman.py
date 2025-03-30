@@ -730,7 +730,7 @@ async def listguildprefixes(ctx: commands.Context):
             await ctx.send(f"Guild prefixes: {', '.join([f'`{p}`' for p in prefixes])}")
 
 # Reloading extensions
-@bot.command(description='Reloads extensions. Usage: /reload [extension_list]', pass_context=True)
+@bot.command(description='Reloads extensions.', pass_context=True)
 @bot_info.is_owner()
 async def reload(ctx, *, exs : str = None):
     module_msg = 'd' # d
