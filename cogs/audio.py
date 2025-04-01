@@ -342,19 +342,163 @@ class Audio(commands.Cog):
     async def queue(self, ctx: commands.Context):
         await ctx.typing()
         queue = self.get_queue(ctx.guild.id)
-        if queue:
-            embed = discord.Embed(
-                title="Queue",
-                description="\n".join(f"{i+1}. {url} ({', '.join(filters)})" for i, (url, filters) in enumerate(queue)),
-                color=discord.Color.og_blurple(),
-                timestamp=discord.utils.utcnow()
-            )
-            await ctx.send(embed=embed)
-        elif ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
+
+        if ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
             await ctx.send("You are not in the same voice channel as me.")
             return
-        else:
+        
+        if not queue:
             await ctx.send("The queue is empty.")
+            return
+        
+        ITEMS_PER_PAGE = 10
+        total_pages = (len(queue) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+
+        class QueuePaginator(discord.ui.View):
+            def __init__(self, queue, total_pages, original_author):
+                super().__init__(timeout=180)
+                self.queue = queue
+                self.current_page = 0
+                self.total_pages = total_pages
+                self.original_author = original_author
+                self.message = None
+                self.disabled = False
+            
+            async def interaction_check(self, interaction: discord.Interaction) -> bool:
+                if interaction.user != self.original_author:
+                    await interaction.response.send_message("You can't control this pagination.", ephemeral=True)
+                    return False
+                return True
+            
+            async def on_timeout(self):
+                if not self.disabled:
+                    for item in self.children:
+                        item.disabled = True
+                    try:
+                        await self.message.edit(view=self)
+                    except discord.NotFound:
+                        pass
+            
+            def create_embed(self):
+                start_idx = self.current_page * ITEMS_PER_PAGE
+                end_idx = min((self.current_page + 1) * ITEMS_PER_PAGE, len(self.queue))
+
+                embed = discord.Embed(
+                    title=f"Queue (Page {self.current_page + 1}/{self.total_pages})",
+                    color=discord.Color.og_blurple(),
+                    timestamp=discord.utils.utcnow()
+                )
+
+                for i, (url, filters) in enumerate(self.queue[start_idx:end_idx], start=start_idx + 1):
+                    display_url = url if len(url) < 50 else f"{url[:47]}..."
+                    filter_text = f" ({', '.join(filters)})" if filters else ""
+                    embed.add_field(
+                        name=f"{i}. {display_url}{filter_text}",
+                        value="\u200b",
+                        inline=False
+                    )
+                
+                return embed
+            
+            @discord.ui.button(emoji="⏮️", style=discord.ButtonStyle.secondary)
+            async def first_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+                if self.current_page == 0:
+                    await interaction.response.defer()
+                    return
+                
+                self.current_page = 0
+                await interaction.response.edit_message(embed=self.create_embed(), view=self)
+            
+            @discord.ui.button(emoji="◀️", style=discord.ButtonStyle.primary)
+            async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+                if self.current_page == 0:
+                    await interaction.response.defer()
+                    return
+                
+                self.current_page -= 1
+                await interaction.response.edit_message(embed=self.create_embed(), view=self)
+            
+            @discord.ui.button(emoji="▶️", style=discord.ButtonStyle.primary)
+            async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+                if self.current_page == self.total_pages - 1:
+                    await interaction.response.defer()
+                    return
+                
+                self.current_page += 1
+                await interaction.response.edit_message(embed=self.create_embed(), view=self)
+            
+            @discord.ui.button(emoji="⏭️", style=discord.ButtonStyle.secondary)
+            async def last_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+                if self.current_page == self.total_pages - 1:
+                    await interaction.response.defer()
+                    return
+                
+                self.current_page = self.total_pages - 1
+                await interaction.response.edit_message(embed=self.create_embed(), view=self)
+            
+            @discord.ui.button(emoji="🔀", style=discord.ButtonStyle.success)
+            async def random_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+                new_page = random.randint(0, self.total_pages - 1)
+                if new_page == self.current_page:
+                    await interaction.response.defer()
+                    return
+
+                self.current_page = new_page
+                await interaction.response.edit_message(embed=self.create_embed(), view=self)
+            
+            @discord.ui.button(emoji="🔢", style=discord.ButtonStyle.secondary)
+            async def jump_to_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+                if self.disabled:
+                    await interaction.response.defer()
+                    return
+                
+                class PageJumpModal(discord.ui.Modal, title="Jump to Page"):
+                    page_num = discord.ui.TextInput(
+                        label=f"Page Number (1-{self.total_pages})",
+                        placeholder=f"Enter a number between 1 and {self.total_pages}",
+                        min_length=1,
+                        max_length=len(str(self.total_pages))
+                    )
+
+                    async def on_submit(self, interaction: discord.Interaction):
+                        try:
+                            page = int(self.page_num.value)
+                            if 1 <= page <= self.view.total_pages:
+                                self.view.current_page = page - 1
+                                await interaction.response.edit_message(
+                                    embed=self.view.create_embed(),
+                                    view=self.view
+                                )
+                            else:
+                                await interaction.response.send_message(
+                                    f"Please enter a number between 1 and {self.total_pages}.",
+                                    ephemeral=True
+                                )
+                        except ValueError:
+                            await interaction.response.send_message(
+                                "Please enter a valid number.",
+                                ephemeral=True
+                            )
+                
+                modal = PageJumpModal()
+                modal.view = self
+                await interaction.response.send_modal(modal)
+            
+            @discord.ui.button(emoji="⏹️", style=discord.ButtonStyle.danger)
+            async def disable_components(self, interaction: discord.Interaction, button: discord.ui.Button):
+                self.disabled = True
+                for item in self.children:
+                    item.disabled = True
+                await interaction.response.edit_message(view=self)
+            
+            @discord.ui.button(emoji="🗑️", style=discord.ButtonStyle.danger)
+            async def delete_message(self, interaction: discord.Interaction, button: discord.ui.Button):
+                await interaction.message.delete()
+                self.stop()
+        
+        paginator = QueuePaginator(list(queue), total_pages, ctx.author)
+        embed = paginator.create_embed()
+        paginator.message = await ctx.send(embed=embed, view=paginator)
     
     @commands.hybrid_command(name="skip", description="Skip the currently playing audio/song.")
     @app_commands.allowed_installs(guilds=True, users=False)
