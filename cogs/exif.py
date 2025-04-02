@@ -6,6 +6,7 @@ import aiohttp
 import json
 import mimetypes
 from urllib.parse import urlparse
+from typing import Optional
 import asyncio
 
 class Exif(commands.Cog):
@@ -13,14 +14,14 @@ class Exif(commands.Cog):
         self.bot = bot
     
     @commands.hybrid_command(name="exif", description="Use FFprobe to extract exif metadata from media.", aliases=["ffprobe"])
-    @app_commands.describe(url="Input URL to extract metadata from.")
+    @app_commands.describe(url="Input URL to extract metadata from.", attachment="Media attachment to extract metadata from.")
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    async def exif(self, ctx: commands.Context, url: str = None):
+    async def exif(self, ctx: commands.Context, url: str = None, attachment: Optional[discord.Attachment] = None):
         await ctx.typing()
         
         try:
-            if not url and not ctx.message.attachments:
+            if not url and not (ctx.message.attachments or attachment):
                 await ctx.send("Please provide an URL or attach a media file.")
                 return
             
@@ -110,8 +111,8 @@ class Exif(commands.Cog):
                     else:
                         raise ValueError("Failed to download the file.")
             
-        elif ctx.message.attachments:
-            attachment = ctx.message.attachments[0]
+        elif ctx.message.attachments or ctx.interaction.message.attachments:
+            attachment = ctx.message.attachments[0] or ctx.interaction.message.attachments[0]
             file_name = attachment.filename
             file_path = f"vids/{file_name}"
             await attachment.save(file_path)

@@ -21,7 +21,8 @@ class Ytdlp(commands.Cog):
         await ctx.typing()
         ydl_opts = {
             'noplaylist': True,
-            'outtmpl': 'vids/%(extractor)s-%(id)s.%(ext)s'
+            'outtmpl': 'vids/%(extractor)s-%(id)s.%(ext)s',
+            'playlist_items': '1'
         }
 
         if options.strip():
