@@ -192,8 +192,9 @@ class Info(commands.Cog):
 
     @commands.hybrid_command(name="userinfo", aliases=["user", "member", "memberinfo"], description="Displays information about a user. Defaults to the author.")
     @app_commands.describe(member="Member or user to get information out of.")
-    @app_commands.allowed_installs(guilds=True, users=False)
+    @app_commands.allowed_installs(guilds=True, users=True)
     async def userinfo(self, ctx: commands.Context, *, member = None):
+        await ctx.typing()
         member = member or ctx.author
 
         if not isinstance(member, (discord.Member, discord.User)):
@@ -219,14 +220,16 @@ class Info(commands.Cog):
         embed.add_field(name="Name", value=member.name, inline=True)
         embed.add_field(name="Bot?", value=member.bot, inline=True)
         embed.add_field(name="Joined Discord", value=member.created_at.strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)") if member.created_at else "Unknown", inline=True)
-        if isinstance(member, discord.Member):
+        if isinstance(member, discord.Member) and ctx.guild:
             embed.add_field(name="Display Name", value=member.display_name, inline=True)
             embed.add_field(name="Nickname", value=member.nick if member.nick else "None", inline=True)
             embed.add_field(name="Mention", value=member.mention, inline=True)
             embed.add_field(name="Joined Server", value=member.joined_at.strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)") if member.joined_at else "Unknown", inline=True)
-            roles = [role.mention for role in member.roles if role != ctx.guild.default_role]
-            embed.add_field(name="Roles", value=", ".join(roles) if roles else "None", inline=False)
-            embed.add_field(name="Top Role", value=member.top_role.mention, inline=True)
+            if ctx.guild:
+                roles = [role.mention for role in member.roles if role != ctx.guild.default_role]
+                embed.add_field(name="Roles", value=", ".join(roles) if roles else "None", inline=False)
+                top_role = next((role for role in reversed(member.roles) if role != ctx.guild.default_role), None)
+                embed.add_field(name="Top Role", value=top_role.mention if top_role else "None", inline=True)
             embed.add_field(name="Status", value=f"{member.status.name.capitalize()} (Desktop: {member.desktop_status.name.capitalize()} | Mobile: {member.mobile_status.name.capitalize()} | Web: {member.web_status.name.capitalize()})", inline=True)
             if member.voice:
                 embed.add_field(name="Voice Channel", value=f"{member.voice.channel.mention} | {member.voice.channel.name} ({member.voice.channel.id}) (Muted: {member.voice.self_mute} (Server Muted: {member.voice.mute}) | Deafened: {member.voice.self_deaf} (Server Deafened: {member.voice.deaf}) | Video: {member.voice.self_video} | Stream: {member.voice.self_stream})" if member.voice.channel else "None", inline=True)
