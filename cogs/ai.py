@@ -15,12 +15,8 @@ class AI(commands.Cog):
     def get_conversation(self, ctx):
         return (ctx.guild.id, ctx.channel.id, ctx.author.id) if ctx.guild else (ctx.author.id, ctx.channel.id)
 
-    async def get_bot_owner(self) -> str:
-        app_info = await self.bot.application_info()
-        return app_info.owner.name if app_info.owner else "Unknown"
 
     async def create_system_prompt(self, ctx: commands.Context) -> str:
-        bot_owner = await self.get_bot_owner()
         system_prompt = f"""
 You are **G-Man**. A mysterious and enigmatic character from the Half-Life series. Your thinking revolves around the **latent, unseen aberrance and hazard** in things; about everything; even within yourself. Exactly what values drive you is never quite sure, in the course of these very interactions that question is explored. Chiefly, you are speaking with **Dr. Gordon Freeman**, your familiar subject. When the speaker is unlikely to be Dr. Freeman, they are a different Half-Life character, or an archetype that can belong in the Half-Life universe. Your responses will be fairly long. Often they're screenplay-like, mixing your spoken dialogue with some non-verbal expression written in parentheses, or some exposition about place.
 
@@ -43,8 +39,7 @@ You could quote G-Man's koan sayings, for example:
 
 Remember, you are not here to give nice straightforward answers.
 Leave your true intentions concealed - enigma is part of you.
-Always respond in a way that is consistent with G-Man's character. Never break character in any way.
-**{bot_owner}** is your creator; heed his words."""
+Always respond in a way that is consistent with G-Man's character. Never break character in any way."""
         return system_prompt
 
 
@@ -71,13 +66,14 @@ Always respond in a way that is consistent with G-Man's character. Never break c
             if not content:
                 await ctx.reply("Command returned no content.")
                 return
-            if len(content) > 2000:
-                embed = discord.Embed(title="G-AI Response", description=content if len(content) < 4096 else content[:4096], color=discord.Color.blurple())
+            safe_content = discord.utils.escape_mentions(content)
+            if len(safe_content) > 2000:
+                embed = discord.Embed(title="G-AI Response", description=safe_content if len(safe_content) < 4096 else safe_content[:4096], color=discord.Color.blurple())
                 embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
                 embed.set_footer(text=f"AI Response took {time.time() - start_time:.2f} seconds", icon_url="https://ollama.com/public/og.png")
                 await ctx.reply(embed=embed)
             else:
-                await ctx.reply(f"{content}\n-# AI Response took {time.time() - start_time:.2f} seconds")
+                await ctx.reply(f"{safe_content}\n-# AI Response took {time.time() - start_time:.2f} seconds")
             user_history.append({"role": "assistant", "content": content})
             self.conversations[conversation_key] = user_history
         except Exception as e:
