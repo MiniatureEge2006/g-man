@@ -49,7 +49,7 @@ class Ytdlp(commands.Cog):
                 f"ID: {fmt.get('format_id')} | Ext: {fmt.get('ext')} | "
                 f"Res: {fmt.get('resolution', 'N/A')} | FPS: {fmt.get('fps', 'N/A')} | "
                 f"Video Codec: {fmt.get('vcodec', 'N/A')} | Audio Codec: {fmt.get('acodec', 'N/A')} | "
-                f"Bitrate: {fmt.get('tbr', 'N/A')}k | Size: {self.human_readable_size(fmt.get('filesize') or fmt.get('filesize_approx') or 0)} | "
+                f"Bitrate: {fmt.get('tbr', 'N/A')}k | Size: {self.get_format_size(fmt, info)} | "
                 f"Protocol: {fmt.get('protocol', 'N/A')} | "
                 f"Notes: {fmt.get('format_note', 'N/A')} | "
                 f"Container: {fmt.get('container', 'N/A')}"
@@ -69,7 +69,7 @@ class Ytdlp(commands.Cog):
                 return
             if ydl_opts.get("json", False):
                 info = await task
-                json_file_path = f"vids/info-{info.get('id', 'Unknown ID')}.json"
+                json_file_path = f"vids/{info.get('id', 'Unknown ID')}.info.json"
                 try:
                     with open(json_file_path, 'w', encoding='utf-8') as json_file:
                         json.dump(info, json_file, indent=4)
@@ -143,6 +143,23 @@ class Ytdlp(commands.Cog):
             return hours * 3600 + minutes * 60 + seconds
         else:
             raise ValueError(f"Invalid time format: `{time_str}`")
+    
+    def get_format_size(self, fmt: dict, info: dict) -> str:
+        filesize = fmt.get('filesize') or fmt.get('filesize_approx')
+        if filesize and filesize > 0:
+            return self.human_readable_size(filesize)
+        
+        try:
+            duration = float(info.get('duration', 0)) if info.get('duration') else 0
+            tbr = float(fmt.get('tbr', 0)) * 1000 if fmt.get('tbr') else 0
+
+            if duration > 0 and tbr > 0:
+                approx_size = (tbr * duration) / 8
+                return f"~{self.human_readable_size(approx_size)} (estimation)"
+        except (TypeError, ValueError):
+            pass
+        
+        return "Variable/Unknown"
 
     def parse_options(self, options: str) -> dict:
         parsed_opts = {}
@@ -247,7 +264,7 @@ class Ytdlp(commands.Cog):
             return 10 * 1024 * 1024 # 10 MB
     
     def human_readable_size(self, size: int) -> str:
-        for unit in ["B", "KB", "MB", "GB", "TB"]:
+        for unit in ["B", "KiB", "MiB", "GiB", "TiB"]:
             if size < 1024:
                 return f"{size:.2f} {unit}"
             size /= 1024

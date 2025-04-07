@@ -162,7 +162,7 @@ class FFmpeg(commands.Cog):
             return 10 * 1024 * 1024 # 10 MB
     
     def human_readable_size(self, size: int) -> str:
-        for unit in ["B", "KB", "MB", "GB", "TB"]:
+        for unit in ["B", "KiB", "MiB", "GiB", "TiB"]:
             if size < 1024:
                 return f"{size:.2f} {unit}"
             size /= 1024
