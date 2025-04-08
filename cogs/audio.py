@@ -11,8 +11,9 @@ from urllib.parse import urlparse, parse_qs
 from collections import deque
 from datetime import datetime
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor
 
-YDL_OPTIONS = {'format': 'bestaudio/best', 'outtmpl': 'vids/%(extractor)s-%(id)s-%(title)s.%(ext)s', 'restrictfilenames': True, 'extract_flat': 'in_playlist'}
+YDL_OPTIONS = {'format': 'bestaudio/best', 'outtmpl': 'vids/%(extractor)s-%(id)s-%(title)s.%(ext)s', 'restrictfilenames': True, 'extract_flat': 'in_playlist', 'quiet': True, 'no_warnings': True}
 spotify = spotipy.Spotify(auth_manager=spotipy.SpotifyClientCredentials(client_id=bot_info.data['spotify_client_id'], client_secret=bot_info.data['spotify_client_secret']))
 
 class Audio(commands.Cog):
@@ -23,11 +24,16 @@ class Audio(commands.Cog):
         self.loop_mode = {}
         self.original_queues = {}
         self.metadata_cache = {}
+        self.executor = ThreadPoolExecutor(max_workers=4)
     
     def get_queue(self, guild_id):
         if guild_id not in self.queues:
             self.queues[guild_id] = deque()
         return self.queues[guild_id]
+    
+    async def run_in_executor(self, func, *args):
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.executor, func, *args)
     
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
@@ -65,6 +71,35 @@ class Audio(commands.Cog):
             await ctx.send("You are not connected to a voice channel.")
             return False
     
+    async def process_spotify_url(self, url: str) -> list:
+        try:
+            if 'track' in url:
+                track = await self.run_in_executor(spotify.track, url)
+                return [f"{track['name']} {track['artists'][0]['name']}"]
+            elif 'playlist' in url:
+                playlist = await self.run_in_executor(spotify.playlist, url)
+                tracks = []
+                for item in playlist['tracks']['items']:
+                    track = item['track']
+                    tracks.append(f"{track['name']} {track['artists'][0]['name']}")
+                return tracks
+            elif 'album' in url:
+                album = await self.run_in_executor(spotify.album, url)
+                tracks = []
+                for track in album['tracks']['items']:
+                    tracks.append(f"{track['name']} {track['artists'][0]['name']}")
+                return tracks
+            elif 'artist' in url:
+                artist = await self.run_in_executor(spotify.artist, url)
+                top_tracks = await self.run_in_executor(spotify.artist_top_tracks, url)
+                tracks = []
+                for track in top_tracks['tracks'][:10]:
+                    tracks.append(f"{track['name']} {track['artists'][0]['name']}")
+                return tracks
+        except Exception as e:
+            print(f"Error processing Spotify URL: {e}")
+            return None
+
     async def play_next(self, ctx: commands.Context):
         guild_id = ctx.guild.id
         queue = self.get_queue(guild_id)
@@ -89,51 +124,99 @@ class Audio(commands.Cog):
     
     async def process_playlist(self, ctx: commands.Context, url: str, filters=None):
         try:
-            with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-                info = ydl.extract_info(url, download=False)
-
-                if 'entries' not in info:
-                    return await self.play_audio(ctx, url, filters)
-                
-                entries = [e for e in info['entries'] if e]
+            if 'spotify.com' in url:
+                queries = await self.process_spotify_url(url)
+                if not queries:
+                    await ctx.send("Failed to process Spotify playlist.")
+                    return
                 queue = self.get_queue(ctx.guild.id)
+                youtube_urls = []
 
-                for entry in entries:
-                    queue.append((entry['url'], filters))
+                for query in queries:
+                    youtube_url = await self.search_youtube(query)
+                    if youtube_url:
+                        youtube_urls.append(youtube_url)
+                if not youtube_urls:
+                    await ctx.send("Could not find any YouTube videos which match the Spotify tracks.")
+                    return
+                for youtube_url in youtube_urls:
+                    queue.append((youtube_url, filters))
                 
-                if self.loop_mode.get(ctx.guild.id) == "queue":
-                    self.original_queues[ctx.guild.id] = list(queue)
-                
-                await ctx.send(f"Added {len(entries)} tracks from {info.get('title', 'Unknown Playlist')}.")
-                
+                await ctx.send(f"Added {len(youtube_urls)} tracks from the Spotify playlist to the queue.")
+
                 if not ctx.voice_client or not ctx.voice_client.is_playing():
                     await self.play_next(ctx)
+                return
+            def sync_playlist_process():
+                with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+                    return ydl.extract_info(url, download=False)
+                
+            info = await self.run_in_executor(sync_playlist_process)
+
+            if 'entries' not in info:
+                return await self.play_audio(ctx, url, filters)
+                
+            entries = [e for e in info['entries'] if e]
+            queue = self.get_queue(ctx.guild.id)
+
+            for entry in entries:
+                queue.append((entry['url'], filters))
+                
+            if self.loop_mode.get(ctx.guild.id) == "queue":
+                self.original_queues[ctx.guild.id] = list(queue)
+                
+            await ctx.send(f"Added {len(entries)} tracks from {info.get('title', 'Unknown Playlist')}.")
+                
+            if not ctx.voice_client or not ctx.voice_client.is_playing():
+                await self.play_next(ctx)
         except Exception as e:
             await ctx.send(f"Error processing playlist: {e}")
+    
+    async def search_youtube(self, query: str) -> Optional[str]:
+        try:
+            def sync_search():
+                with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+                    results = ydl.extract_info(f"ytsearch:{query}", download=False)
+                    if results and 'entries' in results and results['entries']:
+                        return results['entries'][0]['url']
+                return None
+            result = await self.run_in_executor(sync_search)
+            return result
+        except Exception as e:
+            print(f"Error searching YouTube: {e}")
+            return None
+    
+    async def extract_info(self, url: str):
+        def sync_extract():
+            with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+                return ydl.extract_info(url, download=True)
+        
+        return await self.run_in_executor(sync_extract)
 
     async def play_audio(self, ctx: commands.Context, url: str, filters=None):
-        if 'spotify.com' in url:
-            track = spotify.track(url)
-            query = f"{track['name']} {track['artists'][0]['name']}"
-            with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-                results = ydl.extract_info(f"ytsearch:{query}", download=False)['entries']
-                if results:
-                    url = results[0]['webpage_url']
+        if 'spotify.com' in url and 'track' in url:
+            query = await self.process_spotify_url(url)
+            if query:
+                youtube_url = await self.search_youtube(query[0])
+                if youtube_url:
+                    url = youtube_url
+                else:
+                    await ctx.send("Could not find any YouTube video for this Spotify track.")
+                    return
 
         cached_info = self.metadata_cache.get(url)
-        loop_mode_active = self.loop_mode.get(ctx.guild.id) == "single"
+        loop_mode_active = self.loop_mode.get(ctx.guild.id) == "track"
 
         if cached_info and loop_mode_active:
             info = cached_info
             file_path = yt_dlp.YoutubeDL(YDL_OPTIONS).prepare_filename(info)
         else:
-            loop = asyncio.get_event_loop()
-            info = await loop.run_in_executor(None, self.extract_info, url)
+            info = await self.extract_info(url)
             file_path = yt_dlp.YoutubeDL(YDL_OPTIONS).prepare_filename(info)
             self.metadata_cache[url] = info
 
         if not os.path.exists(file_path):
-            info = await loop.run_in_executor(None, self.extract_info, url)
+            info = await self.extract_info(url)
             self.metadata_cache[url] = info
 
                     
@@ -190,10 +273,6 @@ class Audio(commands.Cog):
             embed.set_image(url=info.get('thumbnail'))
             embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
             await ctx.send(embed=embed)
-    
-    def extract_info(self, url):
-        with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-            return ydl.extract_info(url, download=True)
 
     async def cleanup_file_and_play_next(self, ctx, file_path):
         if self.loop_mode.get(ctx.guild.id) != "single":
@@ -249,7 +328,8 @@ class Audio(commands.Cog):
                 'youtube.com/playlist?list=',
                 'youtu.be/playlist?list=',
                 'spotify.com/playlist',
-                'spotify.com/album'
+                'spotify.com/album',
+                'spotify.com/artist'
             ]
             is_playlist = any(pattern in source_url.lower() for pattern in playlist_patterns)
 
