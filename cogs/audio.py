@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
 
-YDL_OPTIONS = {'format': 'bestaudio/best', 'outtmpl': 'vids/%(extractor)s-%(id)s-%(title)s.%(ext)s', 'restrictfilenames': True, 'extract_flat': 'in_playlist', 'quiet': True, 'no_warnings': True}
+YDL_OPTIONS = {'format': 'bestaudio/best', 'outtmpl': 'vids/%(extractor)s-%(id)s-%(title)s.%(ext)s', 'restrictfilenames': True, 'extract_flat': 'in_playlist'}
 spotify = spotipy.Spotify(auth_manager=spotipy.SpotifyClientCredentials(client_id=bot_info.data['spotify_client_id'], client_secret=bot_info.data['spotify_client_secret']))
 
 class Audio(commands.Cog):
@@ -275,7 +275,7 @@ class Audio(commands.Cog):
             await ctx.send(embed=embed)
 
     async def cleanup_file_and_play_next(self, ctx, file_path):
-        if self.loop_mode.get(ctx.guild.id) != "single":
+        if self.loop_mode.get(ctx.guild.id) != "track":
             if os.path.exists(file_path):
                 await asyncio.sleep(1)
                 os.remove(file_path)
