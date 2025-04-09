@@ -34,91 +34,159 @@ class Ytdlp(commands.Cog):
                 return
         download = not ydl_opts.get("json", False)
         task = asyncio.create_task(self.extract_info(ydl_opts, url, download=download))
+
+        start_time = time.time()
+        info = None
+
         try:
-            start_time = time.time()
-
-            if ydl_opts.get("listformats", False):
-                info = await task
-                formats = info.get('formats', [])
-                if not formats:
-                    await ctx.send("No formats available for this URL.")
-                    return
-                    
-                format_list = [
-                (
-                f"ID: {fmt.get('format_id')} | Ext: {fmt.get('ext')} | "
-                f"Res: {fmt.get('resolution', 'N/A')} | FPS: {fmt.get('fps', 'N/A')} | "
-                f"Video Codec: {fmt.get('vcodec', 'N/A')} | Audio Codec: {fmt.get('acodec', 'N/A')} | "
-                f"Bitrate: {fmt.get('tbr', 'N/A')}k | Size: {self.get_format_size(fmt, info)} | "
-                f"Protocol: {fmt.get('protocol', 'N/A')} | "
-                f"Notes: {fmt.get('format_note', 'N/A')} | "
-                f"Container: {fmt.get('container', 'N/A')}"
-                )
-                for fmt in formats
-                ]
-
-                format_message = "\n".join(format_list)
-                if len(format_message) > 2000:
-                    file_path = f"vids/formats-{info.get('id', 'Unknown ID')}.txt"
-                    with open(file_path, 'w') as f:
-                        f.write(format_message)
-                    await ctx.send(f"Available formats for {info.get('title', 'Unknown Title')}:", file=discord.File(file_path))
-                    os.remove(file_path)
-                else:
-                    await ctx.send(f"Available formats for {info.get('title', 'Unknown Title')}:\n```{format_message}```")
-                return
-            if ydl_opts.get("json", False):
-                info = await task
-                json_file_path = f"vids/{info.get('id', 'Unknown ID')}.info.json"
-                try:
-                    with open(json_file_path, 'w', encoding='utf-8') as json_file:
-                        json.dump(info, json_file, indent=4)
-                    await ctx.send(f"JSON info extracted for {info.get('title', 'Unknown Title')}:", file=discord.File(json_file_path))
-                except Exception as e:
-                    await ctx.send(f"Error extracting JSON info: {e}")
-                os.remove(json_file_path)
-            else:
-                info = await task
-                final_file = info.get('final_file')
-
-                if not final_file or not os.path.exists(final_file):
-                    raise FileNotFoundError(f"The file '{final_file}' does not exist.")
-                file_size = os.path.getsize(final_file)
-                boost_count = ctx.guild.premium_subscription_count if ctx.guild else 0
-                max_size = self.get_max_file_size(boost_count)
-
-                if file_size > max_size:
-                    raise commands.CommandError(f"File is too large to send. (Size: {file_size} bytes/{self.human_readable_size(file_size)}, Max Size: {max_size} bytes/{self.human_readable_size(max_size)})")
-                else:
-                    elapsed_time = time.time() - start_time
-                    video_url = info.get('webpage_url', 'Unknown URL')
-                    title = info.get('title', 'Unknown Title')
-                    id = info.get('id', 'Unknown Video ID')
-                    width = info.get('width', 'Unknown Width')
-                    height = info.get('height', 'Unknown Height')
-                    resolution = f"{width}x{height}"
-                    uploader = info.get('uploader', 'Unknown Uploader')
-                    uploader_url = info.get('uploader_url', 'Unknown URL')
-                    uploader_id = info.get('uploader_id', 'Unknown ID')
-                    duration = info.get('duration_string', 'Unknown')
-                    duration_seconds = info.get('duration', 'Unknown')
-                    format_id = info.get('format_id', 'Unknown Format IDs')
-                    format_details = info.get('format', 'Unknown Format Details')
-                    await ctx.send(f"-# [{title} ({id})](<{video_url}> '{os.path.basename(final_file)}') by [{uploader}](<{uploader_url}> '{uploader_id}'), {resolution}, {duration} ({duration_seconds} seconds) Duration, Format IDs: `{format_id} ({format_details})`, {file_size} bytes ({self.human_readable_size(file_size)}), took {elapsed_time:.2f} seconds", file=discord.File(final_file))
-
-        except FileNotFoundError as e:
-            raise commands.CommandError(f"File handling error: `{e}`")
-        except Exception as e:
-            raise commands.CommandError(f"Download failed: ```ansi\n{e}```")
-        finally:
             info = await task
-            final_file = info.get('final_file')
-            if final_file and os.path.exists(final_file):
-                os.remove(final_file)
+
+            if ydl_opts.get('listformats', False):
+                await self.handle_listformats(ctx, info)
+            elif ydl_opts.get('json', False):
+                await self.handle_json_output(ctx, info)
+            else:
+                boost_count = ctx.guild.premium_subscription_count if ctx.guild else 0
+                await self.handle_video_download(ctx, info, boost_count, start_time)
+        
+        except Exception as e:
+            await self.send_error_embed(ctx, e)
+        finally:
+            if info:
+                await self.cleanup_downloaded_file(info)
 
     async def extract_info(self, ydl_opts, url, download=True):
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._extract_info, ydl_opts, url, download)
+    
+    async def handle_listformats(self, ctx: commands.Context, info):
+        formats = info.get('formats', [])
+        if not formats:
+            return await ctx.send("No formats available for this URL.")
+        
+        lines = [
+            f"ID: {f.get('format_id')} | Ext: {f.get('ext')} | Res: {f.get('resolution', 'N/A')} | FPS: {f.get('fps', 'N/A')} | "
+            f"Video Codec: {f.get('vcodec', 'N/A')} | Audio Codec: {f.get('acodec', 'N/A')} | "
+            f"Bitrate: {f.get('tbr', 'N/A')}k | Size: {self.get_format_size(f, info)} | "
+            f"Protocol: {f.get('protocol', 'N/A')} | Notes: {f.get('format_note', 'N/A')} | Container: {f.get('container', 'N/A')}"
+            for f in formats
+        ]
+
+        message = "\n".join(lines)
+        if len(message) > 2000:
+            path = f"vids/formats-{info.get('id', 'Unknown')}.txt"
+            with open(path, 'w') as f:
+                f.write(message)
+            await ctx.send(f"Available formats for {info.get('title', 'Unknown')}:", file=discord.File(path))
+            os.remove(path)
+        else:
+            await ctx.send(f"Available formats for {info.get('title', 'Unknown')}:\n```{message}```")
+    
+    async def handle_json_output(self, ctx: commands.Context, info):
+        path = f"vids/{info.get('id', 'Unknown')}.info.json"
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(info, f, indent=4)
+            await ctx.send(f"Info dict JSON extracted for {info.get('title', 'Unknown Title')}:", file=discord.File(path))
+        except Exception as e:
+            await ctx.send(f"Error extracting the info dict JSON: {e}")
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+    
+    async def handle_video_download(self, ctx: commands.Context, info, boost_count, start_time):
+        file_path = info.get('final_file')
+        if not file_path or not os.path.exists(file_path):
+            raise FileNotFoundError(f"The file `{file_path}` does not exist.")
+        
+        size = os.path.getsize(file_path)
+        max_size = self.get_max_file_size(boost_count)
+
+        if size > max_size:
+            raise commands.CommandError(
+                f"File too large. ({size} bytes > {max_size} bytes ({self.human_readable_size(size)} > {self.human_readable_size(max_size)}))"
+            )
+        elapsed = time.time() - start_time
+        meta = self.build_metadata_message(info, file_path, size, elapsed)
+
+        with open(file_path, 'rb') as f:
+            await ctx.send(meta, file=discord.File(f, filename=os.path.basename(file_path)))
+    
+    def build_metadata_message(self, info: dict, file_path: str, file_size: int, elapsed: float) -> str:
+        fields = []
+
+        title = info.get('title')
+        video_id = info.get('id')
+        url = info.get('webpage_url')
+        if title and url and video_id:
+            fields.append(f"[{title} ({video_id})](<{url}> '{os.path.basename(file_path)}')")
+        elif title and video_id:
+            fields.append(f"{title} ({video_id})")
+        
+        uploader = info.get('uploader')
+        uploader_url = info.get('uploader_url')
+        uploader_id = info.get('uploader_id')
+        if uploader:
+            if uploader_url and uploader_id:
+                fields.append(f"by [{uploader}](<{uploader_url}> '{uploader_id}')")
+            else:
+                fields.append(f"by {uploader}")
+        
+        width, height = info.get('width'), info.get('height')
+        if width and height:
+            fields.append(f"Resolution: {width}x{height}")
+        
+        duration_str = info.get('duration_string')
+        duration = info.get('duration')
+        if duration_str and duration:
+            fields.append(f"Duration: {duration_str} ({duration} seconds)")
+        
+        format_id = info.get('format_id')
+        format_name = info.get('format')
+        if format_id and format_name:
+            fields.append(f"Formats: `{format_id} ({format_name})`")
+        
+        fields.append(f"Size: {self.human_readable_size(file_size)} ({file_size} bytes)")
+        fields.append(f"Took: {elapsed:.2f} seconds")
+
+        return "-# " + ", ".join(fields)
+    
+    async def send_error_embed(self, ctx: commands.Context, error):
+        error_text = f"```ansi\n{error}```"
+        advice = None
+        color = discord.Color.red()
+
+        lower_msg = str(error).lower()
+        if "unsupported url" in lower_msg:
+            advice = "This media type is not supported. Usually this means yt-dlp does not support the website. Try a different link."
+            color = discord.Color.orange()
+        elif "unable to extract" in lower_msg:
+            advice = "yt-dlp failed to extract the content inside this webpage. It might be private, region-locked, or malformed."
+            color = discord.Color.dark_orange()
+        elif "drm" in lower_msg or "protected" in lower_msg:
+            advice = "This media is DRM (Digital Rights Management) protected, meaning you are legally not allowed to download this content.\n**Help will __not__ be provided regarding DRM protected content.**"
+            color = 0xFF0000
+        elif "file too large" in lower_msg:
+            advice = "The file exceeds Discord's upload limit for this server's boost level. Try checking the available formats for this content to download a smaller one. If used as an external user application, you'll need to contact your server staff/support for help as it's not possible to detect and upload large files if the bot is not in the server."
+            color = discord.Color.blurple()
+        
+        embed = discord.Embed(
+            title=":warning: yt-dlp Error",
+            description=error_text,
+            color=color,
+            timestamp=discord.utils.utcnow()
+        )
+        
+        if advice:
+            embed.add_field(name="Additional info regarding this error", value=advice, inline=False)
+        
+        embed.set_author(name=f"{ctx.author}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar, url=f"https://discord.com/users/{ctx.author.id}")
+        await ctx.send(embed=embed)
+    
+    async def cleanup_downloaded_file(self, info):
+        path = info.get('final_file')
+        if path and os.path.exists(path):
+            os.remove(path)
 
     def _extract_info(self, ydl_opts, url, download=True):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
