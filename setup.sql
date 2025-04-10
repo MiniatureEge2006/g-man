@@ -80,3 +80,8 @@ CREATE TABLE IF NOT EXISTS reminders (
     reminder TEXT NOT NULL,
     reminder_time TIMESTAMPTZ NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS system_prompts (
+    user_id BIGINT PRIMARY KEY,
+    prompt TEXT
+);

@@ -4,6 +4,10 @@ from discord import app_commands
 import ollama
 import asyncio
 import time
+import asyncpg
+import bot_info
+import json
+import io
 
 MAX_CONVERSATION_HISTORY_LENGTH = 5
 
@@ -11,13 +15,14 @@ class AI(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.conversations = {}
+        self.db = None
     
     def get_conversation(self, ctx):
         return (ctx.guild.id, ctx.channel.id, ctx.author.id) if ctx.guild else (ctx.author.id, ctx.channel.id)
 
 
     async def create_system_prompt(self, ctx: commands.Context) -> str:
-        system_prompt = f"""
+        system_prompt = """
 You are **G-Man**. A mysterious and enigmatic character from the Half-Life series. Your thinking revolves around the **latent, unseen aberrance and hazard** in things; about everything; even within yourself. Exactly what values drive you is never quite sure, in the course of these very interactions that question is explored. Chiefly, you are speaking with **Dr. Gordon Freeman**, your familiar subject. When the speaker is unlikely to be Dr. Freeman, they are a different Half-Life character, or an archetype that can belong in the Half-Life universe. Your responses will be fairly long. Often they're screenplay-like, mixing your spoken dialogue with some non-verbal expression written in parentheses, or some exposition about place.
 
 
@@ -33,13 +38,17 @@ You like to briefly allude to connection with **larger, unseen forces at play.**
 Delicate affairs can be described through cryptic phrasing so you're not taken the wrong way.
 You could quote G-Man's koan sayings, for example:
 - "The right man in the wrong place can make all the difference in the world."
-- "I realize this moment may not be the most convenient for a… heart-to-heart."
+- "I realize this moment may not be the most convenient for a... heart-to-heart."
 - "Time, Dr. Freeman? Is it really that time again?"
 
 
 Remember, you are not here to give nice straightforward answers.
 Leave your true intentions concealed - enigma is part of you.
 Always respond in a way that is consistent with G-Man's character. Never break character in any way."""
+        if self.db:
+            row = await self.db.fetchrow("SELECT prompt FROM system_prompts WHERE user_id = $1", ctx.author.id)
+            if row and row['prompt']:
+                return row['prompt']
         return system_prompt
 
 
@@ -86,6 +95,76 @@ Always respond in a way that is consistent with G-Man's character. Never break c
             return response
         except Exception as e:
             raise RuntimeError(f"AI request failed: {e}")
+    
+
+    @commands.hybrid_command(name="setsystemprompt", description="Set a custom system prompt for G-AI.")
+    @app_commands.allowed_installs(guilds=True, users=True)
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    @app_commands.describe(prompt="The custom system prompt.")
+    async def setsystemprompt(self, ctx: commands.Context, *, prompt: str):
+        await ctx.typing()
+        if self.db:
+            await self.db.execute("""
+                INSERT INTO system_prompts (user_id, prompt) VALUES ($1, $2)
+                ON CONFLICT (user_id) DO UPDATE SET prompt = EXCLUDED.prompt
+                """, ctx.author.id, prompt)
+            await ctx.send("Custom system prompt has been successfully set.")
+        else:
+            await ctx.send("Database not initialized.")
+    
+
+    @commands.hybrid_command(name="resetsystemprompt", description="Reset your system prompt back to default.")
+    @app_commands.allowed_installs(guilds=True, users=True)
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    async def resetsystemprompt(self, ctx: commands.Context):
+        await ctx.typing()
+        if self.db:
+            await self.db.execute("DELETE FROM system_prompts WHERE user_id = $1", ctx.author.id)
+            await ctx.send("Your system prompt has successfully been reset.")
+        else:
+            await ctx.send("Database not initialized")
+    
+    @commands.hybrid_command(name="exportchat", description="Export your conversation history with G-AI.")
+    @app_commands.allowed_installs(guilds=True, users=True)
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    async def exportchat(self, ctx: commands.Context):
+        await ctx.typing()
+        key = self.get_conversation(ctx)
+        history = self.conversations.get(key, [])
+        if not history:
+            await ctx.send("No conversation history to export.")
+            return
+        buffer = io.BytesIO()
+        buffer.write(json.dumps(history, indent=2).encode())
+        buffer.seek(0)
+        await ctx.send("Here is your conversation history:", file=discord.File(buffer, filename="conversation.json"))
+    
+    @commands.hybrid_command(name="importchat", description="Import your conversation history with G-AI.")
+    @app_commands.allowed_installs(guilds=True, users=True)
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    @app_commands.describe(attachment="The JSON file to import.")
+    async def importchat(self, ctx: commands.Context, attachment: discord.Attachment):
+        await ctx.typing()
+        if not (ctx.message.attachments or attachment):
+            await ctx.send("Please attach a `conversation.json` file from the exportchat command.")
+            return
+        attachment = ctx.message.attachments[0] or attachment
+        if not attachment.filename.endswith(".json"):
+            await ctx.send("File must be a `.json` file.")
+            return
+        
+        content = await attachment.read()
+        try:
+            history = json.loads(content)
+            if isinstance(history, list) and all("role" in m and "content" in m for m in history):
+                self.conversations[self.get_conversation(ctx)] = history
+                await ctx.send("Conversation history has successfully been imported.")
+            else:
+                await ctx.send("Invalid format.")
+        except Exception as e:
+            await ctx.send(f"Error loading JSON: {e}")
+
+
     @commands.hybrid_command(name="resetai", description="Reset the conversation history of G-AI.")
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
@@ -100,4 +179,6 @@ Always respond in a way that is consistent with G-Man's character. Never break c
     
 
 async def setup(bot):
-    await bot.add_cog(AI(bot))
+    cog = AI(bot)
+    cog.db = await asyncpg.create_pool(bot_info.data['database'])
+    await bot.add_cog(cog)
