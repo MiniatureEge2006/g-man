@@ -134,9 +134,9 @@ class Search(commands.Cog):
         embed = discord.Embed(
             title=title[:256],
             url=url,
-            color=discord.Color.green() if platform == 'spotify' or 'sp' else discord.Color.red() if platform == 'youtube' or 'yt' else discord.Color.orange() if platform == 'soundcloud' or 'sc' else None
+            color=discord.Color.red() if platform == 'youtube' or 'yt' else discord.Color.orange() if platform == 'soundcloud' or 'sc' else discord.Color.green(),
         )
-        if platform == 'spotify' or 'sp':
+        if platform == 'spotify' or platform == 'sp':
             if entry.get('id'):
                 embed.add_field(name="Track ID", value=entry['id'], inline=True)
             if entry.get('url'):
