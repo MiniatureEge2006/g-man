@@ -7,7 +7,6 @@ psutil
 colorlog
 asyncpg
 spotipy
-isodate
 dateparser
 ollama
 PyNaCl
