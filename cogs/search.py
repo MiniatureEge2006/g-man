@@ -21,7 +21,8 @@ class Search(commands.Cog):
             'noplaylist': True,
             'ignore_no_formats_error': True,
             'playlist_items': f"1:{max_results}",
-            'quiet': True
+            'quiet': True,
+            'no_warnings': True
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
