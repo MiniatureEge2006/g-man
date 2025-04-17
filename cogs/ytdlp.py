@@ -187,14 +187,43 @@ class Ytdlp(commands.Cog):
         path = info.get('final_file')
         if path and os.path.exists(path):
             os.remove(path)
+    
+    def find_first_video_entry(self, info):
+        if not info:
+            return None
+        if 'entries' in info:
+            for entry in info['entries']:
+                if entry is None:
+                    continue
+                if entry.get('_type') == 'playlist':
+                    nested = self.find_first_video_entry(entry)
+                    if nested:
+                        return nested
+                else:
+                    return entry
+        elif info.get('_type') != 'playlist':
+            return info
+        return None
 
     def _extract_info(self, ydl_opts, url, download=True):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=download)
+            entry = self.find_first_video_entry(info)
+            if not entry:
+                raise ValueError("No valid entry found.")
             if download:
-                final_file = info.get('requested_downloads', [{}])[0].get('filepath') or ydl.prepare_filename(info)
-                info['final_file'] = final_file
-            return info
+                if 'requested_downloads' in entry and entry['requested_downloads']:
+                    entry['final_file'] = entry['requested_downloads'][0]['filepath']
+                else:
+                    entry['final_file'] = ydl.prepare_filename(entry)
+                return entry
+            else:
+                if download:
+                    if 'requested_downloads' in info and info['requested_downloads']:
+                        info['final_file'] = info['requested_downloads'][0]['filepath']
+                    else:
+                        info['final_file'] = ydl.prepare_filename(info)
+                return info
 
     def parse_time_to_seconds(self, time_str):
         time_parts = time_str.split(":")
