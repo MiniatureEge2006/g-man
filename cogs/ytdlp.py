@@ -3,61 +3,210 @@ import time
 import discord
 from discord import app_commands
 from discord.ext import commands
+from discord.ext import tasks
 from yt_dlp.utils import download_range_func
 import yt_dlp
 import shlex
 import json
 import asyncio
+import tempfile
+import shutil
+import re
+import uuid
 
 class Ytdlp(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.download_semaphore = asyncio.Semaphore(3)
+        self.temp_dir_prefix = f"yt_dlp_{os.getpid()}_"
+        self.clean_temp_dir.start()
+    
+    @commands.Cog.listener()
+    async def on_cog_unload(self):
+        self.clean_temp_dir.cancel()
     
     @commands.hybrid_command(name="yt-dlp", aliases=["youtube-dl", "ytdl", "youtubedl", "ytdlp", "download", "dl"], description="Use yt-dlp! (for a list of formats use --listformats)")
-    @app_commands.describe(url="Input URL. (e.g., YouTube, SoundCloud. DRM protected websites are NOT supported.)", options="yt-dlp options. (e.g., --download-ranges 10-15 --force-keyframes-at-cuts)")
+    @app_commands.describe(url="Input URL(s). Multiple URLs would be seperated by a space.", options="yt-dlp options. (e.g., --download-ranges 10-15 --force-keyframes-at-cuts)")
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def ytdlp(self, ctx: commands.Context, url: str, *, options: str = ''):
         await ctx.typing()
-        ydl_opts = {
-            'noplaylist': True,
-            'outtmpl': 'vids/%(extractor)s-%(id)s.%(ext)s',
-            'playlist_items': '1'
-        }
-
-        if options.strip():
+        async with self.download_semaphore:
+            temp_dir = os.path.join(tempfile.gettempdir(), f"{self.temp_dir_prefix}{uuid.uuid4().hex}")
+            os.makedirs(temp_dir, exist_ok=True)
+            lock_file = os.path.join(temp_dir, "active.lock")
             try:
-                custom_opts = self.parse_options(options)
-                ydl_opts.update(custom_opts)
+                with open(lock_file, 'w') as f:
+                    f.write("active")
+                if ' ' in url and not url.startswith(('http://', 'https://', 'ytsearch', 'ytsearch:')):
+                    url = f"ytsearch1:{url}"
+                ydl_opts = {
+                    'noplaylist': True,
+                    'playlist_items': '1',
+                    'quiet': True,
+                    'no_warnings': True,
+                    'outtmpl': '%(extractor)s-%(id)s.%(ext)s',
+                    'paths': {
+                        'home': temp_dir,
+                        'temp': temp_dir
+                    }
+                }
+
+                if options.strip():
+                    try:
+                        custom_opts = self.parse_options(options)
+                        ydl_opts.update(custom_opts)
+                    except Exception as e:
+                        await ctx.send(f"Error parsing options: {e}")
+                        return
+                urls = [url] if url.startswith(('ytsearch', 'ytsearch:')) else url.split()
+                ytsearch_match = re.match(r'^ytsearch(\d+):', url)
+                is_multiple_videos = len(urls) > 1 or (ytsearch_match and int(ytsearch_match.group(1)) > 1)
+                max_size = self.get_max_file_size(ctx.guild.premium_subscription_count if ctx.guild else 0)
+                start_time = time.time()
+                results = {
+                    'success': [],
+                    'skipped': [],
+                    'failed': []
+                }
+                for entry in urls:
+                    try:
+                        infos = await self.extract_info(ydl_opts, entry, download=not ydl_opts.get("json", False))
+                        for info in infos:
+                            if ydl_opts.get('listformats', False):
+                                await self.handle_listformats(ctx, info)
+                                continue
+                            if ydl_opts.get('json', False):
+                                await self.handle_json_output(ctx, info)
+                                continue
+
+                            file_path = info.get('final_file')
+                            size = os.path.getsize(file_path)
+                            if not file_path:
+                                continue
+                            title = info.get('title', 'Unknown')
+                            if size > max_size:
+                                results['skipped'].append({
+                                    'title': title,
+                                    'size': size,
+                                    'entry': entry
+                                })
+                                continue
+                            results['success'].append({
+                                'info': info,
+                                'file_path': file_path,
+                                'title': title,
+                                'size': size
+                            })
+                    except Exception as e:
+                        size = self.extract_size_from_info(info) if 'info' in locals() else None
+                        results['failed'].append({
+                            'entry': entry,
+                            'error': str(e),
+                            'size': size,
+                            'title': info.get('title', 'Unknown') if 'info' in locals() else 'Unknown'
+                        })
+                        continue
+                await self.send_results(ctx, results, is_multiple_videos, max_size, start_time, ydl_opts)
             except Exception as e:
-                await ctx.send(f"Error parsing options: {e}")
-                return
-        download = not ydl_opts.get("json", False)
-        task = asyncio.create_task(self.extract_info(ydl_opts, url, download=download))
-
-        start_time = time.time()
-        info = None
-
-        try:
-            info = await task
-
-            if ydl_opts.get('listformats', False):
-                await self.handle_listformats(ctx, info)
-            elif ydl_opts.get('json', False):
-                await self.handle_json_output(ctx, info)
-            else:
-                boost_count = ctx.guild.premium_subscription_count if ctx.guild else 0
-                await self.handle_video_download(ctx, info, boost_count, start_time)
+                await ctx.send(f"An error occurred during download: {str(e)}")
+            finally:
+                try:
+                    os.remove(lock_file)
+                except:
+                    pass
+                try:
+                    shutil.rmtree(temp_dir)
+                except Exception as e:
+                    pass
+    
+    async def send_results(self, ctx: commands.Context, results, is_multiple, max_size, start_time, ydl_opts):
+        for failure in results['failed']:
+            error_msg = f"Failed to download {failure.get('title', failure.get('entry', 'URL'))}"
+            if failure.get('size'):
+                error_msg += f" [Size: {failure['size']}]"
+            error_msg += f": {failure.get('error', 'Unknown error')}"
+            await ctx.send(error_msg[:2000])
         
-        except Exception as e:
-            await self.send_error_embed(ctx, e)
-        finally:
-            if info:
-                await self.cleanup_downloaded_file(info)
+        if results['skipped']:
+            if is_multiple:
+                skip_msg = ["Skipped due to size limits:"]
+                for item in results['skipped']:
+                    skip_msg.append(
+                        f"- {item.get('title', 'Unknown')} "
+                        f"({self.human_readable_size(item.get('size', 0))}) > "
+                        f"{self.human_readable_size(max_size)})"
+                    )
+                await ctx.send("\n".join(skip_msg)[:2000])
+            else:
+                item = results['skipped'][0]
+                await ctx.send(
+                    f"{item.get('title', 'Unknown')} exceeds size limit. "
+                    f"({self.human_readable_size(item.get('size', 0))} > "
+                    f"{self.human_readable_size(max_size)})"
+                )
+        
+        if results['success']:
+            files = [discord.File(item['file_path']) for item in results['success']]
+            messages = [
+                self.build_metadata_message(
+                    item['info'],
+                    item['file_path'],
+                    os.path.getsize(item['file_path']),
+                    time.time() - start_time
+                )
+                for item in results['success']
+            ]
+            await ctx.send("\n\n".join(messages)[:2000], files=files[:10])
+        
+        elif not any([results['failed'], results['skipped']]) and not any([ydl_opts.get('listformats', False), ydl_opts.get('json', False)]):
+            await ctx.send("No videos could be downloaded.")
+                
+    
+    def extract_size_from_info(self, info: dict) -> str:
+        if not info:
+            return ""
+        try:
+            if info.get('filesize'):
+                return self.human_readable_size(info['filesize'])
+            
+            if info.get('requested_downloads'):
+                dl = info['requested_downloads'][0]
+                return self.human_readable_size(dl.get('filesize') or dl.get('filesize_approx'))
+            
+            if info.get('formats'):
+                selected_format = next(
+                    (f for f in info.get('formats', [])
+                    if f.get('format_id') == info.get('format_id')),
+                    None
+                )
+                if selected_format:
+                    return self.human_readable_size(selected_format.get('filesize') or selected_format.get('filesize_approx'))
+        
+        except Exception:
+            pass
+
+        return None
+
+    def build_skipped_summary(self, skipped_files, max_size):
+        message_lines = [f"Skipped {len(skipped_files)} file(s) due to size limit:"]
+        total_size = 0
+        for file in skipped_files[:10]:
+            human_size = self.human_readable_size(file['size'])
+            message_lines.append(f"- {file['title']} ({human_size})")
+            total_size += file['size']
+        message_lines.append(f"\nTotal skipped size: {self.human_readable_size(total_size)} | Max allowed: {self.human_readable_size(max_size)}")
+        return "\n".join(message_lines)
 
     async def extract_info(self, ydl_opts, url, download=True):
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._extract_info, ydl_opts, url, download)
+        try:
+            return await loop.run_in_executor(None, self._extract_info, ydl_opts, url, download)
+        except Exception as e:
+            if hasattr(e, 'exc_info'):
+                original_error = e.exc_info[1]
+                raise original_error from e
+            raise
     
     async def handle_listformats(self, ctx: commands.Context, info):
         formats = info.get('formats', [])
@@ -93,24 +242,6 @@ class Ytdlp(commands.Cog):
         finally:
             if os.path.exists(path):
                 os.remove(path)
-    
-    async def handle_video_download(self, ctx: commands.Context, info, boost_count, start_time):
-        file_path = info.get('final_file')
-        if not file_path or not os.path.exists(file_path):
-            raise FileNotFoundError(f"The file `{file_path}` does not exist.")
-        
-        size = os.path.getsize(file_path)
-        max_size = self.get_max_file_size(boost_count)
-
-        if size > max_size:
-            raise commands.CommandError(
-                f"File too large. ({size} bytes > {max_size} bytes ({self.human_readable_size(size)} > {self.human_readable_size(max_size)}))"
-            )
-        elapsed = time.time() - start_time
-        meta = self.build_metadata_message(info, file_path, size, elapsed)
-
-        with open(file_path, 'rb') as f:
-            await ctx.send(meta, file=discord.File(f, filename=os.path.basename(file_path)))
     
     def build_metadata_message(self, info: dict, file_path: str, file_size: int, elapsed: float) -> str:
         fields = []
@@ -151,79 +282,83 @@ class Ytdlp(commands.Cog):
 
         return "-# " + ", ".join(fields)
     
-    async def send_error_embed(self, ctx: commands.Context, error):
-        error_text = f"```ansi\n{error}```"
-        advice = None
-        color = discord.Color.red()
-
-        lower_msg = str(error).lower()
-        if "unsupported url" in lower_msg:
-            advice = "This media type is not supported. Usually this means yt-dlp does not support the website. Try a different link."
-            color = discord.Color.orange()
-        elif "unable to extract" in lower_msg:
-            advice = "yt-dlp failed to extract the content inside this webpage. It might be private, region-locked, or malformed."
-            color = discord.Color.dark_orange()
-        elif "drm" in lower_msg or "protected" in lower_msg:
-            advice = "This media is DRM (Digital Rights Management) protected, meaning you are legally not allowed to download this content.\n**Help will __not__ be provided regarding DRM protected content.**"
-            color = 0xFF0000
-        elif "file too large" in lower_msg:
-            advice = "The file exceeds Discord's upload limit for this server's boost level. Try checking the available formats for this content to download a smaller one. If used as an external user application, you'll need to contact your server staff/support for help as it's not possible to detect and upload large files if the bot is not in the server."
-            color = discord.Color.blurple()
-        
-        embed = discord.Embed(
-            title=":warning: yt-dlp Error",
-            description=error_text,
-            color=color,
-            timestamp=discord.utils.utcnow()
-        )
-        
-        if advice:
-            embed.add_field(name="Additional info regarding this error", value=advice, inline=False)
-        
-        embed.set_author(name=f"{ctx.author}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar, url=f"https://discord.com/users/{ctx.author.id}")
-        await ctx.send(embed=embed)
+    async def cleanup_temp_files(self):
+        try:
+            for filename in os.listdir(self.temp_dir):
+                file_path = os.path.join(self.temp_dir, filename)
+                try:
+                    if os.path.isfile(file_path):
+                        os.unlink(file_path)
+                    elif os.path.isdir(file_path):
+                        shutil.rmtree(file_path)
+                except Exception as e:
+                    print(f"Could not delete {file_path}: {e}")
+        except Exception as e:
+            print(f"Error cleaning temp files: {e}")
     
-    async def cleanup_downloaded_file(self, info):
-        path = info.get('final_file')
-        if path and os.path.exists(path):
-            os.remove(path)
-    
-    def find_first_video_entry(self, info):
-        if not info:
-            return None
-        if 'entries' in info:
-            for entry in info['entries']:
-                if entry is None:
-                    continue
-                if entry.get('_type') == 'playlist':
-                    nested = self.find_first_video_entry(entry)
-                    if nested:
-                        return nested
+    async def safe_cleanup(self, path: str):
+        try:
+            if os.path.exists(path):
+                if os.path.isfile(path):
+                    os.unlink(path)
                 else:
-                    return entry
-        elif info.get('_type') != 'playlist':
-            return info
-        return None
+                    shutil.rmtree(path)
+        except Exception as e:
+            print(f"Error cleaning up {path}: {e}")
+    
+    @tasks.loop(minutes=30)
+    async def clean_temp_dir(self):
+        temp_parent = tempfile.gettempdir()
+        try:
+            for name in os.listdir(temp_parent):
+                if name.startswith('yt_dlp_'):
+                    path = os.path.join(temp_parent, name)
+                    try:
+                        if os.path.getmtime(path) < time.time() - 3600:
+                            await self.safe_cleanup(path)
+                    except Exception as e:
+                        print(f"Could not delete {path}: {e}")
+        except Exception as e:
+            print(f"Error cleaning temp dir: {e}")
+
+
+    def find_video_entries(self, info, limit = 10):
+        entries = []
+
+        def collect_entries(obj):
+            nonlocal entries
+            if not obj or len(entries) >= limit:
+                return
+            if obj.get('_type') == 'playlist' and 'entries' in obj:
+                for entry in obj['entries']:
+                    collect_entries(entry)
+                    if len(entries) >= limit:
+                        break
+            elif obj.get('_type') != 'playlist':
+                entries.append(obj)
+        collect_entries(info)
+        return entries
+
 
     def _extract_info(self, ydl_opts, url, download=True):
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=download)
-            entry = self.find_first_video_entry(info)
-            if not entry:
-                raise ValueError("No valid entry found.")
-            if download:
-                if 'requested_downloads' in entry and entry['requested_downloads']:
-                    entry['final_file'] = entry['requested_downloads'][0]['filepath']
-                else:
-                    entry['final_file'] = ydl.prepare_filename(entry)
-                return entry
-            else:
-                if download:
-                    if 'requested_downloads' in info and info['requested_downloads']:
-                        info['final_file'] = info['requested_downloads'][0]['filepath']
-                    else:
-                        info['final_file'] = ydl.prepare_filename(info)
-                return info
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=download)
+                entries = self.find_video_entries(info, limit=10)
+                if not entries:
+                    raise yt_dlp.utils.DownloadError("No video entries found - the playlist might be empty or inaccessible")
+            
+                for entry in entries:
+                    if download:
+                        if 'requested_downloads' in entry and entry['requested_downloads']:
+                            entry['final_file'] = entry['requested_downloads'][0]['filepath']
+                        else:
+                            entry['final_file'] = ydl.prepare_filename(entry)
+                return entries
+        except Exception as e:
+            if not isinstance(e, (yt_dlp.utils.DownloadError, yt_dlp.utils.ExtractorError)):
+                raise yt_dlp.utils.DownloadError(str(e))
+            raise
 
     def parse_time_to_seconds(self, time_str):
         time_parts = time_str.split(":")
