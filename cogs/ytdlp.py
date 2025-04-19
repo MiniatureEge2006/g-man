@@ -122,7 +122,7 @@ class Ytdlp(commands.Cog):
     
     async def send_results(self, ctx: commands.Context, results, is_multiple, max_size, start_time, ydl_opts):
         for failure in results['failed']:
-            error_msg = f"Failed to download {failure.get('title', failure.get('entry', 'URL'))}"
+            error_msg = f"Failed to download `{failure.get('title', failure.get('entry', 'URL'))}`"
             if failure.get('size'):
                 error_msg += f" [Size: {failure['size']}]"
             error_msg += f": {failure.get('error', 'Unknown error')}"
@@ -133,7 +133,7 @@ class Ytdlp(commands.Cog):
                 skip_msg = ["Skipped due to size limits:"]
                 for item in results['skipped']:
                     skip_msg.append(
-                        f"- {item.get('title', 'Unknown')} "
+                        f"- `{item.get('title', 'Unknown')}` "
                         f"({self.human_readable_size(item.get('size', 0))}) > "
                         f"{self.human_readable_size(max_size)})"
                     )
@@ -141,7 +141,7 @@ class Ytdlp(commands.Cog):
             else:
                 item = results['skipped'][0]
                 await ctx.send(
-                    f"{item.get('title', 'Unknown')} exceeds size limit. "
+                    f"`{item.get('title', 'Unknown')}` exceeds size limit. "
                     f"({self.human_readable_size(item.get('size', 0))} > "
                     f"{self.human_readable_size(max_size)})"
                 )
