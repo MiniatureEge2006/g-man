@@ -449,13 +449,7 @@ class Ytdlp(commands.Cog):
                 if opt == "format_sort":
                     if value is None:
                         raise ValueError("format_sort requires a value.")
-                    try:
-                        parsed_value = json.loads(value)
-                        if not isinstance(parsed_value, list) or not all(isinstance(item, str) for item in parsed_value):
-                            raise ValueError("format_sort must be a list of strings.")
-                        parsed_opts[key] = parsed_value
-                    except json.JSONDecodeError as e:
-                        raise ValueError(f"Error parsing format_sort: `{e}`")
+                    parsed_opts[key] = [x.strip() for x in value.split(",") if x.strip()]
                 elif opt == "download_ranges":
                     if value is None:
                         raise ValueError("download_ranges requires a value.")
