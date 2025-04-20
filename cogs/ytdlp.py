@@ -107,6 +107,17 @@ class Ytdlp(commands.Cog):
                             'title': info.get('title', 'Unknown') if 'info' in locals() else 'Unknown'
                         })
                         continue
+                if 'ffmpeg' in ydl_opts:
+                    try:
+                        results['success'] = await self.apply_filter_complex(
+                            results['success'],
+                            ydl_opts['ffmpeg'],
+                            temp_dir,
+                            ydl_opts.get("postprocessors", [])
+                        )
+                    except Exception as e:
+                        await ctx.send(f"Filter processing failed:\n{e}")
+                        return
                 await self.send_results(ctx, results, is_multiple_videos, max_size, start_time, ydl_opts)
             except Exception as e:
                 await ctx.send(f"An error occurred during download: {str(e)}")
@@ -161,6 +172,71 @@ class Ytdlp(commands.Cog):
         
         elif not any([results['failed'], results['skipped']]) and not any([ydl_opts.get('listformats', False), ydl_opts.get('json', False)]):
             await ctx.send("No videos could be downloaded.")
+    
+    async def apply_filter_complex(self, entries, filter_str, temp_dir, postprocessors):
+        if not entries:
+            return entries
+        
+        input_files = [entry['file_path'] for entry in entries]
+
+        ext = "mp4"
+        if postprocessors:
+            for pp in postprocessors:
+                fmt = pp.get("preferedformat") or pp.get("preferredcodec")
+                if fmt:
+                    ext = fmt
+                    break
+        
+        original_path = entries[0]['file_path']
+        base, _ = os.path.splitext(original_path)
+        output_path = f"{base}-filtered.{ext}"
+
+        input_args = []
+        for file in input_files:
+            input_args += ["-i", file]
+        
+        maps = []
+        if "[vout]" in filter_str and "[aout]" not in filter_str:
+            maps += ["-map", "[vout]", "-map", "0:a?"]
+        elif "[aout]" in filter_str and "[vout]" not in filter_str:
+            maps += ["-map", "0:v?", "-map", "[aout]"]
+        else:
+            if "[vout]" in filter_str:
+                maps += ["-map", "[vout]"]
+            if "[aout]" in filter_str:
+                maps += ["-map", "[aout]"]
+        if not maps:
+            raise ValueError("Your filter must output atleast [vout] or [aout].")
+        
+        cmd = [
+            "ffmpeg", "-hide_banner",
+            *input_args,
+            "-filter_complex", filter_str,
+            *maps,
+            "-y",
+            output_path
+        ]
+
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await process.communicate()
+
+        if process.returncode != 0:
+            raise RuntimeError(f"```{stderr.decode()}```")
+        
+        new_info = entries[0]['info'].copy()
+        new_info['title'] += " (filtered)"
+        new_info['final_file'] = output_path
+
+        return [{
+            "info": new_info,
+            "file_path": output_path,
+            "title": new_info['title'],
+            "size": os.path.getsize(output_path)
+        }]
                 
     
     def extract_size_from_info(self, info: dict) -> str:
