@@ -226,7 +226,7 @@ class Search(commands.Cog):
     
 
     @commands.hybrid_command(name="search", description="Search for YouTube.", aliases=["youtube", "yt"])
-    @app_commands.describe(query="The search query for YouTube. Add --max N to return up to N results. (default 1, max 15)")
+    @app_commands.describe(query="The search query for YouTube. Add --max N to return up to N results. (default 1, max 10)")
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def search(self, ctx: commands.Context, *, query: str = ""):
@@ -237,7 +237,7 @@ class Search(commands.Cog):
             if match:
                 max_results = int(match.group(1))
                 query = re.sub(r"--max[ =]+(\d+)", "", query).strip()
-        max_results = max(1, min(max_results, 15))
+        max_results = max(1, min(max_results, 10))
         if not query:
             return await ctx.send("Please provide a search query.")
         
