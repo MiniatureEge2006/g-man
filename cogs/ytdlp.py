@@ -419,22 +419,22 @@ class Ytdlp(commands.Cog):
         while i < len(options_list):
             opt = options_list[i]
 
-            if not (opt.startswith("-") or opt.startswith("--")):
+            if not opt.startswith("-"):
                 raise ValueError(f"Options must start with '-' or '--'. Invalid option: `{opt}`")
             
-            opt = opt[1:] if opt.startswith("-") and not opt.startswith("--") else opt[2:]
-
-            opt = opt.replace("-", "_")
-            
-            key = opt
-            if i + 1 < len(options_list) and not (options_list[i + 1].startswith("-") or options_list[i + 1].startswith("--")):
-                value = options_list[i + 1]
-                i += 1
+            if '=' in opt:
+                key_part, value = opt.split('=', 1)
+                key = key_part.lstrip('-').replace('-', '_')
             else:
-                value = None
+                key = opt.lstrip('-').replace('-', '_')
+                if i + 1 < len(options_list) and not options_list[i + 1].startswith("-"):
+                    value = options_list[i + 1]
+                    i += 1
+                else:
+                    value = None
             
-            if opt in postprocessor_mapping:
-                pp_info = postprocessor_mapping[opt]
+            if key in postprocessor_mapping:
+                pp_info = postprocessor_mapping[key]
                 pp_key = pp_info["key"]
                 pp_params = pp_info["params"]
                 pp_value = value if value is not None else pp_info["default"]
@@ -446,11 +446,11 @@ class Ytdlp(commands.Cog):
                 postprocessor.update({pp_params[0]: pp_value})
                 parsed_opts.setdefault("postprocessors", []).append(postprocessor)
             else:
-                if opt == "format_sort":
+                if key == "format_sort":
                     if value is None:
                         raise ValueError("format_sort requires a value.")
                     parsed_opts[key] = [x.strip() for x in value.split(",") if x.strip()]
-                elif opt == "download_ranges":
+                elif key == "download_ranges":
                     if value is None:
                         raise ValueError("download_ranges requires a value.")
                     try:
