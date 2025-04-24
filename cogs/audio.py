@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
 
-YDL_OPTIONS = {'format': 'bestaudio/best', 'outtmpl': 'vids/%(extractor)s-%(id)s-%(title)s.%(ext)s', 'restrictfilenames': True, 'extract_flat': 'in_playlist'}
+YDL_OPTIONS = {'format': 'bestaudio/best', 'outtmpl': 'vids/%(extractor)s-%(id)s-%(title)s.%(ext)s', 'restrictfilenames': True, 'extract_flat': 'in_playlist', 'quiet': True, 'no_warnings': True}
 spotify = spotipy.Spotify(auth_manager=spotipy.SpotifyClientCredentials(client_id=bot_info.data['spotify_client_id'], client_secret=bot_info.data['spotify_client_secret']))
 
 class Audio(commands.Cog):

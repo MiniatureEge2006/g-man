@@ -85,3 +85,32 @@ CREATE TABLE IF NOT EXISTS system_prompts (
     user_id BIGINT PRIMARY KEY,
     prompt TEXT
 );
+
+CREATE TABLE IF NOT EXISTS tags (
+    guild_id BIGINT,
+    user_id BIGINT,
+    name TEXT NOT NULL,
+    content TEXT NOT NULL,
+    author_id BIGINT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    uses INTEGER DEFAULT 0
+);
+
+CREATE UNIQUE INDEX idx_tags_primary ON tags (
+    COALESCE(guild_id, -1),
+    COALESCE(user_id, -1),
+    name
+);
+
+ALTER TABLE tags ADD CONSTRAINT valid_tag_scope CHECK (
+    (guild_id IS NOT NULL AND user_id IS NULL)
+    OR
+    (user_id IS NOT NULL AND guild_id IS NULL)
+);
+
+ALTER TABLE tags ADD CONSTRAINT name_lowercase CHECK (name = lower(name));
+
+CREATE INDEX idx_tags_guild ON tags (guild_id) WHERE guild_id IS NOT NULL;
+CREATE INDEX idx_tags_user ON tags (user_id) WHERE user_id IS NOT NULL;
+CREATE INDEX idx_tags_author ON tags (author_id);
+CREATE INDEX idx_tags_name ON tags (name);

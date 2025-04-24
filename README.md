@@ -18,7 +18,8 @@ A Discord multi-purpose bot.
 * A YouTube search command.
 * Music commands with FFMPEG audio filters support along with a queue system.
 * A prefix changing system.
-* And lastly, an AI chatbot command that will do things like helping you execute commands in human language and general purpose stuff.
+* An AI chatbot command via Ollama.
+* And lastly, a tag system with tagscripting support.
 
 ## Usage/Commands
 You can now just type `g-help` in a channel to see all the commands.
