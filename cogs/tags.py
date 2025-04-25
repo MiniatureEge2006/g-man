@@ -2076,7 +2076,7 @@ class Tags(commands.Cog):
             )
             content = await self.process_tags(ctx, tag['content'], args)
             if content.strip():
-                await ctx.send(content)
+                await ctx.send(content[:2000])
     
     @tag.command(name="show", description="Show a tag.", with_app_command=True, aliases=["fetch"])
     @app_commands.describe(name="The tag name.", args="The tag arguments, if any.")
@@ -2101,7 +2101,7 @@ class Tags(commands.Cog):
             )
             content = await self.process_tags(ctx, tag['content'], args)
             if content.strip():
-                await ctx.send(content)
+                await ctx.send(content[:2000])
     
     @tag.command(name="create", description="Create a tag.", with_app_command=True, aliases=["add"])
     @app_commands.describe(name="The tag name.", content="The tag content.", personal="Make this a personal tag.")
