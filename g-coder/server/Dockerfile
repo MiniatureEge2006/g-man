@@ -12,11 +12,14 @@ RUN apt-get update && \
     bash \
     curl \
     file \
+    nodejs \
+    npm \
     && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 COPY policy.xml /etc/ImageMagick-6/policy.xml
+RUN npm install -g typescript ts-node
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install \

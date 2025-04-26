@@ -57,13 +57,15 @@ class Code(commands.Cog):
         language = {
             "py": "python",
             "sh": "bash",
-            "js": "node"
+            "js": "javascript",
+            "node": "javascript",
+            "ts": "typescript"
         }.get(language, language)
 
         try:
             result = await self.execute_code(language, code, files=files)
             output = result.get("output", "").replace('\r\n', '\n').strip()
-            status = result.get("error", False)
+            status = result.get("error", False) or ("error" in result.get("output", "").lower())
             
 
             if not output:
@@ -74,13 +76,13 @@ class Code(commands.Cog):
                 output = output[:1900] + "\n... (output truncated)"
 
             embed = discord.Embed(
-                title=f"{language.upper()} Execution",
+                title=f"{language.capitalize()} Execution",
                 description=f"```{language}\n{output}\n```",
                 color=discord.Color.red() if status else discord.Color.green()
             )
 
             embed.set_author(
-                name=str(ctx.author),
+                name=f"{ctx.author.name}#{ctx.author.discriminator}",
                 icon_url=ctx.author.display_avatar.url,
                 url=f"https://discord.com/users/{ctx.author.id}"
             )
@@ -119,8 +121,10 @@ class Code(commands.Cog):
                 color=discord.Color.red()
             )
             await ctx.send(embed=error_embed)
-
-    def cog_unload(self):
+    
+    
+    @commands.Cog.listener()
+    async def on_cog_unload(self):
         if self.session and not self.session.closed:
             asyncio.create_task(self.session.close())
 
