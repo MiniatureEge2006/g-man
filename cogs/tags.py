@@ -17,6 +17,7 @@ import shlex
 import shutil
 from datetime import datetime
 import random
+from io import BytesIO
 
 
 class MediaProcessor:
@@ -31,6 +32,7 @@ class MediaProcessor:
         self.cleanup_interval = 3600
         self.file_max_age = 86400
         self.start_cleanup_task()
+        self.session = None
         self.command_specs = {
             'load': {
                 'url': {'required': True, 'type': str},
@@ -164,6 +166,10 @@ class MediaProcessor:
         if self._cleanup_task is None or self._cleanup_task.done():
             self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
     
+    async def ensure_session(self):
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession()
+    
     async def _periodic_cleanup(self):
         while True:
             try:
@@ -226,6 +232,8 @@ class MediaProcessor:
 
     
     async def cleanup(self):
+        if self.session and not self.session.closed:
+            await self.session.close()
         for proc in self.active_processes:
             if proc.returncode is None:
                 try:
@@ -1242,7 +1250,61 @@ class Tags(commands.Cog):
         except Exception as e:
             pass
     
-    
+    async def execute_language(self, ctx, language: str, code: str, **kwargs):
+        await self.processor.ensure_session()
+        url = f"http://localhost:8000/{language}/execute"
+        data = aiohttp.FormData()
+        data.add_field("code", code)
+
+
+        attachments = ctx.message.attachments
+        if attachments:
+            for attachment in attachments:
+                try:
+                    file_bytes = await attachment.read()
+                    data.add_field(
+                        "files",
+                        BytesIO(file_bytes),
+                        filename=attachment.filename,
+                        content_type=attachment.content_type or "application/octet-stream"
+                    )
+                except Exception as e:
+                    return f"[{language} error: Failed to process attachment {attachment.filename}: {str(e)}]"
+
+        try:
+            async with self.processor.session.post(url, data=data) as response:
+                if response.status != 200:
+                    return f"[{language} error: HTTP {response.status}]"
+                result = await response.json()
+
+            
+                output = result.get("output", "").replace("\r\n", "\n").strip()
+                if result.get("error") or "error" in output.lower():
+                    return f"[{language} error: {output or 'Execution failed with no output'}]"
+
+            
+                if result.get("files"):
+                    file_objs = []
+                    for filename in result["files"][:10]:
+                        file_url = f"http://localhost:8000/files/{result['execution_id']}/{filename}"
+                        try:
+                            async with self.processor.session.get(file_url) as file_resp:
+                                if file_resp.status == 200:
+                                    file_data = await file_resp.read()
+                                    file_objs.append(discord.File(BytesIO(file_data), filename=filename))
+                        except Exception as e:
+                            return f"[{language} error: Failed to fetch file {filename}: {str(e)}]"
+
+                    if file_objs:
+                        await ctx.send(files=file_objs)
+                        return ""
+
+                return output or "Execution succeeded with no console output"
+        except Exception as e:
+            return f"[{language} exception: {str(e)}]"
+
+        
+
     
     def setup_media_formatters(self):
         @self.formatter.register('gscript')
@@ -1557,10 +1619,10 @@ class Tags(commands.Cog):
             chosen_raw = then_raw if result else else_raw
             return await self.formatter.format(chosen_raw, ctx, **kwargs)
         
-        @self.formatter.register('random')
-        async def _random(ctx, args_str, **kwargs):
+        @self.formatter.register('range')
+        async def _range(ctx, args_str, **kwargs):
             """
-            ### {random:min|max}
+            ### {range:min|max}
                 * Generates a random integer between min and max (inclusive)
                 * Example: `{random:1|6}` -> "5"
             """
@@ -1579,7 +1641,7 @@ class Tags(commands.Cog):
                 
                 return str(random.randint(min_val, max_val))
             except Exception:
-                return "[random error: invalid input]"
+                return "[range error: invalid input]"
         
         @self.formatter.register('dice')
         async def _dice(ctx, notation, **kwargs):
@@ -1805,6 +1867,38 @@ class Tags(commands.Cog):
                 return str(eval(expr, {"__builtins__": None}, {}))
             except Exception as e:
                 return f'[error in math: {e}]'
+        
+        @self.formatter.register('python')
+        async def _python(ctx, code, **kwargs):
+            return await self.execute_language(ctx, 'python', code, **kwargs)
+
+        @self.formatter.register('py')
+        async def _py(ctx, code, **kwargs):
+            return await _python(ctx, code, **kwargs)
+
+        @self.formatter.register('bash')
+        async def _bash(ctx, code, **kwargs):
+            return await self.execute_language(ctx, 'bash', code, **kwargs)
+
+        @self.formatter.register('sh')
+        async def _sh(ctx, code, **kwargs):
+            return await _bash(ctx, code, **kwargs)
+
+        @self.formatter.register('javascript')
+        async def _javascript(ctx, code, **kwargs):
+            return await self.execute_language(ctx, 'javascript', code, **kwargs)
+
+        @self.formatter.register('js')
+        async def _js(ctx, code, **kwargs):
+            return await _javascript(ctx, code, **kwargs)
+
+        @self.formatter.register('typescript')
+        async def _typescript(ctx, code, **kwargs):
+            return await self.execute_language(ctx, 'typescript', code, **kwargs)
+
+        @self.formatter.register('ts')
+        async def _ts(ctx, code, **kwargs):
+            return await _typescript(ctx, code, **kwargs)
         
         @self.formatter.register('user')
         async def _user(ctx, i, **kwargs):
