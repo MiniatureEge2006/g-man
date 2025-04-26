@@ -8,43 +8,66 @@ import asyncio
 import time
 import json
 from typing import List
+from pathlib import Path
 
-EXECUTION_ROOT = "/tmp/code_executions"
-os.makedirs(EXECUTION_ROOT, exist_ok=True)
+
+APP_USER = "gcoder"
+EXECUTION_ROOT = Path("/app/executions")
+FILE_RETENTION_SECONDS = 30 * 60
+MAX_FILE_SIZE = 10 * 1024 * 1024
+ALLOWED_LANGUAGES = ["bash", "python", "javascript", "typescript"]
+
+
+def setup_environment():
+    EXECUTION_ROOT.mkdir(mode=0o700, exist_ok=True)
+    if os.getuid() == 0:
+        os.chown(EXECUTION_ROOT, 1000, 1000)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    setup_environment()
     for dir_name in os.listdir(EXECUTION_ROOT):
-        dir_path = os.path.join(EXECUTION_ROOT, dir_name)
-        if os.path.isdir(dir_path):
-            shutil.rmtree(dir_path, ignore_errors=True)
+        dir_path = EXECUTION_ROOT / dir_name
+        if dir_path.is_dir():
+            safe_delete(dir_path)
     yield
 
 app = FastAPI(lifespan=lifespan)
 
-def safe_delete(path: str):
+def safe_delete(path: Path):
     for _ in range(3):
         try:
-            if os.path.exists(path):
-                if os.path.isdir(path):
-                    shutil.rmtree(path)
+            if path.exists():
+                if path.is_dir():
+                    shutil.rmtree(path, ignore_errors=True)
                 else:
-                    os.remove(path)
+                    path.unlink(missing_ok=True)
                 return True
         except Exception:
             time.sleep(0.1)
     return False
 
+async def validate_file(file: UploadFile):
+    file.file.seek(0, os.SEEK_END)
+    size = file.file.tell()
+    file.file.seek(0)
+    if size > MAX_FILE_SIZE:
+        raise HTTPException(400, detail=f"File {file.filename} exceeds maximum size of 10MB")
+    
+
+    if "../" in file.filename or "/" in file.filename:
+        raise HTTPException(400, detail="Invalid filename")
+
 async def execute_code(language: str, code: str, files: List[UploadFile]):
     execution_id = str(uuid.uuid4())
-    work_dir = os.path.join(EXECUTION_ROOT, execution_id)
-    os.makedirs(work_dir, exist_ok=True)
-
+    work_dir = EXECUTION_ROOT / execution_id
+    work_dir.mkdir(mode=0o700)
 
     saved_files = []
     for file in files:
-        file_path = os.path.join(work_dir, file.filename)
-        with open(file_path, 'wb') as f:
+        await validate_file(file)
+        file_path = work_dir / file.filename
+        with file_path.open('wb') as f:
             content = await file.read()
             f.write(content)
         saved_files.append(file.filename)
@@ -61,12 +84,12 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
             
             output_files = [
                 f for f in os.listdir(work_dir)
-                if f not in saved_files and os.path.isfile(os.path.join(work_dir, f))
+                if f not in saved_files and (work_dir / f).is_file()
             ]
 
         elif language in ["javascript", "typescript"]:
             if language == "typescript":
-                with open(os.path.join(work_dir, "tsconfig.json"), 'w') as f:
+                with (work_dir / "tsconfig.json").open('w') as f:
                     f.write(json.dumps({
                         "compilerOptions": {
                             "module": "commonjs",
@@ -74,14 +97,12 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
                         }
                     }))
 
-
             wrapper_code = f"""
             const fs = require('fs');
             const {{ spawnSync }} = require('child_process');
             let output = '';
             
             try {{
-                // Execute user code with proper module handling
                 const cmd = '{'node' if language == 'javascript' else 'ts-node'}';
                 const args = {{
                     javascript: ['-e', `{code.replace('`', '\\`')}`],
@@ -96,7 +117,6 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
                 
                 output = result.stdout || result.stderr;
                 
-                // Get only user-created files
                 const allFiles = fs.readdirSync('.');
                 const tempFiles = ['script.{'js' if language == 'javascript' else 'ts'}', 
                                 'tsconfig.json',
@@ -114,37 +134,36 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
             """
             
             ext = "js" if language == "javascript" else "ts"
-            script_path = os.path.join(work_dir, f"script.{ext}")
-            with open(script_path, 'w') as f:
+            script_path = work_dir / f"script.{ext}"
+            with script_path.open('w') as f:
                 f.write(wrapper_code)
 
             proc = await asyncio.create_subprocess_exec(
-                'node', script_path,
+                'node', str(script_path),
                 cwd=work_dir,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
             await proc.communicate()
 
-
             output = ""
-            if os.path.exists(os.path.join(work_dir, "__output__.txt")):
-                with open(os.path.join(work_dir, "__output__.txt"), 'r') as f:
-                    output = f.read()
+            output_path = work_dir / "__output__.txt"
+            if output_path.exists():
+                output = output_path.read_text()
 
             output_files = []
-            if os.path.exists(os.path.join(work_dir, "__files__.json")):
-                with open(os.path.join(work_dir, "__files__.json"), 'r') as f:
-                    output_files = json.load(f)
+            files_json_path = work_dir / "__files__.json"
+            if files_json_path.exists():
+                output_files = json.loads(files_json_path.read_text())
 
-            if os.path.exists(os.path.join(work_dir, "__error__.txt")):
-                with open(os.path.join(work_dir, "__error__.txt"), 'r') as f:
-                    return {
-                        "output": f.read(),
-                        "files": [],
-                        "execution_id": execution_id,
-                        "error": proc.returncode != 0
-                    }
+            error_path = work_dir / "__error__.txt"
+            if error_path.exists():
+                return {
+                    "output": error_path.read_text(),
+                    "files": [],
+                    "execution_id": execution_id,
+                    "error": True
+                }
 
         elif language == "python":
             proc = await asyncio.create_subprocess_exec(
@@ -158,7 +177,7 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
             
             output_files = [
                 f for f in os.listdir(work_dir)
-                if f not in saved_files and os.path.isfile(os.path.join(work_dir, f))
+                if f not in saved_files and (work_dir / f).is_file()
             ]
 
         return {
@@ -168,8 +187,9 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
             "error": proc.returncode != 0 if language != "typescript" else False
         }
 
-    finally:
-        pass
+    except Exception as e:
+        safe_delete(work_dir)
+        raise HTTPException(500, detail=str(e))
 
 @app.post("/{language}/execute")
 async def execute_endpoint(
@@ -177,7 +197,7 @@ async def execute_endpoint(
     code: str = Form(...),
     files: List[UploadFile] = File([])
 ):
-    if language not in ["bash", "python", "javascript", "typescript"]:
+    if language not in ALLOWED_LANGUAGES:
         raise HTTPException(400, detail="Unsupported language")
     return await execute_code(language, code, files)
 
@@ -187,16 +207,16 @@ async def get_file(
     filename: str, 
     background_tasks: BackgroundTasks
 ):
-    file_path = os.path.join(EXECUTION_ROOT, execution_id, filename)
+    file_path = EXECUTION_ROOT / execution_id / filename
     
-    if not os.path.exists(file_path):
+    if not file_path.exists():
         raise HTTPException(404, detail="File not found.")
 
     async def cleanup():
         await asyncio.sleep(10)
         safe_delete(file_path)
-        dir_path = os.path.dirname(file_path)
-        if os.path.exists(dir_path) and not os.listdir(dir_path):
+        dir_path = file_path.parent
+        if dir_path.exists() and not any(dir_path.iterdir()):
             safe_delete(dir_path)
 
     background_tasks.add_task(cleanup)
@@ -206,6 +226,8 @@ async def get_file(
 async def health_check():
     return {
         "status": "healthy",
-        "execution_root": EXECUTION_ROOT,
-        "is_empty": len(os.listdir(EXECUTION_ROOT)) == 0
+        "user": APP_USER,
+        "uid": os.getuid(),
+        "execution_root": str(EXECUTION_ROOT),
+        "is_empty": len(list(EXECUTION_ROOT.iterdir())) == 0
     }

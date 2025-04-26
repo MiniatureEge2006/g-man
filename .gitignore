@@ -10,6 +10,7 @@ fonts/*
 clips/*
 ffmpeg4-2-2/*
 ffmpeg-static/*
+g-coder/executions/*
 
 !tutorial/bg.mp4
 !clips/hypercam.jpg

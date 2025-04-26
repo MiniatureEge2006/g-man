@@ -2,11 +2,14 @@ version: '3.8'
 
 services:
   server:
-    build: ./server
+    build: 
+      context: ./server
+      dockerfile: Dockerfile
+    user: "1000:1000"
     ports:
       - "8000:8000"
     volumes:
-      - /tmp/code_executions:/tmp/code_executions
+      - ./executions:/app/executions
     environment:
       - FILE_RETENTION_MINUTES=30
     healthcheck:
