@@ -59,7 +59,17 @@ class Code(commands.Cog):
             "sh": "bash",
             "js": "javascript",
             "node": "javascript",
-            "ts": "typescript"
+            "ts": "typescript",
+            "php": "php",
+            "rb": "ruby",
+            "lua": "lua",
+            "go": "go",
+            "rs": "rust",
+            "c": "c",
+            "c++": "cpp",
+            "cs": "csharp",
+            "c#": "csharp",
+            "zig": "zig"
         }.get(language, language)
 
         try:

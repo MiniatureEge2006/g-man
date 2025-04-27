@@ -15,7 +15,7 @@ APP_USER = "gcoder"
 EXECUTION_ROOT = Path("/app/executions")
 FILE_RETENTION_SECONDS = 30 * 60
 MAX_FILE_SIZE = 10 * 1024 * 1024
-ALLOWED_LANGUAGES = ["bash", "python", "javascript", "typescript"]
+ALLOWED_LANGUAGES = ["bash", "python", "javascript", "typescript", "php", "ruby", "lua", "go", "rust", "c", "cpp", "csharp", "zig"]
 
 
 def setup_environment():
@@ -71,6 +71,10 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
             content = await file.read()
             f.write(content)
         saved_files.append(file.filename)
+    
+    output = ""
+    output_files: List[str] = []
+    return_code: int = 0
 
     try:
         if language == "bash":
@@ -179,12 +183,199 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
                 f for f in os.listdir(work_dir)
                 if f not in saved_files and (work_dir / f).is_file()
             ]
+        
+        elif language == "php":
+            env = os.environ.copy()
+            proc = await asyncio.create_subprocess_exec(
+                'php', '-r', code,
+                cwd=work_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env
+            )
+            stdout, stderr = await proc.communicate()
+            output = stdout.decode() or stderr.decode()
+            return_code = proc.returncode
+        
+        elif language == "ruby":
+            env = os.environ.copy()
+            proc = await asyncio.create_subprocess_exec(
+                'ruby', '-e', code,
+                cwd=work_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env
+            )
+            stdout, stderr = await proc.communicate()
+            output = stdout.decode() or stderr.decode()
+            return_code = proc.returncode
+
+        elif language == "lua":
+            env = os.environ.copy()
+            proc = await asyncio.create_subprocess_exec(
+                'lua', '-e', code,
+                cwd=work_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env
+            )
+            stdout, stderr = await proc.communicate()
+            output = stdout.decode() or stderr.decode()
+            return_code = proc.returncode
+
+        elif language == "go":
+            env = os.environ.copy()
+            go_file = work_dir / "main.go"
+            with go_file.open('w') as f:
+                f.write(code)
+            
+            proc = await asyncio.create_subprocess_exec(
+                'go', 'run', str(go_file),
+                cwd=work_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env
+            )
+            stdout, stderr = await proc.communicate()
+            output = stdout.decode() or stderr.decode()
+            return_code = proc.returncode
+
+        elif language == "rust":
+            env = os.environ.copy()
+            rust_file = work_dir / "main.rs"
+            with rust_file.open('w') as f:
+                f.write(code)
+            
+            compile_proc = await asyncio.create_subprocess_exec(
+                'rustc', str(rust_file), '-o', str(work_dir / 'main'),
+                cwd=work_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env
+            )
+            compile_stdout, compile_stderr = await compile_proc.communicate()
+            
+            if compile_proc.returncode != 0:
+                output = compile_stderr.decode() or "Rust compilation failed"
+            else:
+                run_proc = await asyncio.create_subprocess_exec(
+                    str(work_dir / 'main'),
+                    cwd=work_dir,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await run_proc.communicate()
+                output = stdout.decode() or stderr.decode()
+                return_code = run_proc.returncode
+
+        elif language == "c":
+            env = os.environ.copy()
+            c_file = work_dir / "main.c"
+            with c_file.open('w') as f:
+                f.write(code)
+            
+            compile_proc = await asyncio.create_subprocess_exec(
+                'gcc', str(c_file), '-o', str(work_dir / 'main'),
+                cwd=work_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env
+            )
+            compile_stdout, compile_stderr = await compile_proc.communicate()
+            
+            if compile_proc.returncode != 0:
+                output = compile_stderr.decode() or "C compilation failed"
+            else:
+                run_proc = await asyncio.create_subprocess_exec(
+                    str(work_dir / 'main'),
+                    cwd=work_dir,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await run_proc.communicate()
+                output = stdout.decode() or stderr.decode()
+                return_code = run_proc.returncode
+
+        elif language == "cpp":
+            env = os.environ.copy()
+            cpp_file = work_dir / "main.cpp"
+            with cpp_file.open('w') as f:
+                f.write(code)
+            
+            compile_proc = await asyncio.create_subprocess_exec(
+                'g++', str(cpp_file), '-o', str(work_dir / 'main'),
+                cwd=work_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env
+            )
+            compile_stdout, compile_stderr = await compile_proc.communicate()
+            
+            if compile_proc.returncode != 0:
+                output = compile_stderr.decode() or "C++ compilation failed"
+            else:
+                run_proc = await asyncio.create_subprocess_exec(
+                    str(work_dir / 'main'),
+                    cwd=work_dir,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await run_proc.communicate()
+                output = stdout.decode() or stderr.decode()
+                return_code = run_proc.returncode
+
+        elif language == "csharp":
+            env = os.environ.copy()
+            csharp_file = os.path.join(work_dir, "Program.cs")
+            with open(csharp_file, "w") as f:
+                f.write(code)
+
+
+            compile_proc = await asyncio.create_subprocess_exec(
+                "mcs", "Program.cs",
+                cwd=work_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env
+            )
+            compile_stdout, compile_stderr = await compile_proc.communicate()
+    
+            if compile_proc.returncode != 0:
+                output = compile_stderr.decode() or "C# compilation failed"
+            else:
+                run_proc = await asyncio.create_subprocess_exec(
+                    "mono", "Program.exe",
+                    cwd=work_dir,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await run_proc.communicate()
+                output = stdout.decode() or stderr.decode()
+                return_code = run_proc.returncode
+
+        elif language == "zig":
+            env = os.environ.copy()
+            zig_file = work_dir / "main.zig"
+            with zig_file.open('w') as f:
+                f.write(code)
+            
+            proc = await asyncio.create_subprocess_exec(
+                'zig', 'run', str(zig_file),
+                cwd=work_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env
+            )
+            stdout, stderr = await proc.communicate()
+            output = stdout.decode() or stderr.decode()
+            return_code = proc.returncode
+
 
         return {
             "output": output,
             "files": output_files,
             "execution_id": execution_id,
-            "error": proc.returncode != 0 if language != "typescript" else False
+            "error": return_code != 0
         }
 
     except Exception as e:

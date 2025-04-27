@@ -1869,36 +1869,66 @@ class Tags(commands.Cog):
                 return f'[error in math: {e}]'
         
         @self.formatter.register('python')
+        @self.formatter.register('py')
         async def _python(ctx, code, **kwargs):
             return await self.execute_language(ctx, 'python', code, **kwargs)
 
-        @self.formatter.register('py')
-        async def _py(ctx, code, **kwargs):
-            return await _python(ctx, code, **kwargs)
-
         @self.formatter.register('bash')
+        @self.formatter.register('sh')
         async def _bash(ctx, code, **kwargs):
             return await self.execute_language(ctx, 'bash', code, **kwargs)
 
-        @self.formatter.register('sh')
-        async def _sh(ctx, code, **kwargs):
-            return await _bash(ctx, code, **kwargs)
-
         @self.formatter.register('javascript')
+        @self.formatter.register('js')
+        @self.formatter.register('node')
         async def _javascript(ctx, code, **kwargs):
             return await self.execute_language(ctx, 'javascript', code, **kwargs)
 
-        @self.formatter.register('js')
-        async def _js(ctx, code, **kwargs):
-            return await _javascript(ctx, code, **kwargs)
-
         @self.formatter.register('typescript')
+        @self.formatter.register('ts')
         async def _typescript(ctx, code, **kwargs):
             return await self.execute_language(ctx, 'typescript', code, **kwargs)
+        
+        @self.formatter.register('php')
+        async def _php(ctx, code, **kwargs):
+            return await self.execute_language(ctx, 'php', code, **kwargs)
+        
+        @self.formatter.register('ruby')
+        @self.formatter.register('rb')
+        async def _ruby(ctx, code, **kwargs):
+            return await self.execute_language(ctx, 'ruby', code, **kwargs)
+        
+        @self.formatter.register('lua')
+        async def _lua(ctx, code, **kwargs):
+            return await self.execute_language(ctx, 'lua', code, **kwargs)
 
-        @self.formatter.register('ts')
-        async def _ts(ctx, code, **kwargs):
-            return await _typescript(ctx, code, **kwargs)
+        @self.formatter.register('go')
+        async def _go(ctx, code, **kwargs):
+            return await self.execute_language(ctx, 'go', code, **kwargs)
+
+        @self.formatter.register('rust')
+        @self.formatter.register('rs')
+        async def _rust(ctx, code, **kwargs):
+            return await self.execute_language(ctx, 'rust', code, **kwargs)
+
+        @self.formatter.register('c')
+        async def _c(ctx, code, **kwargs):
+            return await self.execute_language(ctx, 'c', code, **kwargs)
+
+        @self.formatter.register('cpp')
+        @self.formatter.register('c++')
+        async def _cpp(ctx, code, **kwargs):
+            return await self.execute_language(ctx, 'cpp', code, **kwargs)
+
+        @self.formatter.register('csharp')
+        @self.formatter.register('cs')
+        @self.formatter.register('c#')
+        async def _csharp(ctx, code, **kwargs):
+            return await self.execute_language(ctx, 'csharp', code, **kwargs)
+
+        @self.formatter.register('zig')
+        async def _zig(ctx, code, **kwargs):
+            return await self.execute_language(ctx, 'zig', code, **kwargs)
         
         @self.formatter.register('user')
         async def _user(ctx, i, **kwargs):
