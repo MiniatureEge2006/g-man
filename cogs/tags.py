@@ -15,9 +15,265 @@ from pathlib import Path
 import subprocess
 import shlex
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta
 import random
 from io import BytesIO
+from urllib.parse import quote, unquote
+import base64
+import json
+
+
+
+class DiscordGenerator:
+    @staticmethod
+    def create_embed(source: Union[str, dict], **kwargs) -> Union[dict, discord.Embed]:
+        if isinstance(source, str):
+            try:
+                data = json.loads(source)
+                if kwargs:
+                    data.update(kwargs)
+                source = data
+            except json.JSONDecodeError:
+                params = DiscordGenerator._parse_kwargs(source)
+                params.update(kwargs)
+                return DiscordGenerator._build_embed(**params)
+        
+        if isinstance(source, dict):
+            if kwargs:
+                source.update(kwargs)
+            return DiscordGenerator._build_embed(**source)
+
+        raise ValueError("Invaild embed source")
+    
+    @staticmethod
+    def _build_embed(**kwargs) -> discord.Embed:
+        embed = discord.Embed(
+            title=kwargs.get('title'),
+            description=kwargs.get('description'),
+            color=DiscordGenerator.parse_color(kwargs.get('color'))
+        )
+
+        if any(k in kwargs for k in ['author', 'author_name']):
+            embed.set_author(
+                name=kwargs.get('author_name', kwargs.get('author')),
+                url=kwargs.get('author_url'),
+                icon_url=kwargs.get('author_icon')
+            )
+        
+        if any(k in kwargs for k in ['footer', 'footer_text']):
+            embed.set_footer(
+                text=kwargs.get('footer_text', kwargs.get('footer')),
+                icon_url=kwargs.get('footer_icon')
+            )
+        
+        if 'thumbnail' in kwargs:
+            embed.set_thumbnail(url=kwargs['thumbnail'])
+        if 'image' in kwargs:
+            embed.set_image(url=kwargs['image'])
+        
+        for i in range(1, 10):
+            if f'field{i}_name' in kwargs:
+                embed.add_field(
+                    name=kwargs[f'field{i}_name'],
+                    value=kwargs.get(f'field{i}_value', ''),
+                    inline=kwargs.get(f'field{i}_inline', 'false').lower() == 'true'
+                )
+        
+        return embed
+    
+    @staticmethod
+    def create_view(source: Union[str, list, dict], **kwargs) -> Union[dict, discord.ui.View]:
+        if isinstance(source, discord.ui.View):
+            return source
+            
+        if isinstance(source, str):
+            try:
+                data = json.loads(source)
+                return DiscordGenerator._build_view(data)
+            except json.JSONDecodeError:
+                pass
+        
+        if isinstance(source, (list, tuple)):
+            return DiscordGenerator._build_view({"components": source})
+        
+        if isinstance(source, dict):
+            return DiscordGenerator._build_view(source)
+        
+        raise ValueError("Invalid view source")
+    
+    @staticmethod
+    def _build_view(data: dict) -> discord.ui.View:
+        view = discord.ui.View(timeout=None)
+        
+        for row in data.get('components', []):
+            action_row = []
+            
+            for component in row.get('components', []):
+                if component['type'] == 2:
+                    action_row.append(
+                        DiscordGenerator.create_button(component)
+                    )
+                elif component['type'] == 3:
+                    action_row.append(
+                        DiscordGenerator.create_select(component)
+                    )
+            
+            if action_row:
+                view.add_item(*action_row)
+        
+        return view
+    
+    @staticmethod
+    def create_select(source: Union[str, dict], **kwargs) -> discord.ui.Select:
+        if isinstance(source, str):
+            try:
+                data = json.loads(source)
+            except json.JSONDecodeError:
+                data = DiscordGenerator._parse_select_args(source)
+        else:
+            data = source.copy() if isinstance(source, dict) else {}
+
+
+        data.update(kwargs)
+
+
+        options = []
+        if 'options' in data:
+            if isinstance(data['options'], list):
+                for opt in data['options']:
+                    if isinstance(opt, dict):
+                        options.append(discord.SelectOption(
+                            label=str(opt.get('label', 'Option')),
+                            value=str(opt.get('value', opt.get('label', 'option'))),
+                            description=opt.get('description'),
+                            emoji=opt.get('emoji'),
+                            default=opt.get('default', False)
+                        ))
+        else:
+            i = 1
+            while f'option{i}_label' in data:
+                options.append(discord.SelectOption(
+                    label=str(data[f'option{i}_label']),
+                    value=str(data.get(f'option{i}_value', data[f'option{i}_label'])),
+                    description=data.get(f'option{i}_desc'),
+                    emoji=data.get(f'option{i}_emoji'),
+                    default=data.get(f'option{i}_default', False)
+                ))
+                i += 1
+
+
+        if not options:
+            options.append(discord.SelectOption(label='Default', value='default'))
+
+
+        return discord.ui.Select(
+            placeholder=str(data.get('placeholder', 'Select...')),
+            min_values=int(data.get('min_values', 1)),
+            max_values=int(data.get('max_values', 1)),
+            options=options,
+            custom_id=data.get('custom_id', f"select_{random.randint(1000,9999)}"),
+            disabled=data.get('disabled', False)
+        )
+
+    @staticmethod
+    def _parse_select_args(args_str: str) -> dict:
+        params = {}
+        for pair in shlex.split(args_str):
+            if '=' in pair:
+                key, value = pair.split('=', 1)
+                params[key.strip().lower()] = value.strip()
+        return params
+
+
+    @staticmethod
+    def create_button(data: dict) -> discord.ui.Button:
+        if isinstance(data, discord.ui.Button):
+            return data
+            
+        return discord.ui.Button(
+            style=DiscordGenerator.parse_button_style(data.get('style', 'primary')),
+            label=str(data.get('label', 'Button')),
+            emoji=data.get('emoji'),
+            custom_id=data.get('id'),
+            url=data.get('url'),
+            disabled=data.get('disabled', False)
+        )
+    
+    
+    @staticmethod
+    def parse_color(color):
+        if color is None:
+            return discord.Color.random()
+        if isinstance(color, discord.Color):
+            return color
+        if isinstance(color, int):
+            return discord.Color(color)
+        return discord.Color.from_str(color)
+    
+    @staticmethod
+    def parse_button_style(style):
+        styles = {
+            'primary': discord.ButtonStyle.primary,
+            'secondary': discord.ButtonStyle.secondary,
+            'success': discord.ButtonStyle.success,
+            'danger': discord.ButtonStyle.danger,
+            'link': discord.ButtonStyle.link
+        }
+        return styles.get(style.lower(), discord.ButtonStyle.primary)
+    
+    @staticmethod
+    def _parse_kwargs(args_str: str, defaults: dict = None) -> dict:
+        if isinstance(args_str, (dict, list, tuple)):
+            return args_str
+            
+        args = []
+        kwargs = {}
+        current = []
+        in_quote = False
+        quote_char = None
+        escaped = False
+
+        for char in args_str:
+            if escaped:
+                current.append(char)
+                escaped = False
+            elif char == '\\':
+                escaped = True
+            elif char in ('"', "'"):
+                if in_quote and char == quote_char:
+                    in_quote = False
+                    quote_char = None
+                else:
+                    in_quote = True
+                    quote_char = char
+            elif char == ' ' and not in_quote:
+                if current:
+                    token = ''.join(current)
+                    if '=' in token and not token.startswith(('http://', 'https://')):
+                        key, val = token.split('=', 1)
+                        kwargs[key.strip()] = val.strip()
+                    else:
+                        args.append(token.strip())
+                    current = []
+            else:
+                current.append(char)
+
+        if current:
+            token = ''.join(current)
+            if '=' in token and not token.startswith(('http://', 'https://')):
+                key, val = token.split('=', 1)
+                kwargs[key.strip()] = val.strip()
+            else:
+                args.append(token.strip())
+
+        if defaults:
+            for i, (name, default) in enumerate(defaults.items()):
+                if i < len(args):
+                    kwargs[name] = args[i]
+                elif name not in kwargs:
+                    kwargs[name] = default
+
+        return kwargs
 
 
 class MediaProcessor:
@@ -1124,41 +1380,81 @@ class MediaProcessor:
 class TagFormatter:
     def __init__(self):
         self.functions: Dict[str, Callable] = {}
+        self._component_tags = {'embed', 'button', 'view', 'select'}
     
     def register(self, name: str):
         def decorator(func: Callable):
+            if any(comp in func.__name__ for comp in self._component_tags):
+                self._component_tags.add(name)
             self.functions[name] = func
             return func
         return decorator
     
-    async def format(self, content: str, ctx: commands.Context, **kwargs) -> str:
-        async def process_chunk(chunk: str) -> str:
-            if not chunk.startswith('{') or not chunk.endswith('}'):
-                return chunk
-            
-            inner = chunk[1:-1]
-            parts = inner.split(':', 1)
-            name = parts[0].strip()
+    async def format(self, content: str, ctx: commands.Context, **kwargs) -> tuple[str, list[discord.Embed], discord.ui.View | None]:
+        text_parts = []
+        embeds = []
+        view = None
         
-            if name in self.functions:
-                try:
-                    args = parts[1] if len(parts) > 1 else ''
-                    processed_args = await self.format(args, ctx, **kwargs)
-                    func = self.functions[name]
-                    result = func(ctx, processed_args, **kwargs)
-                    if asyncio.iscoroutine(result):
-                        result = await result
-                    return str(result)
-                except Exception:
-                    return chunk
-            return chunk
+        for chunk in self._split_chunks(content):
+            if chunk.startswith('{') and chunk.endswith('}'):
+                result = await self._process_tag(chunk, ctx, **kwargs)
+                text, new_embeds, new_view = self._normalize_result(result)
+                
+                text_parts.append(text)
+                embeds.extend(new_embeds)
+                if new_view:
+                    view = view or discord.ui.View(timeout=None)
+                    for item in new_view.children:
+                        view.add_item(item)
+            else:
+                text_parts.append(chunk)
+        
+        return ''.join(text_parts), embeds, view if view and view.children else None
 
+    async def _process_tag(self, tag: str, ctx: commands.Context, **kwargs):
+        inner = tag[1:-1].strip()
+        parts = inner.split(':', 1)
+        name = parts[0].strip()
+            
+        if name not in self.functions:
+            return tag
 
+        try:
+            args = parts[1] if len(parts) > 1 else ''
+            func = self.functions[name]
+                
+
+            if name in self._component_tags:
+                result = func(ctx, args, **kwargs)
+            else:
+                arg_text, _, _ = await self.format(args, ctx, **kwargs)
+                result = func(ctx, arg_text.strip(), **kwargs)
+                
+            return await result if asyncio.iscoroutine(result) else result
+                
+        except Exception as e:
+            return f"[Tag Error: {str(e)}]"
+
+    def _normalize_result(self, result) -> tuple[str, list[discord.Embed], discord.ui.View | None]:
+        if isinstance(result, discord.Embed):
+            return ("", [result], None)
+        elif isinstance(result, discord.ui.Item):
+            view = discord.ui.View(timeout=None)
+            view.add_item(result)
+            return ("", [], view)
+        elif isinstance(result, discord.ui.View):
+            return ("", [], result)
+        elif isinstance(result, tuple) and len(result) == 3:
+            return result
+        else:
+            return (str(result), [], None)
+
+    def _split_chunks(self, content: str) -> list[str]:
         chunks = []
         pos = 0
         depth = 0
         start = 0
-    
+
         for i, c in enumerate(content):
             if c == '{':
                 if depth == 0:
@@ -1171,20 +1467,10 @@ class TagFormatter:
                 if depth == 0:
                     chunks.append(content[start:i+1])
                     pos = i + 1
-    
 
         if pos < len(content):
             chunks.append(content[pos:])
-    
-
-        processed_chunks = []
-        for chunk in chunks:
-            if chunk.startswith('{') and chunk.endswith('}'):
-                processed_chunks.append(await process_chunk(chunk))
-            else:
-                processed_chunks.append(chunk)
-        
-        return ''.join(processed_chunks)
+        return chunks
     
     async def resolve_user(self, ctx, input_str: str) -> Union[discord.User, discord.Member]:
         input_str = input_str.strip()
@@ -1357,6 +1643,15 @@ class Tags(commands.Cog):
                 * Example: `{eval:Hello {user}!}`
             """
             return await self.process_tags(ctx, val, kwargs.get('args', ''))
+        
+        @self.formatter.register('ignore')
+        async def _ignore(ctx, text, **kwargs):
+            """
+            ### {ignore:text}
+                * Returns the text exactly as provided, without evaluating any nested tags.
+                * Example: `{ignore:{user}}` -> "{user}"
+            """
+            return text
             
         @self.formatter.register('args')
         def args(ctx, _, **kwargs):
@@ -1377,12 +1672,10 @@ class Tags(commands.Cog):
             args_string = kwargs.get('args', '')
             args_list = args_string.split()
 
-            processed_input = await ctx.cog.formatter.format(i, ctx, **kwargs)
-
             try:
-                index = int(processed_input.strip())
+                index = int(str(i).strip())
             except ValueError:
-                return f"[arg error: invalid index `{processed_input.strip()}`]"
+                return f"[arg error: invalid index `{i}`]"
             
             if 0 <= index < len(args_list):
                 return args_list[index]
@@ -1405,7 +1698,9 @@ class Tags(commands.Cog):
                 * Returns `value` if it exists, otherwise returns `fallback`.
                 * Example: `{default:{arg:0}|No argument provided}`
             """
-            return val if val else fb
+            val_str = str(val) if val is not None else ""
+            fb_str = str(fb) if fb is not None else ""
+            return val_str if val_str else fb_str
         
         @self.formatter.register('newline')
         def _newline(ctx, _, **kwargs):
@@ -1425,7 +1720,7 @@ class Tags(commands.Cog):
                 * Example: `{substring:Hello World|6|11}` -> "World"
             """
             try:
-                processed_input = await ctx.cog.formatter.format(args_str, ctx, **kwargs)
+                processed_input = str(args_str)
 
                 if '|' in processed_input:
                     parts = [p.strip() for p in processed_input.split('|') if p.strip()]
@@ -1482,7 +1777,7 @@ class Tags(commands.Cog):
                 * Example: `{replace:Hello|e|a}` -> "Hallo
             """
             try:
-                processed_input = await ctx.cog.formatter.format(args_str, ctx, **kwargs)
+                processed_input = str(args_str)
                 
                 if '|' in processed_input:
                     parts = [p.strip() for p in processed_input.split('|')]
@@ -1549,6 +1844,170 @@ class Tags(commands.Cog):
             except Exception:
                 return args_str
         
+        @self.formatter.register('timestamp')
+        async def _timestamp(ctx, args_str="", **kwargs):
+            """
+            ### {timestamp:format|offset}
+                * Returns a formatted timestamp.
+                * Format options: t (short time), T (long time), d (short date), D (long date), f (short datetime), F (long datetime), R (relative time)
+                * Offset can be + or - hours (e.g. +2, -5.5)
+                * Example: `{timestamp:F}` -> "Monday, June 20, 2022 at 12:00 PM"
+                * Example: `{timestamp:R|+2}` -> "in 2 hours"
+            """
+            try:
+                now = datetime.now()
+                format_code = "f"
+                processed = str(args_str)
+                if processed:
+                    parts = processed.split("|")
+                    if parts[0].strip():
+                        format_code = parts[0].strip()
+            
+                    if len(parts) > 1 and parts[1].strip():
+                        offset = parts[1].strip()
+                        try:
+                            hours = float(offset)
+                            now = now + timedelta(hours=hours)
+                        except ValueError:
+                            pass
+        
+                if format_code.lower() == "unix":
+                    return str(int(now.timestamp()))
+        
+                if format_code.lower() == "iso":
+                    return now.isoformat()
+        
+                formats = {
+                    "t": "%-I:%M %p",
+                    "T": "%-I:%M:%S %p",
+                    "d": "%m/%d/%Y",
+                    "D": "%B %d, %Y",
+                    "f": "%B %d, %Y at %-I:%M %p",
+                    "F": "%A, %B %d, %Y at %-I:%M %p",
+                    "R": "R"
+                }
+        
+                fmt = formats.get(format_code, "%B %d, %Y at %-I:%M %p")
+        
+                if format_code == "R":
+                    return f"<t:{int(now.timestamp())}:R>"
+                return f"<t:{int(now.timestamp())}:{format_code}>"
+            except Exception:
+                return "[timestamp error]"
+        
+        @self.formatter.register('urlencode')
+        async def _urlencode(ctx, text, **kwargs):
+            """
+            ### {urlencode:text}
+                * URL-encodes the given text.
+                * Example: `{urlencode:hello world}` -> "hello%20world"
+            """
+            try:
+                processed = str(text)
+                return quote(processed)
+            except Exception:
+                return text
+        
+        @self.formatter.register('urldecode')
+        async def _urldecode(ctx, text, **kwargs):
+            """
+            ### {urldecode:text}
+                * URL-decodes the given text.
+                * Example: `{urldecode:hello%20world}` -> "hello world"
+            """
+            try:
+                processed = str(text)
+                return unquote(processed)
+            except Exception:
+                return text
+        
+        @self.formatter.register('base64encode')
+        async def _base64encode(ctx, text, **kwargs):
+            """
+            ### {base64encode:text}
+                * Base64 encodes the given text.
+                * Example: `{base64encode:hello}` -> "aGVsbG8="
+            """
+            try:
+                processed = str(text)
+                return base64.b64encode(processed.encode()).decode()
+            except Exception:
+                return "[base64 error]"
+        
+        @self.formatter.register('base64decode')
+        async def _base64decode(ctx, text, **kwargs):
+            """
+            ### {base64decode:text}
+                * Base64 decodes the given text.
+                * Example: `{base64decode:aGVsbG8=}` -> "hello"
+            """
+            try:
+                processed = str(text)
+                return base64.b64decode(processed.encode()).decode()
+            except Exception:
+                return "[base64 error]"
+        
+        @self.formatter.register('hex')
+        async def _hex(ctx, args_str, **kwargs):
+            """
+            ### {hex:encode|text} or {hex:decode|text}
+                * Hex encodes or decodes the given text.
+                * Example: `{hex:encode|hello}` -> "68656c6c6f"
+                * Example: `{hex:decode|68656c6c6f}` -> "hello"
+            """
+            try:
+                processed = str(args_str)
+                mode, text = processed.split("|", 1)
+                mode = mode.strip().lower()
+                
+                if mode == "encode":
+                    return text.encode().hex()
+                elif mode == "decode":
+                    return bytes.fromhex(text).decode()
+                else:
+                    return "[hex error: invalid mode]"
+            except Exception:
+                return "[hex error]"
+        
+        @self.formatter.register('countdown')
+        async def _countdown(ctx, args_str, **kwargs):
+            """
+            ### {countdown:target_time}
+                * Creates a countdown to the specified time.
+                * Format: YYYY-MM-DD HH:MM:SS or timestamp
+                * Example: `{countdown:2025-01-01 00:00:00}`
+            """
+            try:
+                processed = str(args_str)
+                
+                try:
+                    target = datetime.fromtimestamp(float(processed))
+                except ValueError:
+                    target = datetime.strptime(processed, "%Y-%m-%d %H:%M:%S")
+                
+                now = datetime.now()
+                if target < now:
+                    return "The target time has already passed."
+                
+                delta = target - now
+                days = delta.days
+                hours, remainder = divmod(delta.seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                
+                parts = []
+                if days > 0:
+                    parts.append(f"{days} day{'s' if days != 1 else ''}")
+                if hours > 0:
+                    parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
+                if minutes > 0:
+                    parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
+                if seconds > 0 or not parts:
+                    parts.append(f"{seconds} second{'s' if seconds != 1 else ''}")
+                
+                return ", ".join(parts)
+            except Exception:
+                return "[countdown error]"
+        
         @self.formatter.register('reverse')
         async def _reverse(ctx, text, **kwargs):
             """
@@ -1557,7 +2016,7 @@ class Tags(commands.Cog):
                 * Example: `{reverse:hello}` -> "olleh"
             """
             try:
-                processed_text = await ctx.cog.formatter.format(text, ctx, **kwargs)
+                processed_text = str(text)
                 return processed_text[::-1]
             except Exception:
                 return text
@@ -1586,8 +2045,8 @@ class Tags(commands.Cog):
                     else_raw = val
 
 
-            left  = await self.formatter.format(left_raw,  ctx, **kwargs)
-            right = await self.formatter.format(right_raw, ctx, **kwargs)
+            left  = str(left_raw)
+            right = str(right_raw)
 
 
             ops: dict[str, Callable[[str,str], bool]] = {
@@ -1617,7 +2076,7 @@ class Tags(commands.Cog):
                 result = not result
 
             chosen_raw = then_raw if result else else_raw
-            return await self.formatter.format(chosen_raw, ctx, **kwargs)
+            return chosen_raw
         
         @self.formatter.register('range')
         async def _range(ctx, args_str, **kwargs):
@@ -1627,7 +2086,7 @@ class Tags(commands.Cog):
                 * Example: `{random:1|6}` -> "5"
             """
             try:
-                processed = await ctx.cog.formatter.format(args_str, ctx, **kwargs)
+                processed = str(args_str)
                 if '|' in processed:
                     min_val, max_val = processed.split('|', 1)
                 else:
@@ -1651,7 +2110,7 @@ class Tags(commands.Cog):
                 * Example: `{dice:2d6+1}` -> Rolls 2 six-sided dice and adds 1
             """
             try:
-                processed = await ctx.cog.formatter.format(notation, ctx, **kwargs)
+                processed = str(notation)
                 parts = re.split(r'[d+-]', processed)
                 modifiers = re.findall(r'[+-]', processed)
         
@@ -1708,7 +2167,7 @@ class Tags(commands.Cog):
                     * `{choose:{user} rolled {dice:1d20}!|Try again!}`
             """
             try:
-                processed = await ctx.cog.formatter.format(options_str, ctx, **kwargs)
+                processed = str(options_str)
                 settings = {}
                 if 'sep=' in processed.lower():
                     parts = processed.rsplit('sep=', 1)
@@ -1790,34 +2249,34 @@ class Tags(commands.Cog):
                 * Returns the length of the text.
                 * Example: `{len:hello}` -> "5"
             """
-            return str(len(val))
+            return str(len(str(val)))
             
         @self.formatter.register('upper')
-        def upper(ctx, val, **kwargs):
+        def _upper(ctx, val, **kwargs):
             """
             ### {upper:text}
                 * Converts text to uppercase.
                 * Example: `{upper:hello}` -> "HELLO"
             """
-            return val.upper()
+            return str(val).upper()
             
         @self.formatter.register('lower')
-        def lower(ctx, val, **kwargs):
+        def _lower(ctx, val, **kwargs):
             """
             ### {lower:text}
                 * Converts text to lowercase.
                 * Example: `{lower:HELLO}` -> "hello"
             """
-            return val.lower()
+            return str(val).lower()
             
         @self.formatter.register('capitalize')
-        def capitalize(ctx, val, **kwargs):
+        def _capitalize(ctx, val, **kwargs):
             """
             ### {capitalize:text}
                 * Capitalizes the first letter.
                 * Example: `{capitalize:hello}` -> "Hello"
             """
-            return val.capitalize()
+            return str(val).capitalize()
             
         @self.formatter.register('set')
         async def _set(ctx, args_str, **kwargs):
@@ -1829,7 +2288,7 @@ class Tags(commands.Cog):
             if not args_str:
                 return "[error: missing name|value]"
             
-            processed_input = await ctx.cog.formatter.format(args_str, ctx, **kwargs)
+            processed_input = str(args_str)
 
             parts = processed_input.split('|', 1)
             if len(parts) < 2:
@@ -1849,24 +2308,25 @@ class Tags(commands.Cog):
                 * Example: `Hello {get:name}!`
             """
             name = name.strip()
-            processed_name = await ctx.cog.formatter.format(name, ctx, **kwargs)
+            processed_name = str(name)
             variables = ctx.cog._variables.get(ctx.message.id, {})
             value = variables.get(processed_name, "")
-            return await ctx.cog.formatter.format(value, ctx, **kwargs)
+            return str(value)
             
         @self.formatter.register('math')
-        def math(ctx, expr, **kwargs):
+        def _math(ctx, expr, **kwargs):
             """
             ### {math:expression}
                 * Evaluates a mathematical expression.
                 * Example: `{math:5+3*2}` -> "11"
             """
-            if not expr:
-                return '0'
             try:
+                expr = str(expr)
+                if not expr:
+                    return '0'
                 return str(eval(expr, {"__builtins__": None}, {}))
             except Exception as e:
-                return f'[error in math: {e}]'
+                return f'[math error: {e}]'
         
         @self.formatter.register('python')
         @self.formatter.register('py')
@@ -1937,7 +2397,7 @@ class Tags(commands.Cog):
                 * Returns username of mentioned user or self.
                 * Example: `{user:@MiniatureEge2006}` -> "miniatureege2006"
             """
-            user = await self.formatter.resolve_user(ctx, await self.formatter.format(i, ctx, **kwargs))
+            user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
                 return user.name
             return user.name
@@ -1949,7 +2409,7 @@ class Tags(commands.Cog):
                 * Returns server nickname of mentioned user or self. (returns display name instead if not available)
                 * Example: `{nick:@MiniatureEge2006}` -> "Mini"
             """
-            user = await self.formatter.resolve_user(ctx, await self.formatter.format(i, ctx, **kwargs))
+            user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
                 return user.nick
             return user.display_name
@@ -1961,7 +2421,7 @@ class Tags(commands.Cog):
                 * Returns display name of mentioned user or self.
                 * Example: `{userdisplay:@MiniatureEge2006}` -> "MiniatureEge2006"
             """
-            user = await self.formatter.resolve_user(ctx, await self.formatter.format(i, ctx, **kwargs))
+            user = await self.formatter.resolve_user(ctx, i)
             return user.display_name
         
         @self.formatter.register('mention')
@@ -1971,7 +2431,7 @@ class Tags(commands.Cog):
                 * Mentions the user or self.
                 * Example: `{mention:@MiniatureEge2006}` -> "@MiniatureEge2006"
             """
-            user = await self.formatter.resolve_user(ctx, await ctx.cog.formatter.format(i, ctx, **kwargs))
+            user = await self.formatter.resolve_user(ctx, i)
             return user.mention
         
         @self.formatter.register('avatar')
@@ -1981,7 +2441,7 @@ class Tags(commands.Cog):
                 * Returns avatar URL. (display avatar, defaults to normal if not available)
                 * Example: `{avatar:@MiniatureEge2006}` -> URL
             """
-            user = await self.formatter.resolve_user(ctx, await ctx.cog.formatter.format(i, ctx, **kwargs))
+            user = await self.formatter.resolve_user(ctx, i)
             return str(user.display_avatar.url)
         
         @self.formatter.register('useravatar')
@@ -1991,7 +2451,7 @@ class Tags(commands.Cog):
                 * Returns avatar URL. (user avatar)
                 * Example: `{useravatar:@MiniatureEge2006}` -> URL
             """
-            user = await self.formatter.resolve_user(ctx, await ctx.cog.formatter.format(i, ctx, **kwargs))
+            user = await self.formatter.resolve_user(ctx, i)
             return str(user.avatar.url)
         
         @self.formatter.register('banner')
@@ -2001,7 +2461,7 @@ class Tags(commands.Cog):
                 * Returns banner URL. (display banner)
                 * Example: `{banner:@MiniatureEge2006}` -> URL
             """
-            user = await self.formatter.resolve_user(ctx, await ctx.cog.formatter.format(i, ctx, **kwargs))
+            user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
                 user = await ctx.bot.fetch_user(user.id)
                 return str(user.banner.url) or f"{user.name} does not have a banner."
@@ -2016,7 +2476,7 @@ class Tags(commands.Cog):
                 * Returns banner URL. (user banner)
                 * Example: `{userbanner:@MiniatureEge2006}` -> URL
             """
-            user = await self.formatter.resolve_user(ctx, await ctx.cog.formatter.format(i, ctx, **kwargs))
+            user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
                 user = await ctx.bot.fetch_user(user.id)
             if not user.banner:
@@ -2030,7 +2490,7 @@ class Tags(commands.Cog):
                 * Returns join date in server.
                 * Example: `{userjoindate:@MiniatureEge2006}` -> "2025-24-24 12:00:00 (April 24, 2025 at 12:00:00 PM)"
             """
-            user = await self.formatter.resolve_user(ctx, await ctx.cog.formatter.format(i, ctx, **kwargs))
+            user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
                 return user.joined_at.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)') if user.joined_at else "Join date not available."
             return "User is not in a server."
@@ -2042,7 +2502,7 @@ class Tags(commands.Cog):
                 * Returns user status.
                 * Example: `{userstatus:@MiniatureEge2006}` -> "Online"
             """
-            user = await self.formatter.resolve_user(ctx, await ctx.cog.formatter.format(i, ctx, **kwargs))
+            user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
                 return str(user.status.value).capitalize()
             return "User is not in a server."
@@ -2054,7 +2514,7 @@ class Tags(commands.Cog):
                 * Returns custom status if set.
                 * Example: `{usercustomstatus:@MiniatureEge2006}` -> "Playing Roblox"
             """
-            user = await self.formatter.resolve_user(ctx, await ctx.cog.formatter.format(i, ctx, **kwargs))
+            user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
                 custom_status = user.activity
                 if custom_status:
@@ -2082,7 +2542,7 @@ class Tags(commands.Cog):
                 * Returns user badges.
                 * Example: `{userbadges:@MiniatureEge2006}` -> "Active Developer, Early Verified Bot Developer"
             """
-            user = await self.formatter.resolve_user(ctx, await ctx.cog.formatter.format(i, ctx, **kwargs))
+            user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
                 badges = user.public_flags
             elif isinstance(user, discord.User):
@@ -2132,7 +2592,12 @@ class Tags(commands.Cog):
                 * Returns current channel name.
                 * Example: `{channel}` -> "general"
             """
-            return ctx.channel.name if ctx.channel else "DMs"
+            if isinstance(ctx.channel, discord.DMChannel):
+                return "DMs"
+            elif isinstance(ctx.channel, discord.TextChannel):
+                return ctx.channel.name
+            else:
+                return str(ctx.channel)
         
         @self.formatter.register('guild')
         async def _guild(ctx, i, **kwargs):
@@ -2141,7 +2606,162 @@ class Tags(commands.Cog):
                 * Returns current server name.
                 * Example: `{guild}` -> "G-Server"
             """
-            return ctx.guild.name if ctx.guild else "DM"
+            if ctx.guild:
+                return ctx.guild.name
+            elif isinstance(ctx.guild, discord.DMChannel):
+                return "Direct Messages"
+            else:
+                return "Private Channel"
+        
+        @self.formatter.register('embed')
+        async def _embed(ctx, args_str, **kwargs):
+            """
+            ### {embed:[title] [description] [color] [field=value...]}
+            Flexible embed builder. (accepts both JSON and builder syntax)
+            JSON Example: {embed:{"title":"Hello"}}
+            Builder Example: {embed:title=Hello color=blue}
+            """
+            try:
+                processed_content, _, _ = await  ctx.cog.formatter.format(args_str, ctx, **kwargs)
+                if processed_content.strip().startswith(('{', '[')):
+                    try:
+                        embed_data = json.loads(processed_content)
+                        return DiscordGenerator.create_embed(embed_data)
+                    except json.JSONDecodeError:
+                        pass
+                params = DiscordGenerator._parse_kwargs(processed_content)
+                return DiscordGenerator.create_embed(params)
+            except Exception as e:
+                return f"[Embed Error: {str(e)}]"
+            
+        @self.formatter.register('button')
+        async def _button(ctx, args_str, **kwargs):
+            """
+            ### {button:[label] [style] [id/url] [emoji] [disabled]}
+            Flexible button builder (JSON or builder syntax)
+            JSON Example: {button:{"label":"Click","style":"primary"}}
+            Builder Example: {button:label=Click style=primary}
+            """
+            try:
+                processed_args, _, _ = await ctx.cog.formatter.format(args_str, ctx, **kwargs)
+                
+
+                if processed_args.strip().startswith('{'):
+                    try:
+                        button = DiscordGenerator.create_button(json.loads(processed_args))
+                        return ("", [], discord.ui.View().add_item(button))
+                    except json.JSONDecodeError:
+                        pass
+                
+
+                params = {'label': 'Button', 'style': 'primary'}
+                for pair in shlex.split(processed_args):
+                    if '=' in pair:
+                        key, val = pair.split('=', 1)
+                        params[key.lower()] = val
+                    elif not params.get('label'):
+                        params['label'] = pair
+                
+                button = DiscordGenerator.create_button(params)
+                return ("", [], discord.ui.View().add_item(button))
+            
+            except Exception as e:
+                return (f"[Button Error: {str(e)}]", [], None)
+    
+
+        @self.formatter.register('view')
+        async def _view(ctx, args_str, **kwargs):
+            """
+            ### {view:row1|row2|...}
+            Create Discord View from components.
+            Accepts both JSON and builder syntax.
+            
+            JSON Example:
+            {view:[
+            {"type":1,"components":[{"type":2,"label":"Button","style":1}]},
+            {"type":1,"components":[{"type":3,"placeholder":"Select..."}]}
+            ]}
+            
+            Builder Example:
+            {view:{row:{button:Submit primary submit_btn}|{button:Cancel danger cancel_btn}}|{row:{select:placeholder=Choose... min=1 option1=A option2=B}}}
+            """
+            try:
+                view = discord.ui.View(timeout=None)
+                
+
+                processed_content, _, _ = await ctx.cog.formatter.format(args_str, ctx, **kwargs)
+                
+
+                if processed_content.strip().startswith('['):
+                    try:
+                        components = json.loads(processed_content)
+                        for component in components:
+                            if component.get('type') == 1:
+                                for item in component.get('components', []):
+                                    if item.get('type') == 2:
+                                        view.add_item(DiscordGenerator.create_button(item))
+                                    elif item.get('type') == 3:
+                                        view.add_item(DiscordGenerator.create_select(item))
+                        return ("", [], view) if view.children else ("[View Error: Empty JSON components]", [], None)
+                    except json.JSONDecodeError:
+                        pass
+                
+
+                for component_str in args_str.split('|'):
+                    component_str = component_str.strip()
+                    if not component_str:
+                        continue
+                        
+                    component = await ctx.cog.formatter.format(component_str, ctx, **kwargs)
+                    if isinstance(component, tuple):
+                        if component[2]:
+                            for item in component[2].children:
+                                view.add_item(item)
+                    elif isinstance(component, discord.ui.Item):
+                        view.add_item(component)
+                    elif isinstance(component, discord.ui.View):
+                        for item in component.children:
+                            view.add_item(item)
+                
+                return ("", [], view) if view.children else ("[View Error: No valid components]", [], None)
+            
+            except Exception as e:
+                return (f"[View Error: {str(e)}]", [], None)
+        
+        @self.formatter.register('select')
+        async def _select(ctx, args_str, **kwargs):
+            """
+            ### {select:placeholder|min|max|option1_label|option1_value|option1_desc|...}
+            Create select menu with options.
+            
+            JSON Example:
+            {select:{
+            "placeholder": "Choose",
+            "min": 1,
+            "options": [
+                {"label":"A","value":"a"},
+                {"label":"B","value":"b"}
+            ]
+            }}
+            
+            Builder Example:
+            {select:
+            placeholder=Select Role
+            min=1 max=1
+            option1_label=Admin option1_value=role_admin
+            option2_label=Member option2_value=role_member
+            }
+            """
+            try:
+                processed_content, _, _ = await ctx.cog.formatter.format(args_str, ctx, **kwargs)
+                
+
+                select = DiscordGenerator.create_select(processed_content)
+                view = discord.ui.View(timeout=None)
+                view.add_item(select)
+                return ("", [], view)
+            except Exception as e:
+                return (f"[Select Error: {str(e)}]", [], None)
 
     
     def parse_args(self, raw: str) -> list[str]:
@@ -2169,7 +2789,7 @@ class Tags(commands.Cog):
             parts.append(''.join(current).strip())
         return parts
 
-    async def process_tags(self, ctx: commands.Context, content: str, args: str = "") -> str:
+    async def process_tags(self, ctx: commands.Context, content: str, args: str = "") -> tuple[str, list, discord.ui.View]:
         return await self.formatter.format(content, ctx, args=args)
     
     @commands.Cog.listener()
@@ -2198,9 +2818,16 @@ class Tags(commands.Cog):
                 WHERE name = $1 AND (guild_id = $2 OR user_id = $3)""",
                 name, ctx.guild.id if ctx.guild else None, ctx.author.id
             )
-            content = await self.process_tags(ctx, tag['content'], args)
-            if content.strip():
-                await ctx.send(content[:2000])
+            text, embeds, view = await self.formatter.format(tag['content'], ctx, args=args)
+            
+            try:
+                await ctx.send(
+                    content=text[:2000] if text else None,
+                    embeds=embeds[:10],
+                    view=view if view and view.children else None
+                )
+            except discord.HTTPException as e:
+                await ctx.send(f"Failed to send tag: {e}")
     
     @tag.command(name="show", description="Show a tag.", with_app_command=True, aliases=["fetch"])
     @app_commands.describe(name="The tag name.", args="The tag arguments, if any.")
@@ -2223,9 +2850,16 @@ class Tags(commands.Cog):
                 WHERE name = $1 AND (guild_id = $2 OR user_id = $3)""",
                 name, ctx.guild.id if ctx.guild else None, ctx.author.id
             )
-            content = await self.process_tags(ctx, tag['content'], args)
-            if content.strip():
-                await ctx.send(content[:2000])
+            text, embeds, view = await self.formatter.format(tag['content'], ctx, args=args)
+            
+            try:
+                await ctx.send(
+                    content=text[:2000] if text else None,
+                    embeds=embeds[:10],
+                    view=view if view and view.children else None
+                )
+            except discord.HTTPException as e:
+                await ctx.send(f"Failed to send tag: {e}")
     
     @tag.command(name="create", description="Create a tag.", with_app_command=True, aliases=["add"])
     @app_commands.describe(name="The tag name.", content="The tag content.", personal="Make this a personal tag.")
