@@ -21,6 +21,9 @@ from io import BytesIO
 from urllib.parse import quote, unquote
 import base64
 import json
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
+import math
 
 
 
@@ -361,24 +364,19 @@ class MediaProcessor:
             'text': {
                 'input_key': {'required': True, 'type': str},
                 'text': {'required': True, 'type': str},
-                'x': {'required': True, 'type': str},
-                'y': {'required': True, 'type': str},
-                'font_size': {'required': True, 'type': int},
-                'font_color': {'required': True, 'type': str},
-                'output_key': {'required': True, 'type': str}
-            },
-            'text2': {
-                'input_key': {'required': True, 'type': str},
-                'text': {'required': True, 'type': str},
-                'x': {'required': True, 'type': str},
-                'y': {'required': True, 'type': str},
-                'font_size': {'required': True, 'type': int},
-                'font_color': {'required': True, 'type': str},
-                'outline_color': {'required': True, 'type': str},
-                'outline_width': {'required': True, 'type': int},
-                'box_color': {'required': True, 'type': str},
-                'box_opacity': {'required': True, 'type': float},
-                'output_key': {'required': True, 'type': str}
+                'x': {'default': '0', 'type': str},
+                'y': {'default': '0', 'type': str},
+                'color': {'default': 'black', 'type': str},
+                'output_key': {'required': True, 'type': str},
+                'font_size': {'default': 64, 'type': int},
+                'font': {'default': 'arial.ttf', 'type': str},
+                'outline_color': {'required': False, 'type': str},
+                'outline_width': {'required': False, 'type': int},
+                'shadow_color': {'required': False, 'type': str},
+                'shadow_offset': {'required': False, 'type': int},
+                'shadow_blur': {'required': False, 'type': int},
+                'wrap_width': {'required': False, 'type': int},
+                'line_spacing': {'required': False, 'type': int}
             },
             'audioputreplace': {
                 'media_key': {'required': True, 'type': str},
@@ -396,6 +394,27 @@ class MediaProcessor:
                 'preserve_length': {'default': True, 'type': bool},
                 'loop_audio': {'default': False, 'type': bool},
                 'loop_media': {'default': False, 'type': bool}
+            },
+            'create': {
+                'media_key': {'required': True, 'type': str},
+                'width': {'required': True, 'type': str},
+                'height': {'required': True, 'type': str},
+                'color': {'default': 'black', 'type': str}
+            },
+            'fadein': {
+                'input_key': {'required': True, 'type': str},
+                'duration': {'required': True, 'type': str},
+                'color': {'default': '#000000', 'type': str},
+                'audio': {'default': True, 'type': bool},
+                'output_key': {'required': True, 'type': str}
+            },
+            'fadeout': {
+                'input_key': {'required': True, 'type': str},
+                'start_time': {'required': True, 'type': float},
+                'duration': {'required': True, 'type': str},
+                'color': {'default': '#000000', 'type': str},
+                'audio': {'default': True, 'type': bool},
+                'output_key': {'required': True, 'type': str}
             }
         }
         self.gscript_commands = {
@@ -412,10 +431,12 @@ class MediaProcessor:
             'speed': self._change_speed,
             'volume': self._adjust_volume,
             'overlay': self._overlay_media,
-            'text': self._overlay_text,
-            'text2': self._advanced_text,
+            'text': self._text,
             'audioputreplace': self._replace_audio,
-            'audioputmix': self._mix_audio
+            'audioputmix': self._mix_audio,
+            'create': self._create_image,
+            'fadein': self._fadein_media,
+            'fadeout': self._fadeout_media
         }
     
     def start_cleanup_task(self):
@@ -536,6 +557,255 @@ class MediaProcessor:
         return path
     
     
+    async def _get_media_dimensions(self, media_key: str) -> tuple[int, int]:
+        if media_key not in self.media_cache:
+            return (0, 0)
+        
+        file_path = self.media_cache[media_key]
+        
+
+        if Path(file_path).suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp'):
+            try:
+                with Image.open(file_path) as img:
+                    return img.size
+            except:
+                pass
+        
+
+        cmd = [
+            'ffprobe', '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream=width,height',
+            '-of', 'csv=p=0',
+            file_path
+        ]
+        
+        try:
+            success, output = await self._run_ffmpeg(cmd)
+            if success and ',' in output:
+                width, height = output.strip().split(',')
+                return (int(width), int(height))
+        except:
+            pass
+        
+        return (0, 0)
+
+    async def _resolve_dimension(self, dim_str: str, context_key: str = None) -> int:
+        try:
+            ctx_w, ctx_h = (0, 0)
+            if context_key:
+                dims = await self._get_media_dimensions(context_key) or (0, 0)
+                ctx_w, ctx_h = dims
+
+
+            var_map = {
+                'iw': ctx_w, 'w': ctx_w, 'W': ctx_w, 'width': ctx_w, 'main_w': ctx_w,
+                'ih': ctx_h, 'h': ctx_h, 'H': ctx_h, 'height': ctx_h, 'main_h': ctx_h,
+                'ow': 0, 'oh': 0, 'overlay_w': 0, 'overlay_h': 0, 'overlay_W': 0, 'overlay_H': 0
+            }
+
+
+            if 'overlay' in self.media_cache:
+                overlay_dims = await self._get_media_dimensions('overlay') or (0, 0)
+                var_map.update({
+                    'ow': overlay_dims[0], 'oW': overlay_dims[0],
+                    'oh': overlay_dims[1], 'oH': overlay_dims[1],
+                    'overlay_w': overlay_dims[0], 'overlay_W': overlay_dims[0],
+                    'overlay_h': overlay_dims[1], 'overlay_H': overlay_dims[1]
+                })
+
+
+            for var_lower, val in var_map.items():
+                for var in [var_lower, var_lower.upper()]:
+                    dim_str = dim_str.replace(var, str(val))
+
+
+            if '(' in dim_str:
+                mode, args_str = dim_str.split('(')[0].lower(), dim_str.split(')')[0].split('(')[1]
+                args = [await self._resolve_dimension(arg.strip(), context_key) for arg in args_str.split(',')]
+                
+                if mode == 'fill': return max(args)
+                if mode == 'contain': return min(args)
+                if mode == 'cover': 
+                    scale = max(args[0]/ctx_w, args[1]/ctx_h) if ctx_w and ctx_h else 1
+                    return int(scale * ctx_w)
+                if mode == 'stretch': return args[0]
+                if mode == 'center':
+                    return (ctx_w - args[0]) // 2 if any(c in dim_str.lower() for c in ['w','width']) else (ctx_h - args[0]) // 2
+
+
+            if '%' in dim_str:
+                base = ctx_w if any(c in dim_str.lower() for c in ['w','width']) else ctx_h
+                return int(base * float(dim_str.replace('%', '')) / 100)
+
+
+            return int(float(eval(dim_str, {'__builtins__': None}, {}))) if any(op in dim_str for op in '+-*/') else int(float(dim_str))
+        
+        except Exception:
+            return 0
+
+
+    
+    def _hex_to_rgb(self, hex_color: str) -> tuple:
+        hex_color = hex_color.lstrip('#')
+        if len(hex_color) == 6:
+            r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+            return r, g, b, 255
+        elif len(hex_color) == 8:
+            r, g, b, a = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4, 6))
+            return r, g, b, a
+        return 0, 0, 0, 255
+    
+
+    def _parse_color(self, color_str: str, size: tuple = None) -> Union[tuple, Image.Image]:
+        if color_str.startswith('#'):
+            return self._hex_to_rgb(color_str)
+        
+        if not color_str.startswith(('linear-gradient(', 'repeating-linear-gradient(', 'radial-gradient(', 'repeating-radial-gradient(')):
+            return self._parse_single_color(color_str)
+
+
+        is_repeating = color_str.startswith('repeating-')
+        base_str = color_str.replace('repeating-', '', 1)
+
+
+        body = base_str[base_str.index('(')+1 : base_str.rindex(')')]
+        parts = [p.strip().strip('"').strip("'") for p in body.split(',')]
+
+
+        angle = 90.0
+        colors_and_stops = []
+        for part in parts:
+            if part.endswith('deg'):
+                try:
+                    angle = float(part[:-3]) % 360
+                except ValueError:
+                    angle = 90.0
+                continue
+            if '%' in part:
+                tokens = part.split()
+                if len(tokens) == 2:
+                    col_str, pct_str = tokens
+                else:
+                    col_str, pct_str = part.rsplit('%', 1)
+                    col_str = col_str.strip()
+                    pct_str = pct_str.strip()
+                try:
+                    stop = float(pct_str.strip('%')) / 100.0
+                except ValueError:
+                    stop = None
+                colors_and_stops.append((col_str.strip(), stop))
+            else:
+                colors_and_stops.append((part, None))
+
+
+        n = len(colors_and_stops)
+        for i, (c, p) in enumerate(colors_and_stops):
+            if p is None:
+                colors_and_stops[i] = (c, i/(n-1) if n>1 else 0.0)
+
+
+        size_factor = colors_and_stops[-1][1] if colors_and_stops[-1][1] is not None else 1.0
+        width, height = size
+        cx, cy = width//2, height//2
+
+
+        if base_str.startswith('linear-gradient('):
+            rad = math.radians(angle)
+            dx, dy = math.sin(rad), -math.cos(rad)
+            pattern = max(width, height) * size_factor
+
+
+            x_coords, y_coords = np.meshgrid(np.arange(width), np.arange(height))
+            if pattern == 0:
+                pattern = 1
+            pos = (x_coords * dx + y_coords * dy) / pattern
+            if is_repeating:
+                pos = pos % 1.0
+            else:
+                pos = np.clip(pos, 0.0, 1.0)
+
+
+            gradient = np.zeros((height, width, 4), dtype=np.uint8)
+            for i in range(n-1):
+                start = colors_and_stops[i][1]
+                end   = colors_and_stops[i+1][1]
+                mask = (pos >= start) & (pos < end)
+                if not np.any(mask):
+                    continue
+                t = (pos[mask] - start) / (end - start)
+                c1 = np.array(self._parse_single_color(colors_and_stops[i][0]))
+                c2 = np.array(self._parse_single_color(colors_and_stops[i+1][0]))
+                gradient[mask] = (c1 + (c2 - c1) * t[..., None]).astype(np.uint8)
+
+            return Image.fromarray(gradient, 'RGBA')
+
+
+        img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        max_diag = math.hypot(cx, cy)
+        max_radius = max_diag * size_factor
+
+
+        stop_radii = [pct * max_radius for (_, pct) in colors_and_stops]
+        tile_r = stop_radii[-1]
+
+
+        def lerp(c1, c2, t_val):
+            return tuple(int(c1[i] + (c2[i] - c1[i]) * t_val) for i in range(4))
+
+
+        stop_colors = [self._parse_single_color(c) for (c, _) in colors_and_stops]
+
+        offset = 0.0
+        while True:
+            if offset > max_radius:
+                break
+            for i in range(n-1):
+                r0 = int(stop_radii[i] + offset)
+                r1 = int(stop_radii[i+1] + offset)
+                c0, c1 = stop_colors[i], stop_colors[i+1]
+                for r in range(r0, r1):
+                    t = (r - (stop_radii[i] + offset)) / (stop_radii[i+1] - stop_radii[i])
+                    color = lerp(c0, c1, t)
+                    bbox = [cx - r, cy - r, cx + r, cy + r]
+                    draw.ellipse(bbox, outline=color)
+            if not is_repeating:
+                break
+            offset += tile_r
+
+        return img
+
+
+
+    def _parse_single_color(self, color_str: str) -> tuple:
+        color_str = color_str.strip().lower()
+        if color_str in ('none', 'transparent'):
+            return (0, 0, 0, 0)
+        
+
+        if color_str.startswith('#'):
+            color_str = color_str.lstrip('#')
+            length = len(color_str)
+            if length == 3:  # RGB
+                return tuple(int(c*2, 16) for c in color_str) + (255,)
+            elif length == 4:  # RGBA
+                return tuple(int(c*2, 16) for c in color_str[:3]) + (int(color_str[3]*2, 16),)
+            elif length == 6:  # RRGGBB
+                return tuple(int(color_str[i:i+2], 16) for i in (0, 2, 4)) + (255,)
+            elif length == 8:  # RRGGBBAA
+                return tuple(int(color_str[i:i+2], 16) for i in (0, 2, 4, 6))
+        
+
+        return {
+            'white': (255, 255, 255, 255),
+            'black': (0, 0, 0, 255),
+            'red': (255, 0, 0, 255),
+            'green': (0, 255, 0, 255),
+            'blue': (0, 0, 255, 255)
+        }.get(color_str, (0, 0, 0, 255))
+
+
     def _parse_command_args(self, cmd: str, args: list[str]) -> dict:
         try:
             spec = self.command_specs[cmd]
@@ -630,8 +900,57 @@ class MediaProcessor:
         finally:
             self.active_processes.discard(proc)
     
+    async def _probe_media_info(self, path: Path) -> tuple:
+        probe_cmd = [
+            'ffprobe', '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream=width,height,duration',
+            '-of', 'json',
+            str(path)
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *probe_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await proc.communicate()
+        
+        try:
+            info = json.loads(stdout)
+            stream = info['streams'][0]
+            width = int(stream['width'])
+            height = int(stream['height'])
+            duration = float(stream.get('duration', 0))
+        except Exception:
+            try:
+                img = await asyncio.to_thread(Image.open, path)
+                width, height = img.size
+                duration = 0
+            except Exception:
+                width, height= 1920, 1080
+            duration = 0
+
+
+        audio_cmd = [
+            'ffprobe', '-v', 'error',
+            '-show_entries', 'stream=codec_type',
+            '-of', 'csv=p=0',
+            str(path)
+        ]
+        a_proc = await asyncio.create_subprocess_exec(
+            *audio_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        a_stdout, _ = await a_proc.communicate()
+        has_audio = b'audio' in a_stdout
+
+        return width, height, duration, has_audio
+    
     async def execute_media_script(self, script: str) -> list[str]:
         output_files = []
+        last_output_key = None
+        errors = []
         for line in script.splitlines():
             line = line.strip()
             if not line:
@@ -645,7 +964,8 @@ class MediaProcessor:
             args = parts[1:]
 
             if cmd not in self.gscript_commands:
-                return [f"Unknown command: {cmd}"]
+                errors.append(f"Unknown command: {cmd}")
+                break
 
             try:
                 parsed_args = self._parse_command_args(cmd, args)
@@ -653,13 +973,35 @@ class MediaProcessor:
                 result = await func(**parsed_args)
 
                 if isinstance(result, str) and result.startswith("Error"):
-                    return [result]
+                    errors.append(result)
+                    break
+                if 'output_key' in parsed_args:
+                    last_output_key = parsed_args['output_key']
                 if cmd == "render" and isinstance(result, str) and result.startswith("media://"):
                     output_files.append(result[8:])
             except Exception as e:
-                return [str(e) if 'result' not in locals() else f"Error in {cmd}: {result} ({str(e)})"]
-    
-        return output_files if output_files else ["Processing complete"]
+                errors.append(f"Error processing `{line}`: {str(e)}")
+        
+        if not errors:
+            try:
+                if not output_files and last_output_key:
+                    auto_result = await self._render_media(
+                        media_key=last_output_key, 
+                        extra_args=[]
+                    )
+                    if auto_result.startswith("media://"):
+                        output_files.append(auto_result[8:])
+                    else:
+                        errors.append(auto_result)
+            except Exception as e:
+                errors.append(f"Auto-render failed: {str(e)}")
+
+
+        if errors:
+            return errors
+        if output_files:
+            return output_files
+        return ["Processing complete (no output generated)"]
     
     async def _load_media(self, **kwargs) -> str:
         try:
@@ -881,9 +1223,11 @@ class MediaProcessor:
     
     async def _resize_media_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
-        width = kwargs['width']
-        height = kwargs['height']
+        width_expr = kwargs.get('width', 0)
+        height_expr = kwargs.get('height', 0)
         output_key = kwargs['output_key']
+        if not all([input_key, width_expr, height_expr, output_key]):
+            return "Error: Missing required parameters"
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
@@ -893,6 +1237,9 @@ class MediaProcessor:
         if suffix not in allowed_suffixes:
             return f"Error: {input_key} is not a video or image file."
         output_file = self._get_temp_path(input_path.suffix[1:])
+        
+        width = await self._resolve_dimension(width_expr, input_key)
+        height = await self._resolve_dimension(height_expr, input_key)
 
         cmd = [
             'ffmpeg', '-hide_banner',
@@ -916,8 +1263,8 @@ class MediaProcessor:
         input_key = kwargs['input_key']
         x = kwargs['x']
         y = kwargs['y']
-        width = kwargs['width']
-        height = kwargs['height']
+        width = await self._resolve_dimension(kwargs['width'], context_key=input_key)
+        height = await self._resolve_dimension(kwargs['height'], context_key=input_key)
         output_key = kwargs['output_key']
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
@@ -1140,109 +1487,226 @@ class MediaProcessor:
 
         base_path = Path(self.media_cache[base_key])
         overlay_path = Path(self.media_cache[overlay_key])
-        allowed_suffixes = ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv', '.gif', '.png', '.jpg', '.jpeg', '.webp')
-        base_suffix = base_path.suffix.lower()
-        overlay_suffix = overlay_path.suffix.lower()
-        if base_suffix not in allowed_suffixes or overlay_suffix not in allowed_suffixes:
-            return f"Error: Overlay requires video or image files."
+        is_base_image = base_path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp')
+        is_overlay_image = overlay_path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp')
         output_file = self._get_temp_path(base_path.suffix[1:])
+
+        x = await self._resolve_dimension(x, base_key)
+        y = await self._resolve_dimension(y, base_key)
 
         cmd = [
             'ffmpeg', '-hide_banner',
             '-i', base_path.as_posix(),
             '-i', overlay_path.as_posix(),
-            '-filter_complex', f'overlay={x}:{y}',
+            '-filter_complex', f'overlay={kwargs["x"]}:{kwargs["y"]}',
             '-y', output_file.as_posix()
         ]
-        success, error = await self._run_ffmpeg(cmd)
-        if success:
-            self.media_cache[output_key] = str(output_file)
-            return f"media://{output_file.as_posix()}"
-        return error
-    
-    async def _overlay_text(self, **kwargs) -> str:
-        try:
-            return await self._overlay_text_impl(**kwargs)
-        except ValueError as e:
-            return f"Text error: {str(e)}"
-    
-    async def _overlay_text_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        text = kwargs['text']
-        x = kwargs['x']
-        y = kwargs['y']
-        font_size = kwargs['font_size']
-        font_color = kwargs['font_color']
-        output_key = kwargs['output_key']
-        if input_key not in self.media_cache:
-            return f"Error: {input_key} not found"
-        
-        input_path = Path(self.media_cache[input_key])
-        suffix = input_path.suffix.lower()
-        allowed_suffixes = ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv', '.gif', '.png', '.jpg', '.jpeg', '.webp')
-        if suffix not in allowed_suffixes:
-            return f"Error: text requires video or image files."
-        output_file = self._get_temp_path(input_path.suffix[1:])
-        cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', input_path.as_posix(),
-            '-vf', f'drawtext=text=\'{text}\':fontfile=fonts/arial.ttf:x={x}:y={y}:fontsize={font_size}:fontcolor={font_color}',
-            '-y', output_file.as_posix()
-        ]
-        
-        success, error = await self._run_ffmpeg(cmd)
-        if not success:
-            return f"Text overlay failed: {error}"
-        self.media_cache[output_key] = str(output_file)
-        return f"media://{output_file}"
-    
-    async def _advanced_text(self, **kwargs) -> str:
-        try:
-            return await self._advanced_text_impl(**kwargs)
-        except ValueError as e:
-            return f"Advanced Text error: {str(e)}"
-    
-    async def _advanced_text_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        text = kwargs['text']
-        x = kwargs['x']
-        y = kwargs['y']
-        font_size = kwargs['font_size']
-        font_color = kwargs['font_color']
-        outline_color = kwargs['outline_color']
-        outline_width = kwargs['outline_width']
-        box_color = kwargs['box_color']
-        box_opacity = kwargs['box_opacity']
-        output_key = kwargs['output_key']
-        if input_key not in self.media_cache:
-            return f"Error: {input_key} not found"
-    
-        input_path = Path(self.media_cache[input_key])
-        output_file = self._get_temp_path(input_path.suffix[1:])
-        text = text.replace("'", "'\\''")
-        drawtext_filter = (
-            f"drawtext=text='{text}':"
-            f"fontfile=fonts/arial.ttf:"
-            f"x={x}:y={y}:"
-            f"fontsize={font_size}:"
-            f"fontcolor={font_color}:"
-            f"bordercolor={outline_color}:"
-            f"borderw={outline_width}:"
-            f"box=1:boxcolor={box_color}@{box_opacity}"
-        )
 
-        cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', input_path.as_posix(),
-            '-vf', drawtext_filter,
-            '-y', output_file.as_posix()
-        ]
+
+        if is_base_image and is_overlay_image:
+            cmd = [
+                'ffmpeg', '-hide_banner',
+                '-i', base_path.as_posix(),
+                '-i', overlay_path.as_posix(),
+                '-filter_complex', f'overlay={kwargs["x"]}:{kwargs["y"]}',
+                '-frames:v', '1',
+                '-update', '1',
+                '-y', output_file.as_posix()
+            ]
+
+
+        elif not is_base_image and is_overlay_image:
+            cmd[3:3] = ['-stream_loop', '-1']
+            cmd.append('-shortest')
         success, error = await self._run_ffmpeg(cmd)
         if success:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
-        return error
+        else:
+            print(f"Error in overlay: {error}")
+            return error
     
+    async def _text(self, **kwargs) -> str:
+        try:
+            return await self._text_impl(**kwargs)
+        except ValueError as e:
+            return f"Gradient text error: {str(e)}"
+        
+    async def _text_impl(self, **kwargs) -> str:
+        def get_text_size(font, text):
+            bbox = font.getbbox(text)
+            width = bbox[2] - bbox[0]
+            height = bbox[3] - bbox[1]
+            return width, height
+
+        try:
+            input_key = kwargs['input_key']
+            text = kwargs['text']
+            x_raw = kwargs['x']
+            y_raw = kwargs['y']
+            font_size = kwargs['font_size']
+            color = kwargs['color']
+            output_key = kwargs['output_key']
+            font_name = kwargs['font']
+
+            outline_color = kwargs.get('outline_color', None)
+            outline_width = kwargs.get('outline_width', None)
+
+            shadow_color = kwargs.get('shadow_color', None)
+            shadow_offset = kwargs.get('shadow_offset', 2)
+            shadow_blur = kwargs.get('shadow_blur', 0)
+
+            wrap_width = kwargs.get('wrap_width', None)
+            line_spacing = kwargs.get('line_spacing', 5)
+
+            if input_key not in self.media_cache:
+                return f"Error: {input_key} not found"
+
+            input_path = Path(self.media_cache[input_key])
+
+
+            base_img = await asyncio.to_thread(Image.open, input_path)
+            base_img = await asyncio.to_thread(base_img.convert, 'RGBA')
+
+
+            font_path = f"fonts/{font_name}"
+            font = await asyncio.to_thread(ImageFont.truetype, font_path, font_size)
+
+
+            draw = await asyncio.to_thread(ImageDraw.Draw, base_img)
+
+            max_width = base_img.width
+            if wrap_width:
+                max_width = int(wrap_width)
+                
+
+            while get_text_size(font, text)[0] > max_width and font_size > 8:
+                font_size = int(font_size * 0.9)
+                font = await asyncio.to_thread(ImageFont.truetype, font_path, font_size)
+
+            def wrap_text(draw, text, font, max_width):
+                words = text.split(' ')
+                lines = []
+                current_line = ""
+                for word in words:
+                    test_line = current_line + word + " "
+                    width, _ = get_text_size(font, test_line)
+                    if width <= max_width:
+                        current_line = test_line
+                    else:
+                        lines.append(current_line.rstrip())
+                        current_line = word + " "
+                lines.append(current_line.rstrip())
+                return lines
+
+            if wrap_width:
+                lines = await asyncio.to_thread(wrap_text, draw, text, font, wrap_width)
+            else:
+                lines = [text]
+
+            text_width = max(get_text_size(font, line)[0] for line in lines)
+            text_height_total = sum(get_text_size(font, line)[1] + line_spacing for line in lines) - line_spacing
+
+            if str(x_raw).lower() == "center":
+                x = (base_img.width - text_width) // 2
+            else:
+                x = int(x_raw)
+
+            if str(y_raw).lower() == "center":
+                y = (base_img.height - text_height_total) // 2
+            else:
+                y = int(y_raw)
+
+
+            if shadow_color:
+                shadow_layer = await asyncio.to_thread(Image.new, 'L', base_img.size, 0)
+                shadow_draw = await asyncio.to_thread(ImageDraw.Draw, shadow_layer)
+                ox = int(shadow_offset)
+                oy = int(shadow_offset)
+
+                cur_y = y
+                for line in lines:
+                    line_width, line_height = get_text_size(font, line)
+                    cur_x = (base_img.width - line_width) // 2 if str(x_raw).lower() == "center" else x
+                    await asyncio.to_thread(shadow_draw.text, (cur_x+ox, cur_y+oy), line, font=font, fill=255)
+                    cur_y += line_height + line_spacing
+
+                if shadow_blur > 0:
+                    shadow_layer = await asyncio.to_thread(shadow_layer.filter, ImageFilter.GaussianBlur(radius=shadow_blur))
+
+                shadow_img = await asyncio.to_thread(Image.new, 'RGBA', base_img.size, (0,0,0,0))
+                if isinstance(shadow_color, str) and shadow_color.startswith(('linear-gradient(', 'repeating-linear-gradient(', 'radial-gradient(', 'repeating-radial-gradient(')):
+                    shadow_gradient = self._parse_color(shadow_color, base_img.size)
+                    if isinstance(shadow_gradient, tuple):
+                        await asyncio.to_thread(shadow_img.paste, shadow_gradient, (0, 0), mask=shadow_layer)
+                    else:
+                        await asyncio.to_thread(shadow_img.paste, shadow_gradient, (0, 0), mask=shadow_layer)
+                else:
+                    sc = self._parse_single_color(shadow_color)
+                    await asyncio.to_thread(shadow_img.paste, sc, (0, 0), mask=shadow_layer)
+                base_img = await asyncio.to_thread(Image.alpha_composite, base_img, shadow_img)
+
+
+
+            if outline_color:
+                if outline_width is None:
+                    outline_width = max(1, font_size // 20)
+
+                outline_layer = await asyncio.to_thread(Image.new, 'L', base_img.size, 0)
+                outline_draw = await asyncio.to_thread(ImageDraw.Draw, outline_layer)
+
+                for dx in range(-outline_width, outline_width+1):
+                    for dy in range(-outline_width, outline_width+1):
+                        if dx*dx + dy*dy <= outline_width*outline_width:
+                            cur_y = y
+                            for line in lines:
+                                line_width, line_height = get_text_size(font, line)
+                                cur_x = (base_img.width - line_width) // 2 if str(x_raw).lower() == "center" else x
+                                await asyncio.to_thread(outline_draw.text, (cur_x+dx, cur_y+dy), line, font=font, fill=255)
+                                cur_y += line_height + line_spacing
+
+                outline_img = await asyncio.to_thread(Image.new, 'RGBA', base_img.size, (0,0,0,0))
+                outline_color_parsed = self._parse_color(outline_color, base_img.size)
+                
+                if isinstance(outline_color_parsed, tuple):
+                    await asyncio.to_thread(outline_img.paste, outline_color_parsed, (0, 0), mask=outline_layer)
+                else:
+                    await asyncio.to_thread(outline_img.paste, outline_color_parsed, (0, 0), mask=outline_layer)
+
+                base_img = await asyncio.to_thread(Image.alpha_composite, base_img, outline_img)
+
+
+            txt_layer = await asyncio.to_thread(Image.new, 'L', base_img.size, 0)
+            txt_draw = await asyncio.to_thread(ImageDraw.Draw, txt_layer)
+
+            cur_y = y
+            for line in lines:
+                line_width, line_height = get_text_size(font, line)
+                cur_x = (base_img.width - line_width) // 2 if str(x_raw).lower() == "center" else x
+                await asyncio.to_thread(txt_draw.text, (cur_x, cur_y), line, font=font, fill=255)
+                cur_y += line_height + line_spacing
+
+
+            gradient_img = self._parse_color(color, base_img.size)
+            if isinstance(gradient_img, tuple):
+                gradient_img = await asyncio.to_thread(Image.new, 'RGBA', base_img.size, gradient_img)
+            else:
+                gradient_img = gradient_img
+
+
+            result = await asyncio.to_thread(base_img.copy)
+            await asyncio.to_thread(result.paste, gradient_img, (0, 0), mask=txt_layer)
+
+
+            output_file = self._get_temp_path('png')
+            await asyncio.to_thread(result.save, output_file)
+            self.media_cache[output_key] = str(output_file)
+            return f"media://{output_file.as_posix()}"
+
+        except Exception as e:
+            return f"Gradient text error: {str(e)}"
+
+
     async def _replace_audio(self, **kwargs) -> str:
         try:
             return await self._replace_audio_impl(**kwargs)
@@ -1373,6 +1837,186 @@ class MediaProcessor:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
+    
+    async def _create_image(self, **kwargs) -> str:
+        try:
+            return await self._create_image_impl(**kwargs)
+        except ValueError as e:
+            return f"Create error: {str(e)}"
+    
+    async def _create_image_impl(self, **kwargs) -> str:
+        try:
+            width = await self._resolve_dimension(kwargs['width'])
+            height = await self._resolve_dimension(kwargs['height'])
+            size = (width, height)
+
+            color = self._parse_color(kwargs['color'], size)
+            if isinstance(color, Image.Image):
+                img = color
+            else:
+                img = await asyncio.to_thread(Image.new, 'RGBA', size, color)
+
+            output_file = self._get_temp_path('png')
+            await asyncio.to_thread(img.save, output_file)
+            self.media_cache[kwargs['media_key']] = str(output_file)
+            return f"media://{output_file.as_posix()}"
+        except Exception as e:
+           return f"Create error: {str(e)}"
+    
+    async def _fadein_media(self, **kwargs) -> str:
+        try:
+            return await self._fadein_media_impl(**kwargs)
+        except ValueError as e:
+            return f"Fade in error: {str(e)}"
+    
+    async def _fadein_media_impl(self, **kwargs) -> str:
+        input_key = kwargs['input_key']
+        duration = float(kwargs['duration'])
+        color = kwargs.get('color', '#000000')
+        audio_fade = kwargs.get('audio', True)
+        output_key = kwargs['output_key']
+
+        if input_key not in self.media_cache:
+            return f"Error: {input_key} not found"
+
+        input_path = Path(self.media_cache[input_key])
+        output_file = self._get_temp_path(input_path.suffix[1:].lstrip('.'))
+
+
+        width, height, input_duration, has_audio = await self._probe_media_info(input_path)
+        try:
+            input_duration = float(input_duration) if input_duration else 0.0
+        except (ValueError, TypeError):
+            input_duration = 0.0
+        is_image = input_duration <= 0
+
+
+        if color.startswith(('linear-gradient', 'radial-gradient')):
+            bg_img = self._parse_color(color, (width, height))
+            bg_file = self._get_temp_path('png')
+            bg_img.save(bg_file)
+            bg_input = ['-stream_loop', '-1', '-i', bg_file.as_posix()]
+        else:
+            bg_input = ['-f', 'lavfi', '-i', f'color=c={color}:s={width}x{height}:d=9999']
+
+
+        filter_parts = [
+                f"[0:v]format=yuva420p,fade=t=in:st=0:d={duration}:alpha=1[fg];",
+                f"[1:v][fg]overlay=format=auto[v]"
+            ]
+            
+        if has_audio:
+            if audio_fade:
+                filter_parts.append(f";[0:a]afade=t=in:st=0:d={duration}[a]")
+            else:
+                filter_parts.append(";[0:a]acopy[a]")
+
+        cmd = [
+            'ffmpeg', '-hide_banner',
+            *(['-stream_loop', '-1'] if is_image else []),
+            '-i', input_path.as_posix(),
+            *bg_input,
+            '-filter_complex', ''.join(filter_parts),
+            '-map', '[v]',
+            *(['-map', '[a]'] if has_audio else []),
+        ]
+
+
+        if is_image:
+            output_file = self._get_temp_path('mp4')
+            cmd.extend([
+                '-t', str(duration),
+                '-pix_fmt', 'yuv420p',
+                '-movflags', '+faststart'
+            ])
+        else:
+            cmd.extend(['-shortest'])
+
+        cmd.extend(['-y', output_file.as_posix()])
+
+        success, error = await self._run_ffmpeg(cmd)
+        if success:
+            self.media_cache[output_key] = str(output_file)
+            return f"media://{output_file.as_posix()}"
+        else:
+            return error
+    
+    async def _fadeout_media(self, **kwargs) -> str:
+        try:
+            return await self._fadeout_media_impl(**kwargs)
+        except ValueError as e:
+            return f"Fade out error: {str(e)}"
+    
+    async def _fadeout_media_impl(self, **kwargs) -> str:
+        input_key = kwargs['input_key']
+        duration = float(kwargs['duration'])
+        start_time = float(kwargs['start_time'])
+        color = kwargs.get('color', '#000000')
+        audio_fade = kwargs.get('audio', True)
+        output_key = kwargs['output_key']
+
+        if input_key not in self.media_cache:
+            return f"Error: {input_key} not found"
+
+        input_path = Path(self.media_cache[input_key])
+        output_file = self._get_temp_path(input_path.suffix[1:].lstrip('.'))
+
+        width, height, input_duration, has_audio = await self._probe_media_info(input_path)
+        try:
+            input_duration = float(input_duration) if input_duration else 0.0
+        except (ValueError, TypeError):
+            input_duration = 0.0
+        is_image = input_duration <= 0
+
+        if color.startswith(('linear-gradient', 'radial-gradient')):
+            bg_img = self._parse_color(color, (width, height))
+            bg_file = self._get_temp_path('png')
+            bg_img.save(bg_file)
+            bg_input = ['-stream_loop', '-1', '-i', bg_file.as_posix()]
+        else:
+            bg_input = ['-f', 'lavfi', '-i', f'color=c={color}:s={width}x{height}:d=9999']
+
+
+        filter_complex_parts = [
+            f"[0:v]format=yuva420p,fade=t=out:st={start_time}:d={duration}:alpha=1[fg];",
+            f"[1:v][fg]overlay=format=auto[v]"
+        ]
+        
+
+        if has_audio:
+            if audio_fade:
+                filter_complex_parts.append(f";[0:a]afade=t=out:st={start_time}:d={duration}[a]")
+            else:
+                filter_complex_parts.append(";[0:a]acopy[a]")
+
+        cmd = [
+            'ffmpeg', '-hide_banner',
+            *(['-stream_loop', '-1'] if is_image else []),
+            '-i', input_path.as_posix(),
+            *bg_input,
+            '-filter_complex', ''.join(filter_complex_parts),
+            '-map', '[v]',
+            *(['-map', '[a]'] if has_audio else []),
+        ]
+
+
+        if is_image:
+            output_file = self._get_temp_path('mp4')
+            cmd.extend([
+                '-t', str(start_time + duration),
+                '-pix_fmt', 'yuv420p',
+                '-movflags', '+faststart'
+            ])
+        else:
+            cmd.append('-shortest')
+
+        cmd += ['-y', output_file.as_posix()]
+
+        success, error = await self._run_ffmpeg(cmd)
+        if success:
+            self.media_cache[output_key] = str(output_file)
+            return f"media://{output_file.as_posix()}"
+        return print(f"Error: {error}")
 
 
 
@@ -1436,6 +2080,8 @@ class TagFormatter:
             return f"[Tag Error: {str(e)}]"
 
     def _normalize_result(self, result) -> tuple[str, list[discord.Embed], discord.ui.View | None]:
+        if result is None or result is discord.utils.MISSING:
+            return ("", [], None)
         if isinstance(result, discord.Embed):
             return ("", [result], None)
         elif isinstance(result, discord.ui.Item):
@@ -1628,7 +2274,7 @@ class Tags(commands.Cog):
                         except Exception as e:
                             pass
 
-                return ""
+                return discord.utils.MISSING
             except Exception as e:
                 await self.processor.cleanup()
                 return f"Script processing error: {str(e)}"
@@ -2819,15 +3465,15 @@ class Tags(commands.Cog):
                 name, ctx.guild.id if ctx.guild else None, ctx.author.id
             )
             text, embeds, view = await self.formatter.format(tag['content'], ctx, args=args)
-            
-            try:
-                await ctx.send(
-                    content=text[:2000] if text else None,
-                    embeds=embeds[:10],
-                    view=view if view and view.children else None
-                )
-            except discord.HTTPException as e:
-                await ctx.send(f"Failed to send tag: {e}")
+            if text.strip() or embeds or (view and view.children):
+                try:
+                    await ctx.send(
+                        content=text[:2000] if text else None,
+                        embeds=embeds[:10],
+                        view=view if view and view.children else None
+                    )
+                except discord.HTTPException as e:
+                    await ctx.send(f"Failed to send tag: {e}")
     
     @tag.command(name="show", description="Show a tag.", with_app_command=True, aliases=["fetch"])
     @app_commands.describe(name="The tag name.", args="The tag arguments, if any.")
@@ -2851,15 +3497,15 @@ class Tags(commands.Cog):
                 name, ctx.guild.id if ctx.guild else None, ctx.author.id
             )
             text, embeds, view = await self.formatter.format(tag['content'], ctx, args=args)
-            
-            try:
-                await ctx.send(
-                    content=text[:2000] if text else None,
-                    embeds=embeds[:10],
-                    view=view if view and view.children else None
-                )
-            except discord.HTTPException as e:
-                await ctx.send(f"Failed to send tag: {e}")
+            if text.strip() or embeds or (view and view.children):
+                try:
+                    await ctx.send(
+                        content=text[:2000] if text else None,
+                        embeds=embeds[:10],
+                        view=view if view and view.children else None
+                    )
+                except discord.HTTPException as e:
+                    await ctx.send(f"Failed to send tag: {e}")
     
     @tag.command(name="create", description="Create a tag.", with_app_command=True, aliases=["add"])
     @app_commands.describe(name="The tag name.", content="The tag content.", personal="Make this a personal tag.")
