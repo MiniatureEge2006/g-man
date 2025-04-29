@@ -23,6 +23,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     mono-complete \
     bash \
     cargo \
+    libc6-dev \
+    libssl-dev \
+    zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -LO https://ziglang.org/download/0.11.0/zig-linux-x86_64-0.11.0.tar.xz \
@@ -33,7 +36,7 @@ RUN groupadd -g 1000 gcoder && useradd -r -u 1000 -g gcoder -m -d /home/gcoder g
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install numpy requests pillow yt-dlp bgutil-ytdlp-pot-provider
-RUN npm install -g typescript ts-node yarn
+RUN npm install -g typescript ts-node @types/node yarn
 USER gcoder
 RUN mkdir -p /home/gcoder && \
     cd /home/gcoder && \
