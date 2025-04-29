@@ -2358,6 +2358,20 @@ class Tags(commands.Cog):
             """
             return '\n'
         
+        @self.formatter.register('jsonify')
+        def _jsonify(ctx, text, **kwargs):
+            """
+            ### {jsonify:text}
+                * Converts text to JSON-compatible format (escapes quotes, handles newlines)
+                * Example: {jsonify:Hello "World"} -> "Hello \"World\""
+                * Useful for embedding text in JSON or GScript commands
+            """
+            try:
+                processed_text = str(text)
+                return json.dumps(processed_text)
+            except Exception as e:
+                return f"[JSON Error: {str(e)}]"
+        
         @self.formatter.register('substring')
         async def _substring(ctx, args_str, **kwargs):
             """
@@ -3230,6 +3244,18 @@ class Tags(commands.Cog):
                 return ", ".join(badge_names)
             else:
                 return "No badges found."
+        
+        @self.formatter.register('randuser')
+        async def _randuser(ctx, user, **kwargs):
+            """
+            ### {randomuser}
+                * Returns a random user from the server.
+                * Example: `{randomuser}`
+            """
+            if ctx.guild:
+                random_user = random.choice(ctx.guild.members)
+                return random_user.name
+            return "This tag function can only be used in a server."
         
         @self.formatter.register('channel')
         async def _channel(ctx, i, **kwargs):
