@@ -21,10 +21,14 @@ from io import BytesIO
 from urllib.parse import quote, unquote
 import base64
 import json
+from jsonschema import validate, ValidationError
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import math
 import matplotlib.font_manager
+import hashlib
+from zoneinfo import ZoneInfo
+import dateparser
 
 
 
@@ -2413,7 +2417,7 @@ class Tags(commands.Cog):
         def _jsonify(ctx, text, **kwargs):
             """
             ### {jsonify:text}
-                * Converts text to JSON-compatible format (escapes quotes, handles newlines)
+                * Converts text to JSON-compatible format. (escapes quotes, handles newlines)
                 * Example: {jsonify:Hello "World"} -> "Hello \"World\""
                 * Useful for embedding text in JSON or GScript commands
             """
@@ -2422,6 +2426,127 @@ class Tags(commands.Cog):
                 return json.dumps(processed_text)
             except Exception as e:
                 return f"[JSON Error: {str(e)}]"
+        
+        @self.formatter.register('traversejson')
+        def _traversejson(ctx, val, **kwargs):
+            """
+            ### {traversejson:path|json}
+                * Traverses a JSON object using dot notation path and returns the value.
+                * Example: `{traversejson:user.name|{"user":{"name":"John"}}}` -> "John"
+                * Example: `{traversejson:1.id|[{}, {"id":42}]}` -> "42"
+                * Returns "[JSON traverse error]" if path is invalid or JSON is malformed
+            """
+            try:
+                parts = str(val).split('|', 1)
+                if len(parts) < 2:
+                    return "[JSON traverse error: missing path or JSON]"
+                
+                path, json_str = parts[0].strip(), parts[1].strip()
+                data = json.loads(json_str)
+                
+                keys = path.split('.')
+                result = data
+                for key in keys:
+                    if isinstance(result, dict):
+                        result = result.get(key)
+                    elif isinstance(result, list):
+                        try:
+                            result = result[int(key)]
+                        except (ValueError, IndexError):
+                            return f"[JSON traverse error: invalid list index '{key}']"
+                    else:
+                        return f"[JSON traverse error: cannot traverse into '{key}' of non-container type]"
+                
+                return str(result) if result is not None else ""
+            except json.JSONDecodeError:
+                return "[JSON traverse error: malformed JSON]"
+            except Exception as e:
+                return f"[JSON traverse error: {str(e)}]"
+        
+        @self.formatter.register('repeat')
+        def _repeat(ctx, val, **kwargs):
+            """
+            ### {repeat:count|text}
+                * Repeats the text the specified number of times.
+                * Example: `{repeat:3|hello}` -> "hellohellohello"
+                * Example: `{repeat:5|* }` -> "* * * * * "
+                * If count is not a valid number, returns the text once
+            """
+            try:
+                parts = str(val).split('|', 1)
+                if len(parts) < 2:
+                    return str(val)
+                
+                count_str, text = parts[0].strip(), parts[1]
+                repeat_count = int(count_str)
+                
+                if repeat_count < 0:
+                    repeat_count = 0
+                    
+                return text * repeat_count
+            except ValueError:
+                return text
+        
+        @self.formatter.register('join')
+        async def _join(ctx, val, **kwargs):
+            """
+            ### {join:delimiter|json_array}
+                * Joins JSON array elements with delimiter.
+                * Example: `{join:, |["a","b","c"]}` → "a, b, c"
+            """
+            try:
+                delim, arr = val.split('|', 1)
+                return delim.join(json.loads(arr))
+            except Exception as e:
+                return f"[Join error: {str(e)}]"
+        
+        @self.formatter.register('split')
+        async def _split(ctx, val, **kwargs):
+            """
+            ### {split:delimiter|text}
+                * Properly handles space delimiter and special cases.
+                * Examples:
+                - {split: |hello world} → ["hello","world"]
+                - {split:space|hello world} → ["hello","world"]
+                - {split:whitespace|hello   world} → ["hello","world"]
+            """
+            try:
+                if not val:
+                    return json.dumps([])
+                    
+
+                parts = val.split('|', 1)
+                if len(parts) < 2:
+                    return "[split error: missing text to split]"
+                    
+                delim_spec, text = parts
+                
+
+                if delim_spec.lower() == "space":
+                    delim = " "
+                elif delim_spec.lower() == "whitespace":
+                    return json.dumps(re.split(r'\s+', text.strip()))
+                else:
+                    delim = delim_spec.replace("\\n", "\n").replace("\\t", "\t")
+                
+
+                if delim == "" and " " in val:
+                    delim = " "
+                    
+                return json.dumps([s.strip() for s in text.split(delim) if s.strip()])
+            
+            except Exception as e:
+                return f"[split error: {str(e)}]"
+        
+        @self.formatter.register('trim')
+        @self.formatter.register('strip')
+        async def _trim(ctx, val, **kwargs):
+            """
+            ### {trim:text}
+                * Removes leading/trailing whitespace.
+                * Example: `{trim:  test  }` → "test"
+            """
+            return val.strip()
         
         @self.formatter.register('substring')
         async def _substring(ctx, args_str, **kwargs):
@@ -2554,41 +2679,37 @@ class Tags(commands.Cog):
     
             except Exception:
                 return args_str
-        
+            
+
         @self.formatter.register('timestamp')
-        async def _timestamp(ctx, args_str="", **kwargs):
+        async def _timestamp(ctx, val, **kwargs):
             """
-            ### {timestamp:format|offset}
-                * Returns a formatted timestamp.
-                * Format options: t (short time), T (long time), d (short date), D (long date), f (short datetime), F (long datetime), R (relative time)
-                * Offset can be + or - hours (e.g. +2, -5.5)
-                * Example: `{timestamp:F}` -> "Monday, June 20, 2022 at 12:00 PM"
-                * Example: `{timestamp:R|+2}` -> "in 2 hours"
+            ### {timestamp:format|timezone|offset}
+                * Formats timestamp with timezone support.
+                * Format options:
+                    - discord: t/T/d/D/f/F/R (Discord-style timestamps)
+                    - strftime: Any valid format string
+                    - unix/iso: UNIX timestamp or ISO-8601
+                * Timezone: IANA name (e.g. "Europe/Paris")
+                * Offset: ± hours adjustment (e.g. "+1")
+                * Example: `{timestamp:F|Europe/Paris|+1}`
             """
             try:
-                now = datetime.now()
-                format_code = "f"
-                processed = str(args_str)
-                if processed:
-                    parts = processed.split("|")
-                    if parts[0].strip():
-                        format_code = parts[0].strip()
-            
-                    if len(parts) > 1 and parts[1].strip():
-                        offset = parts[1].strip()
-                        try:
-                            hours = float(offset)
-                            now = now + timedelta(hours=hours)
-                        except ValueError:
-                            pass
-        
-                if format_code.lower() == "unix":
-                    return str(int(now.timestamp()))
-        
-                if format_code.lower() == "iso":
-                    return now.isoformat()
-        
-                formats = {
+                parts = val.split('|', 2) if val else []
+                format_code = parts[0].strip() if parts else "f"
+                tz = parts[1].strip() if len(parts) > 1 else "UTC"
+                offset = float(parts[2]) if len(parts) > 2 else 0
+
+
+                try:
+                    tz_info = ZoneInfo(tz)
+                except Exception:
+                    tz_info = ZoneInfo("UTC")
+
+                now = datetime.now(tz_info) + timedelta(hours=offset)
+
+
+                discord_formats = {
                     "t": "%-I:%M %p",
                     "T": "%-I:%M:%S %p",
                     "d": "%m/%d/%Y",
@@ -2597,14 +2718,321 @@ class Tags(commands.Cog):
                     "F": "%A, %B %d, %Y at %-I:%M %p",
                     "R": "R"
                 }
-        
-                fmt = formats.get(format_code, "%B %d, %Y at %-I:%M %p")
-        
-                if format_code == "R":
+
+                if format_code.upper() == "R":
                     return f"<t:{int(now.timestamp())}:R>"
-                return f"<t:{int(now.timestamp())}:{format_code}>"
-            except Exception:
-                return "[timestamp error]"
+                elif format_code.lower() in discord_formats:
+                    fmt = discord_formats[format_code.lower()]
+                    return f"<t:{int(now.timestamp())}:{format_code.lower()}>"
+                elif format_code.lower() == "unix":
+                    return str(int(now.timestamp()))
+                elif format_code.lower() == "iso":
+                    return now.isoformat()
+                else:
+                    return now.strftime(format_code)
+
+            except Exception as e:
+                return f"[timestamp error: {str(e)}]"
+        
+        @self.formatter.register('duration')
+        async def _duration(ctx, val, **kwargs):
+            """
+            ### {duration:start|end|format|precision}
+                * Calculates duration between timestamps (supports relative expressions)
+                * Formats:
+                    - human: "3d 2h" (default)
+                    - precise: "3 days, 2 hours, 15 minutes"
+                    - colon: "74:15:30" (HH:MM:SS)
+                    - iso: "P3DT2H15M30S" (ISO 8601)
+                    - seconds: total seconds
+                    - discord: <t:unix_timestamp:F>
+                    - unix: Unix timestamp
+                * Supports:
+                    - Absolute: ISO dates, Unix timestamps
+                    - Relative: now+2h, now-30m
+                * Examples:
+                    - {duration:now|now+3h|human} → "3h"
+                    - {duration:2023-01-01|now|precise}
+                    - {duration:now-30m|now+1h|colon} → "01:30:00"
+            """
+            try:
+                parts = str(val).split('|', 3)
+                start_str = parts[0].strip()
+                end_str = parts[1].strip()
+                fmt = parts[2].lower() if len(parts) > 2 else "human"
+                precision = int(parts[3]) if len(parts) > 3 else 2
+
+                def parse_relative(time_str):
+                    now = datetime.now(ZoneInfo("UTC"))
+                    match = re.match(r'now([+-])(\d+)([hmsd])', time_str.lower())
+                    if not match:
+                        return None
+                    
+                    sign, num, unit = match.groups()
+                    delta = timedelta(**{
+                        'h': {'hours': int(num)},
+                        'm': {'minutes': int(num)},
+                        's': {'seconds': int(num)},
+                        'd': {'days': int(num)}
+                    }[unit])
+                    return now + delta if sign == '+' else now - delta
+
+                def parse_time(time_str):
+                    if time_str.lower().startswith('now'):
+                        relative = parse_relative(time_str)
+                        if relative:
+                            return relative
+                    
+
+                    if time_str.lower() == "now":
+                        return datetime.now(ZoneInfo("UTC"))
+                    try:
+                        return datetime.fromisoformat(time_str).astimezone(ZoneInfo("UTC"))
+                    except ValueError:
+                        try:
+                            return datetime.fromtimestamp(int(time_str), ZoneInfo("UTC"))
+                        except ValueError:
+                            raise ValueError(f"Invalid time format: {time_str}")
+
+
+                start = parse_time(start_str)
+                end = parse_time(end_str)
+                delta = end - start if end > start else start - end
+                total_seconds = delta.total_seconds()
+
+
+                def format_human(seconds, max_units):
+                    intervals = [
+                        ('year', 31536000),
+                        ('month', 2592000),
+                        ('week', 604800),
+                        ('day', 86400),
+                        ('hour', 3600),
+                        ('minute', 60),
+                        ('second', 1)
+                    ]
+                    parts = []
+                    for name, count in intervals:
+                        value = int(seconds // count)
+                        if value > 0:
+                            seconds -= value * count
+                            parts.append(f"{value}{name[0]}")
+                        if len(parts) >= max_units:
+                            break
+                    return " ".join(parts) if parts else "0s"
+
+                def format_precise(seconds):
+                    units = [
+                        ('day', delta.days),
+                        ('hour', delta.seconds // 3600),
+                        ('minute', (delta.seconds // 60) % 60),
+                        ('second', delta.seconds % 60)
+                    ]
+                    parts = []
+                    for unit, value in units:
+                        if value > 0:
+                            parts.append(f"{value} {unit}{'s' if value != 1 else ''}")
+                    return ", ".join(parts) if parts else "0 seconds"
+
+                def format_iso(seconds):
+                    days = delta.days
+                    hours = delta.seconds // 3600
+                    minutes = (delta.seconds // 60) % 60
+                    seconds = delta.seconds % 60
+                    iso = "P"
+                    if days: iso += f"{days}D"
+                    if any((hours, minutes, seconds)):
+                        iso += "T"
+                        if hours: iso += f"{hours}H"
+                        if minutes: iso += f"{minutes}M"
+                        if seconds: iso += f"{seconds}S"
+                    return iso.replace("T0S", "").replace("P0D", "PT0S")
+
+
+                if fmt == "human":
+                    return format_human(total_seconds, precision)
+                elif fmt == "precise":
+                    return format_precise(total_seconds)
+                elif fmt == "colon":
+                    hours = int(total_seconds // 3600)
+                    minutes = int((total_seconds % 3600) // 60)
+                    seconds = int(total_seconds % 60)
+                    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                elif fmt == "iso":
+                    return format_iso(total_seconds)
+                elif fmt == "seconds":
+                    return str(int(total_seconds))
+                elif fmt in ("discord", "unix"):
+                    ts = int(end.timestamp() if fmt == "discord" else total_seconds)
+                    return f"<t:{ts}:F>" if fmt == "discord" else str(ts)
+                else:
+                    return format_human(total_seconds, precision)
+
+            except Exception as e:
+                return f"[duration error: {str(e)}]"
+        
+        @self.formatter.register('businessdays')
+        async def _businessdays(ctx, val, **kwargs):
+            """
+            ### {businessdays:start|end|[holidays]}
+                * Calculates working days between dates. (excludes weekends + holidays)
+                * Holidays format: JSON array as string: "[""2023-12-25""]"
+                * Example: `{businessdays:2023-12-01|2023-12-31|["2023-12-25"]}`
+            """
+            try:
+                parts = val.split('|', 2)
+                if len(parts) < 2:
+                    return "[businessdays error: need start and end dates]"
+                    
+                start_str, end_str = parts[0].strip(), parts[1].strip()
+                holidays = json.loads(parts[2].replace('""', '"')) if len(parts) > 2 else []
+
+                def parse_date(d):
+                    if d.lower() == "now":
+                        return datetime.now().date()
+                    try:
+                        return datetime.fromisoformat(d).date()
+                    except ValueError:
+                        try:
+                            return datetime.fromtimestamp(int(d)).date()
+                        except:
+                            raise ValueError(f"Invalid date: {d}")
+
+                start_date = parse_date(start_str)
+                end_date = parse_date(end_str)
+                
+                if start_date > end_date:
+                    start_date, end_date = end_date, start_date
+
+                delta = end_date - start_date
+                business_days = 0
+                holidays = [datetime.fromisoformat(h).date() if isinstance(h, str) else h for h in holidays]
+
+                for i in range(delta.days + 1):
+                    current = start_date + timedelta(days=i)
+                    if current.weekday() < 5 and current not in holidays:
+                        business_days += 1
+
+                return str(business_days)
+                
+            except json.JSONDecodeError:
+                return "[businessdays error: invalid holidays format]"
+            except Exception as e:
+                return f"[businessdays error: {str(e)}]"
+        
+        @self.formatter.register('parsetime')
+        async def _parsetime(ctx, val, **kwargs):
+            """
+            ### {parsetime:"time string"|timezone|format}
+                * Parse natural language timestamps to ISO, unix, or discord's formats.
+                * Example: `{parsetime:in 2 hours|UTC|ISO}`
+            """
+            try:
+                parts = val.split('|', 2)
+                time_str = parts[0].strip(' "\'')
+                tz = parts[1].strip() if len(parts) > 1 else "UTC"
+                fmt = parts[2].strip().lower() if len(parts) > 2 else "iso"
+
+
+                now = datetime.now(ZoneInfo(tz))
+                
+
+                settings = {
+                    'TIMEZONE': tz,
+                    'RETURN_AS_TIMEZONE_AWARE': True,
+                    'PREFER_DATES_FROM': 'future',
+                    'RELATIVE_BASE': now,
+                    'DATE_ORDER': 'MDY',
+                }
+
+
+                dt = dateparser.parse(
+                    time_str,
+                    settings=settings
+                )
+
+                if not dt:
+                    return f"[parsetime error: could not understand '{time_str}']"
+
+
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=ZoneInfo(tz))
+                dt = dt.astimezone(ZoneInfo(tz))
+
+
+                if fmt == "unix":
+                    return str(int(dt.timestamp()))
+                elif fmt == "discord":
+                    return f"<t:{int(dt.timestamp())}:F>"
+                return dt.isoformat()
+
+            except Exception as e:
+                return f"[parsetime error: {str(e)}]"
+        
+        
+        @self.formatter.register('jsonpretty')
+        async def _jsonpretty(ctx, val, **kwargs):
+            """
+                ### {jsonpretty:json}
+                    * Formats JSON with indentation.
+                    * Example: `{jsonpretty:{"a":1}}` -> 
+                {
+                    "a": 1
+                }
+            """
+            try:
+                data = json.loads(val)
+                return json.dumps(data, indent=2)
+            except Exception as e:
+                return f"[jsonpretty error: {str(e)}]"
+        
+        @self.formatter.register('jsonschema')
+        async def _jsonschema(ctx, val, **kwargs):
+            """
+            ### {jsonschema:json|schema}
+                * Validates JSON against a schema.
+                * Returns "valid" or error message.
+                * Example: `{jsonschema:{"age":25}|{"type":"object","properties":{"age":{"type":"number"}}}`
+            """
+            try:
+                parts = str(val).split("|", 1)
+                if len(parts) < 2:
+                    return "[jsonschema error: missing json or schema]"
+                    
+                json_str, schema_str = parts
+                instance = json.loads(json_str)
+                schema = json.loads(schema_str)
+                
+                validate(instance=instance, schema=schema)
+                return "valid"
+            except ValidationError as e:
+                return f"validation error: {str(e)}"
+            except Exception as e:
+                return f"[jsonschema error: {str(e)}]"
+        
+        @self.formatter.register('type')
+        async def _type(ctx, val, **kwargs):
+            """
+            ### {type:value}
+                * Returns the type of the given value.
+                * Example: `{type:{arg:0}}` -> "str"
+                * Example: `{type:[1,2,3]}` -> "list"
+            """
+            return type(val).__name__
+        
+        @self.formatter.register('hash')
+        async def _hash(ctx, val, **kwargs):
+            """
+            ### {hash:algorithm|text}
+                * Generates hash digest.
+                * Supported algorithms: md5, sha1, sha256, sha512
+                * Example: `{hash:sha256|hello}` → "2cf24d...b2b4"
+            """
+            try:
+                algo, text = val.split('|', 1)
+                return hashlib.new(algo.strip(), text.encode()).hexdigest()
+            except Exception as e:
+                return f"[Hash error: {str(e)}]"
         
         @self.formatter.register('urlencode')
         async def _urlencode(ctx, text, **kwargs):
@@ -2681,43 +3109,97 @@ class Tags(commands.Cog):
                 return "[hex error]"
         
         @self.formatter.register('countdown')
-        async def _countdown(ctx, args_str, **kwargs):
+        async def _countdown(ctx, val, **kwargs):
             """
-            ### {countdown:target_time}
-                * Creates a countdown to the specified time.
-                * Format: YYYY-MM-DD HH:MM:SS or timestamp
-                * Example: `{countdown:2025-01-01 00:00:00}`
+            ### {countdown:target_time|format|timezone|past_message}
+                * Creates a countdown/count-up timer relative to current time.
+                * Time formats: ISO-8601, UNIX timestamp, or natural language
+                * Output formats:
+                    - human: "3 days, 2 hours" (default)
+                    - precise: "3 days, 2 hours, 15 minutes, 30 seconds"
+                    - colon: "74:15:30" (total hours)
+                    - iso: ISO 8601 duration format
+                    - discord: Discord relative timestamp (<t:...:R>)
+                * Timezone: IANA timezone name (default: UTC)
+                * past_message: Custom message for past times (default: "The target time has already passed.")
+                * Examples:
+                    - `{countdown:2025-01-01 00:00:00}`
+                    - `{countdown:1735689600|colon|America/New_York}`
+                    - `{countdown:tomorrow at 3pm|discord|Europe/London}`
             """
             try:
-                processed = str(args_str)
-                
+                parts = str(val).split('|', 3)
+                time_str = parts[0].strip('"')
+                fmt = parts[1].lower() if len(parts) > 1 else "human"
+                tz = parts[2] if len(parts) > 2 else "UTC"
+                past_msg = parts[3] if len(parts) > 3 else "The target time has already passed."
+
+
                 try:
-                    target = datetime.fromtimestamp(float(processed))
-                except ValueError:
-                    target = datetime.strptime(processed, "%Y-%m-%d %H:%M:%S")
+                    if time_str.lower() == "now":
+                        target = datetime.now(ZoneInfo(tz))
+                    elif time_str.isdigit():
+                        target = datetime.fromtimestamp(int(time_str), ZoneInfo(tz))
+                    else:
+                        target = dateparser.parse(
+                            time_str,
+                            settings={'TIMEZONE': tz, 'RETURN_AS_TIMEZONE_AWARE': True}
+                        )
+                        
+                    if not target:
+                        return "[countdown error: invalid time format]"
+                except Exception as e:
+                    return f"[countdown error: invalid time - {str(e)}]"
+
+
+                now = datetime.now(ZoneInfo(tz))
+                delta = target - now if target > now else now - target
+                is_past = target < now
+
+
+                if fmt == "discord":
+                    return f"<t:{int(target.timestamp())}:R>" if not is_past else past_msg
+
+
+                if is_past:
+                    return past_msg
+
+
+                def format_duration(seconds, precision=3):
+                    intervals = [
+                        ('day', 86400),
+                        ('hour', 3600),
+                        ('minute', 60),
+                        ('second', 1)
+                    ]
+                    
+                    parts = []
+                    for name, count in intervals:
+                        value = int(seconds // count)
+                        if value:
+                            seconds -= value * count
+                            parts.append(f"{value} {name if value == 1 else name + 's'}")
+                        if len(parts) >= precision:
+                            break
+                    return ", ".join(parts) if parts else "0 seconds"
+
+                total_seconds = delta.total_seconds()
                 
-                now = datetime.now()
-                if target < now:
-                    return "The target time has already passed."
-                
-                delta = target - now
-                days = delta.days
-                hours, remainder = divmod(delta.seconds, 3600)
-                minutes, seconds = divmod(remainder, 60)
-                
-                parts = []
-                if days > 0:
-                    parts.append(f"{days} day{'s' if days != 1 else ''}")
-                if hours > 0:
-                    parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
-                if minutes > 0:
-                    parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
-                if seconds > 0 or not parts:
-                    parts.append(f"{seconds} second{'s' if seconds != 1 else ''}")
-                
-                return ", ".join(parts)
-            except Exception:
-                return "[countdown error]"
+                if fmt == "human":
+                    return format_duration(total_seconds)
+                elif fmt == "precise":
+                    return format_duration(total_seconds, precision=4)
+                elif fmt == "colon":
+                    hours, rem = divmod(total_seconds, 3600)
+                    mins, secs = divmod(rem, 60)
+                    return f"{int(hours):02d}:{int(mins):02d}:{int(secs):02d}"
+                elif fmt == "iso":
+                    return f"P{delta.days}DT{delta.seconds}S".replace("T0S", "")
+                else:
+                    return format_duration(total_seconds)
+
+            except Exception as e:
+                return f"[countdown error: {str(e)}]"
         
         @self.formatter.register('reverse')
         async def _reverse(ctx, text, **kwargs):
@@ -3341,7 +3823,7 @@ class Tags(commands.Cog):
         @self.formatter.register('randuser')
         async def _randuser(ctx, user, **kwargs):
             """
-            ### {randomuser}
+            ### {randuser}
                 * Returns a random user from current the server.
                 * Example: `{randuser}`
             """
