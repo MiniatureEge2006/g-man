@@ -18,7 +18,7 @@ import shutil
 from datetime import datetime, timedelta
 import random
 from io import BytesIO
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlparse
 import base64
 import json
 from jsonschema import validate, ValidationError
@@ -29,6 +29,12 @@ import matplotlib.font_manager
 import hashlib
 from zoneinfo import ZoneInfo
 import dateparser
+from wand.image import Image as Img
+from wand.color import Color
+
+IMAGE_TYPES = ('image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif')
+VIDEO_TYPES = ('video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska', 'video/x-msvideo', 'video/x-ms-wmv')
+AUDIO_TYPES = ('audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/ogg', 'audio/opus', 'audio/flac', 'audio/x-matroska', 'audio/x-ms-wma')
 
 
 
@@ -302,6 +308,13 @@ class MediaProcessor:
                 'url': {'required': True, 'type': str},
                 'media_key': {'required': True, 'type': str}
             },
+            'loadsvg': {
+                'svg_content': {'required': True, 'type': str},
+                'media_key': {'required': True, 'type': str},
+                'width': {'default': '512', 'type': str},
+                'height': {'default': '512', 'type': str},
+                'background': {'default': 'transparent', 'type': str}
+            },
             'reverse': {
                 'input_key': {'required': True, 'type': str},
                 'output_key': {'required': True, 'type': str}
@@ -424,6 +437,7 @@ class MediaProcessor:
         }
         self.gscript_commands = {
             'load': self._load_media,
+            'loadsvg': self._load_svg,
             'reverse': self._reverse_media,
             'concat': self._concat_media,
             'render': self._render_media,
@@ -1035,6 +1049,43 @@ class MediaProcessor:
                     return f"Loaded {media_key}"
         except Exception as e:
             return f"Download error: {str(e)}"
+    
+    async def _load_svg(self, **kwargs) -> str:
+        try:
+            return await self._load_svg_impl(**kwargs)
+        except ValueError as e:
+            return f"SVG error: {str(e)}"
+    
+    async def _load_svg_impl(self, **kwargs) -> str:
+        svg_content = kwargs['svg_content']
+        media_key = kwargs['media_key']
+        width = await self._resolve_dimension(kwargs['width'])
+        height = await self._resolve_dimension(kwargs['height'])
+        background = kwargs['background']
+        
+
+        output_file = self._get_temp_path('png')
+        
+        try:
+            def convert_svg():
+                with Img(blob=svg_content.encode('utf-8'), format='svg') as img:
+                    img.resize(width, height)
+                    
+
+                    if background.lower() != 'transparent':
+                        bg = Color(self._parse_single_color(background))
+                        with Img(width=width, height=height, background=bg) as bg_img:
+                            bg_img.composite(img, 0, 0)
+                            bg_img.save(filename=str(output_file))
+                    else:
+                        img.save(filename=str(output_file))
+            await asyncio.get_event_loop().run_in_executor(None, convert_svg)
+                    
+        except Exception as e:
+            raise ValueError(f"SVG conversion failed: {str(e)}")
+    
+        self.media_cache[media_key] = str(output_file)
+        return f"media://{output_file.as_posix()}"
     
     async def _reverse_media(self, **kwargs) -> str:
         try:
@@ -4051,6 +4102,174 @@ class Tags(commands.Cog):
                 return ("", [], view)
             except Exception as e:
                 return (f"[Select Error: {str(e)}]", [], None)
+        
+        @self.formatter.register('attach')
+        async def _attach(ctx, args_str, **kwargs):
+            """
+            ### {attach:optional_url}
+                * Sends media as an attachment from URL or message attachment.
+                * Example with URL: `{attach:https://example.com/image.png}`
+                * Example with attachment: `{attach}` (with file attached)
+                * Works with any media type (images, videos, audio, etc.)
+            """
+            try:
+                url = args_str.strip() if args_str else None
+                attachments = ctx.message.attachments
+                
+
+                if not url and attachments:
+                    attachment = attachments[0]
+                    file = discord.File(
+                        BytesIO(await attachment.read()),
+                        filename=attachment.filename
+                    )
+                    await ctx.send(file=file)
+                    return discord.utils.MISSING
+                    
+
+                if url:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(url) as resp:
+                            if resp.status != 200:
+                                return f"Failed to download media (HTTP Exception: {resp.status})"
+                            
+
+                            content_type = resp.headers.get('Content-Type', '')
+                            filename = unquote(urlparse(url).path.split('/')[-1]) or "media"
+                            
+
+                            file_data = BytesIO(await resp.read())
+                            file_data.seek(0)
+                            
+
+                            ext = self._get_extension(content_type, filename)
+                            filename = f"{filename.split('.')[0]}.{ext}" if '.' not in filename else filename
+                            
+
+                            file = discord.File(file_data, filename=filename)
+                            await ctx.send(file=file)
+                            return discord.utils.MISSING
+                            
+                return "No media URL provided and no attachments found"
+                
+            except Exception as e:
+                return f"[Attach Error: {str(e)}]"
+            
+        
+        async def _get_media_url(ctx, url_arg: str, media_types: tuple):
+            if url_arg:
+                return url_arg
+                
+
+            if ctx.message.attachments:
+                for attachment in ctx.message.attachments:
+                    if media_types is None or attachment.content_type in media_types:
+                        return attachment.url
+                        
+            return "No valid media found"
+
+        @self.formatter.register('image')
+        async def _image(ctx, url: str = None, **kwargs):
+            """
+            ### {image:url_or_key}
+                * Uploads an image from URL, attachment, or media key.
+                * Supports: png, jpg, jpeg, webp, gif
+                * Example: `{image}` (with attachment)
+                * Example: `{image:https://example.com/image.png}`
+                * Example: `{image:my_media_key}` (after using GScript to load media)
+            """
+            return await _get_media_url(ctx, url, media_types=IMAGE_TYPES, extract_frame=True)
+
+        @self.formatter.register('video')
+        async def _video(ctx, url: str = None, **kwargs):
+            """
+            ### {video:url_or_key}
+                * Uploads a video from URL, attachment, or media key.
+                * Supports: mp4, webm, mov, mkv, avi, wmv
+                * Example: `{video}` (with attachment)
+                * Example: `{video:https://example.com/video.mp4}`
+                * Example: `{video:my_media_key}` (after using GScript to load media)
+            """
+            return await _get_media_url(ctx, url, media_types=VIDEO_TYPES)
+
+        @self.formatter.register('iv')
+        async def _iv(ctx, url: str = None, **kwargs):
+            """
+            ### {iv:url_or_key}
+                * Uploads image or video from URL, attachment, or media key.
+                * Example: `{iv}` (with attachment)
+                * Example: `{iv:https://example.com/media.gif}`
+                * Example: `{iv:my_media_key}` (after using GScript to load media)
+            """
+            return await _get_media_url(ctx, url, media_types=IMAGE_TYPES+VIDEO_TYPES)
+
+        @self.formatter.register('audio')
+        async def _audio(ctx, url: str = None, **kwargs):
+            """
+            ### {audio:url_or_key}
+                * Uploads audio from URL, attachment, or media key.
+                * Supports: mp3, m4a, wav, ogg, opus, flac, mka, wma
+                * Example: `{audio}` (with attachment)
+                * Example: `{audio:https://example.com/sound.mp3}`
+                * Example: `{audio:my_media_key}` (after using GScript to load media)
+            """
+            return await _get_media_url(ctx, url, media_types=AUDIO_TYPES)
+
+        @self.formatter.register('av')
+        async def _av(ctx, url: str = None, **kwargs):
+            """
+            ### {av:url_or_key}
+                * Uploads audio or video from URL, attachment, or media key.
+                * Example: `{av}` (with attachment)
+                * Example: `{av:https://example.com/media.mp4}`
+                * Example: `{av:my_media_key}` (after using GScript to load media)
+            """
+            return await _get_media_url(ctx, url, media_types=AUDIO_TYPES+VIDEO_TYPES)
+
+        @self.formatter.register('media')
+        async def _media(ctx, url: str = None, **kwargs):
+            """
+            ### {media:url_or_key}
+                * Uploads any media from URL, attachment, or media key.
+                * Example: `{media}` (with attachment)
+                * Example: `{media:https://example.com/file.png}`
+                * Example: `{media:my_media_key}` (after using GScript to load media)
+            """
+            return await _get_media_url(ctx, url, media_types=None)
+        
+    def _get_extension(self, content_type: str, filename: str = None) -> str:
+        if content_type:
+            type_to_ext = {
+                'image/png': 'png',
+                'image/jpeg': 'jpg',
+                'image/jpg': 'jpg',
+                'image/webp': 'webp',
+                'image/gif': 'gif',
+                'video/mp4': 'mp4',
+                'video/webm': 'webm',
+                'video/quicktime': 'mov',
+                'video/x-matroska': 'mkv',
+                'video/x-msvideo': 'avi',
+                'video/x-ms-wmv': 'wmv',
+                'audio/mpeg': 'mp3',
+                'audio/mp4': 'm4a',
+                'audio/wav': 'wav',
+                'audio/ogg': 'ogg',
+                'audio/opus': 'opus',
+                'audio/flac': 'flac',
+                'audio/x-matroska': 'mka',
+                'audio/x-ms-wma': 'wma'
+            }
+            for mime, ext in type_to_ext.items():
+                if mime in content_type.lower():
+                    return ext
+        
+
+            if '.' in filename:
+                return filename.split('.')[-1].lower()
+        
+
+            return '.tmp'
 
     
     def parse_args(self, raw: str) -> list[str]:

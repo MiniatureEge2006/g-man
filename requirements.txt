@@ -12,3 +12,5 @@ ollama
 PyNaCl
 yt-dlp
 matplotlib
+jsonschema
+wand
