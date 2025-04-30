@@ -3113,6 +3113,16 @@ class Tags(commands.Cog):
                 return user.name
             return user.name
         
+        @self.formatter.register('userid')
+        async def _userid(ctx, i, **kwargs):
+            """
+            ### {userid:mention/name/displayname/id}
+                * Returns the user ID of an user or self.
+                * Example: `{userid:@MiniatureEge2006}` -> "576819686877036584"
+            """
+            user = await self.formatter.resolve_user(ctx, i)
+            return user.id
+        
         @self.formatter.register('nick')
         async def _nick(ctx, i, **kwargs):
             """
@@ -3194,17 +3204,34 @@ class Tags(commands.Cog):
                 return f"{user.name} does not have a banner."
             return str(user.banner.url)
         
+        @self.formatter.register('usercreatedate')
+        async def _usercreatedate(ctx, i, **kwargs):
+            """
+            ### {usercreatedate:mention/name/displayname/id}
+                * Always returns account creation date (unlike userjoindate which returns server join date when available).
+                * Example: `{usercreatedate:@MiniatureEge2006}` -> "2019-05-11 17:15:30 (May 11, 2019 at 05:15:30 PM)"
+            """
+            user = await self.formatter.resolve_user(ctx, i)
+            return user.created_at.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)') if user.created_at else "Creation date not available"
+        
         @self.formatter.register('userjoindate')
         async def _userjoindate(ctx, i, **kwargs):
             """
             ### {userjoindate:mention/name/displayname/id}
-                * Returns join date in server.
-                * Example: `{userjoindate:@MiniatureEge2006}` -> "2025-24-24 12:00:00 (April 24, 2025 at 12:00:00 PM)"
+                * Returns join date in server if member, otherwise account creation date.
+                * Example outputs:
+                - For server members: "2025-04-24 12:00:00 (April 24, 2025 at 12:00:00 PM)"
+                - For non-members: "2019-05-11 17:15:30 (May 11, 2019 at 05:15:30 PM)"
             """
             user = await self.formatter.resolve_user(ctx, i)
+            date_to_use = None
+            
             if isinstance(user, discord.Member):
-                return user.joined_at.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)') if user.joined_at else "Join date not available."
-            return "User is not in a server."
+                date_to_use = user.joined_at or user.created_at
+            else:
+                date_to_use = user.created_at
+            
+            return date_to_use.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)') if date_to_use else "Date not available"
         
         @self.formatter.register('userstatus')
         async def _userstatus(ctx, i, **kwargs):
@@ -3226,25 +3253,40 @@ class Tags(commands.Cog):
                 * Example: `{usercustomstatus:@MiniatureEge2006}` -> "Playing Roblox"
             """
             user = await self.formatter.resolve_user(ctx, i)
-            if isinstance(user, discord.Member):
-                custom_status = user.activity
-                if custom_status:
-                    activity_type = custom_status.type
-                    activity_type_str = {
-                        discord.ActivityType.playing: "Playing",
-                        discord.ActivityType.streaming: "Streaming",
-                        discord.ActivityType.listening: "Listening to",
-                        discord.ActivityType.watching: "Watching",
-                        discord.ActivityType.competing: "Competing in"
-                    }.get(activity_type, "Activity")
-
-                    emoji = custom_status.emoji
-                    status = custom_status.state
-
-                    if emoji:
-                        return f"{emoji} {activity_type_str} {status}"
-                    return f"{activity_type_str} {status}"
-            return "User has no status or is not in a server."
+            if not isinstance(user, discord.Member):
+                return "User not in this server."
+            
+            activities = []
+            for activity in user.activities:
+                if isinstance(activity, discord.CustomActivity):
+                    status = []
+                    if activity.emoji:
+                        status.append(str(activity.emoji))
+                    if activity.name:
+                        status.append(activity.name)
+                    if status:
+                        activities.append(" ".join(status))
+                
+                elif isinstance(activity, discord.Game):
+                    activities.append(f"Playing {activity.name}")
+                elif isinstance(activity, discord.Spotify):
+                    artists = ", ".join(activity.artists)
+                    activities.append(f"Listening to {artists} - {activity.title}")
+                elif isinstance(activity, discord.Streaming):
+                    activities.append(f"Streaming {activity.game} on {activity.platform}")
+                elif activity.type == discord.ActivityType.listening and not isinstance(activity, discord.Spotify):
+                    activities.append(f"Listening to {activity.name}")
+                elif activity.type == discord.ActivityType.watching:
+                    activities.append(f"Watching {activity.name}")
+                elif activity.type == discord.ActivityType.competing:
+                    activities.append(f"Competing in {activity.name}")
+                elif activity.type == discord.ActivityType.playing and not isinstance(activity, discord.Game):
+                    activities.append(f"Playing {activity.name}")
+            
+            if not activities:
+                return f"{user.name} has no activities at this time."
+            
+            return " | ".join(activities)
         
         @self.formatter.register('userbadges')
         async def _userbadges(ctx, i, **kwargs):
@@ -3300,12 +3342,24 @@ class Tags(commands.Cog):
         async def _randuser(ctx, user, **kwargs):
             """
             ### {randomuser}
-                * Returns a random user from the server.
-                * Example: `{randomuser}`
+                * Returns a random user from current the server.
+                * Example: `{randuser}`
             """
             if ctx.guild:
                 random_user = random.choice(ctx.guild.members)
                 return random_user.name
+            return "This tag function can only be used in a server."
+        
+        @self.formatter.register('randuserid')
+        async def _randuserid(ctx, user, **kwargs):
+            """
+            ### {randuserid}
+                * Returns a random user ID from the current server.
+                * Example: `{randuser}`
+            """
+            if ctx.guild:
+                random_user = random.choice(ctx.guild.members)
+                return random_user.id
             return "This tag function can only be used in a server."
         
         @self.formatter.register('channel')
@@ -3322,7 +3376,22 @@ class Tags(commands.Cog):
             else:
                 return str(ctx.channel)
         
+        @self.formatter.register('channelid')
+        async def _channelid(ctx, i, **kwargs):
+            """
+            ### {channelid}
+                * Returns current channel ID.
+                * Example: `{channel}` -> "1337131589087400046"
+            """
+            if isinstance(ctx.channel, discord.DMChannel):
+                return ctx.channel.id
+            elif isinstance(ctx.channel, discord.TextChannel):
+                return ctx.channel.id
+            else:
+                return ctx.channel.id if ctx.channel else "Channel ID not available."
+        
         @self.formatter.register('guild')
+        @self.formatter.register('server')
         async def _guild(ctx, i, **kwargs):
             """
             ### {guild}
@@ -3336,6 +3405,21 @@ class Tags(commands.Cog):
             else:
                 return "Private Channel"
         
+        @self.formatter.register('guildid')
+        @self.formatter.register('serverid')
+        async def _guildid(ctx, i, **kwargs):
+            """
+            ### {guildid}
+                * Returns current server ID.
+                * Example: `{guildid}` -> "1337128182964293632"
+            """
+            if ctx.guild:
+                return ctx.guild.id
+            elif isinstance(ctx.guild, discord.DMChannel):
+                return "This tag function can only be used in a server."
+            else:
+                return "Server ID not available."
+
         @self.formatter.register('embed')
         async def _embed(ctx, args_str, **kwargs):
             """
@@ -3519,6 +3603,11 @@ class Tags(commands.Cog):
     async def on_message_delete(self, message):
         if message.id in self._variables:
             del self._variables[message.id]
+    
+    @commands.Cog.listener()
+    async def on_cog_unload(self):
+        if self.processor.session and not self.processor.session.closed():
+            asyncio.create_task(self.processor.session.close())
 
     
     @commands.hybrid_group(name="tag", description="Tag management commands.", invoke_without_command=True, with_app_command=True, aliases=["t"])
