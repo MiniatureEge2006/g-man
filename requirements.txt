@@ -11,3 +11,4 @@ dateparser
 ollama
 PyNaCl
 yt-dlp
+matplotlib

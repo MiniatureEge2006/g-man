@@ -24,6 +24,7 @@ import json
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import math
+import matplotlib.font_manager
 
 
 
@@ -369,7 +370,7 @@ class MediaProcessor:
                 'color': {'default': 'black', 'type': str},
                 'output_key': {'required': True, 'type': str},
                 'font_size': {'default': 64, 'type': int},
-                'font': {'default': 'arial.ttf', 'type': str},
+                'font': {'default': 'arial', 'type': str},
                 'outline_color': {'required': False, 'type': str},
                 'outline_width': {'required': False, 'type': int},
                 'shadow_color': {'required': False, 'type': str},
@@ -1530,7 +1531,7 @@ class MediaProcessor:
         try:
             return await self._text_impl(**kwargs)
         except ValueError as e:
-            return f"Gradient text error: {str(e)}"
+            return f"Text error: {str(e)}"
         
     async def _text_impl(self, **kwargs) -> str:
         def get_text_size(font, text):
@@ -1538,6 +1539,47 @@ class MediaProcessor:
             width = bbox[2] - bbox[0]
             height = bbox[3] - bbox[1]
             return width, height
+        async def load_font(font_name: str, font_size: int) -> ImageFont.FreeTypeFont:
+            
+
+            try:
+                font = await asyncio.to_thread(ImageFont.truetype, font=font_name, size=font_size)
+                return font
+            except Exception as e:
+                pass
+
+
+            try:
+                matches = []
+                for f in matplotlib.font_manager.fontManager.ttflist:
+                    if f.name.lower() == font_name.lower():
+                        matches.append(f.fname)
+                        try:
+                            font = await asyncio.to_thread(ImageFont.truetype, f.fname, font_size)
+                            return font
+                        except Exception as e:
+                            continue
+            except Exception as e:
+                pass
+
+
+            system_paths = [
+                f"C:/Windows/Fonts/{font_name.replace(' ', '')}.ttf",
+                f"C:/Windows/Fonts/{font_name.replace(' ', '')}.otf",
+                f"/Library/Fonts/{font_name}.ttf",
+                f"/Library/Fonts/{font_name}.otf",
+                f"/usr/share/fonts/truetype/{font_name.replace(' ', '')}.ttf",
+                f"/usr/local/share/fonts/{font_name.replace(' ', '')}.ttf",
+            ]
+            for path in system_paths:
+                try:
+                    font = await asyncio.to_thread(ImageFont.truetype, path, font_size)
+                    return font
+                except Exception as e:
+                    pass
+
+
+            return await asyncio.to_thread(ImageFont.load_default)
 
         try:
             input_key = kwargs['input_key']
@@ -1569,8 +1611,11 @@ class MediaProcessor:
             base_img = await asyncio.to_thread(base_img.convert, 'RGBA')
 
 
-            font_path = f"fonts/{font_name}"
-            font = await asyncio.to_thread(ImageFont.truetype, font_path, font_size)
+
+            font = await load_font(font_name, font_size)
+
+            if not isinstance(font, ImageFont.FreeTypeFont):
+                font = await asyncio.to_thread(ImageFont.load_default)
 
 
             draw = await asyncio.to_thread(ImageDraw.Draw, base_img)
@@ -1580,9 +1625,15 @@ class MediaProcessor:
                 max_width = int(wrap_width)
                 
 
-            while get_text_size(font, text)[0] > max_width and font_size > 8:
-                font_size = int(font_size * 0.9)
-                font = await asyncio.to_thread(ImageFont.truetype, font_path, font_size)
+            current_font_size = font_size
+            while True:
+                test_font = await load_font(font_name, current_font_size)
+                text_width, _ = get_text_size(test_font, text)
+                
+                if text_width <= max_width or current_font_size <= 8:
+                    font = test_font
+                    break
+                current_font_size = max(8, int(current_font_size * 0.9))
 
             def wrap_text(draw, text, font, max_width):
                 words = text.split(' ')
@@ -1704,7 +1755,7 @@ class MediaProcessor:
             return f"media://{output_file.as_posix()}"
 
         except Exception as e:
-            return f"Gradient text error: {str(e)}"
+            return f"Text error: {str(e)}"
 
 
     async def _replace_audio(self, **kwargs) -> str:
