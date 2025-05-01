@@ -3324,12 +3324,77 @@ class Tags(commands.Cog):
             chosen_raw = then_raw if result else else_raw
             return chosen_raw
         
+        @self.formatter.register('and')
+        async def _and(ctx, args_str, **kwargs):
+            """
+            ### {and:value1|value2|...}
+                * Returns last value if ALL values are non-empty strings
+                * Returns empty string if any value is empty
+                * Example: `{and:Yes|{get:var}}` returns "Yes" only if {get:var} exists
+            """
+            args = self.parse_args(args_str)
+            if not args:
+                return ""
+            
+            last_valid = ""
+            for arg in args:
+                if not arg.strip():
+                    return ""
+                last_valid = arg
+            return last_valid
+        
+        @self.formatter.register('or')
+        async def _or(ctx, args_str, **kwargs):
+            """
+            ### {or:value1|value2|...}
+                * Returns first non-empty value
+                * Example: `{or:{get:var1}|{get:var2}|default}`
+            """
+            for arg in self.parse_args(args_str):
+                if arg.strip():
+                    return arg
+            return ""
+        
+        @self.formatter.register('equals')
+        async def _equals(ctx, args_str, **kwargs):
+            """
+            ### {equals:val1|val2|...}
+                * Returns "1" if ALL values match exactly
+                * Example: `{equals:{get:var}|hello}`
+            """
+            args = self.parse_args(args_str)
+            if len(args) < 2:
+                return ""
+            
+            first = args[0]
+            for val in args[1:]:
+                if val != first:
+                    return ""
+            return "1"
+        
+        @self.formatter.register('notequals')
+        async def _notequals(ctx, args_str, **kwargs):
+            """
+            ### {notequals:val1|val2|...}
+                * Returns "1" if any value differs from others
+                * Example: `{notequals:{get:var}|{get:var2}}`
+            """
+            args = self.parse_args(args_str)
+            if len(args) < 2:
+                return ""
+            
+            first = args[0]
+            for val in args[1:]:
+                if val != first:
+                    return "1"
+            return ""
+        
         @self.formatter.register('range')
         async def _range(ctx, args_str, **kwargs):
             """
             ### {range:min|max}
                 * Generates a random integer between min and max (inclusive)
-                * Example: `{random:1|6}` -> "5"
+                * Example: `{range:1|6}` -> "5"
             """
             try:
                 processed = str(args_str)
