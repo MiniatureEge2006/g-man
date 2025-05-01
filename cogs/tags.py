@@ -3373,6 +3373,7 @@ class Tags(commands.Cog):
             return "1"
         
         @self.formatter.register('notequals')
+        @self.formatter.register('unequals')
         async def _notequals(ctx, args_str, **kwargs):
             """
             ### {notequals:val1|val2|...}
