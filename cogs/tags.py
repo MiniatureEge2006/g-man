@@ -358,7 +358,7 @@ class MediaProcessor:
             },
             'trim': {
                 'input_key': {'required': True, 'type': str},
-                'start_time': {'required': True, 'type': str},  # "00:00:10"
+                'start_time': {'required': True, 'type': str},
                 'end_time': {'required': True, 'type': str},
                 'output_key': {'required': True, 'type': str}
             },
@@ -413,6 +413,18 @@ class MediaProcessor:
                 'loop_audio': {'default': False, 'type': bool},
                 'loop_media': {'default': False, 'type': bool}
             },
+            'tremolo': {
+                'input_key': {'required': True, 'type': str},
+                'frequency': {'default': 5.0, 'type': float},
+                'depth': {'default': 0.5, 'type': float},
+                'output_key': {'required': True, 'type': str}
+            },
+            'vibrato': {
+                'input_key': {'required': True, 'type': str},
+                'frequency': {'default': 5.0, 'type': float},
+                'depth': {'default': 0.5, 'type': float},
+                'output_key': {'required': True, 'type': str}
+            },
             'create': {
                 'media_key': {'required': True, 'type': str},
                 'width': {'required': True, 'type': str},
@@ -453,6 +465,8 @@ class MediaProcessor:
             'text': self._text,
             'audioputreplace': self._replace_audio,
             'audioputmix': self._mix_audio,
+            'tremolo': self._tremolo,
+            'vibrato': self._vibrato,
             'create': self._create_image,
             'fadein': self._fadein_media,
             'fadeout': self._fadeout_media
@@ -1936,6 +1950,66 @@ class MediaProcessor:
         ])
     
         success, error = await self._run_ffmpeg([x for x in cmd if x is not None])
+        if success:
+            self.media_cache[output_key] = str(output_file)
+            return f"media://{output_file.as_posix()}"
+        return error
+    
+    async def _tremolo(self, **kwargs) -> str:
+        try:
+            return await self._tremolo_impl(**kwargs)
+        except ValueError as e:
+            return f"Tremolo error: {str(e)}"
+    
+    async def _tremolo_impl(self, **kwargs) -> str:
+        input_key = kwargs['input_key']
+        frequency = kwargs['frequency']
+        depth = kwargs['depth']
+        output_key = kwargs['output_key']
+        if input_key not in self.media_cache:
+            return "Error: Missing input media"
+
+        input_path = Path(self.media_cache[input_key])
+        output_file = self._get_temp_path(input_path.suffix[1:])
+
+        cmd = [
+            'ffmpeg', '-hide_banner',
+            '-i', input_path.as_posix(),
+            '-af', f'tremolo={frequency}:{depth}',
+            '-y', output_file.as_posix()
+        ]
+
+        success, error = await self._run_ffmpeg(cmd)
+        if success:
+            self.media_cache[output_key] = str(output_file)
+            return f"media://{output_file.as_posix()}"
+        return error
+    
+    async def _vibrato(self, **kwargs) -> str:
+        try:
+            return await self._vibrato_impl(**kwargs)
+        except ValueError as e:
+            return f"Vibrato error: {str(e)}"
+    
+    async def _vibrato_impl(self, **kwargs) -> str:
+        input_key = kwargs['input_key']
+        frequency = kwargs['frequency']
+        depth = kwargs['depth']
+        output_key = kwargs['output_key']
+        if input_key not in self.media_cache:
+            return "Error: Missing input media"
+
+        input_path = Path(self.media_cache[input_key])
+        output_file = self._get_temp_path(input_path.suffix[1:])
+
+        cmd = [
+            'ffmpeg', '-hide_banner',
+            '-i', input_path.as_posix(),
+            '-af', f'vibrato={frequency}:{depth}',
+            '-y', output_file.as_posix()
+        ]
+
+        success, error = await self._run_ffmpeg(cmd)
         if success:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
