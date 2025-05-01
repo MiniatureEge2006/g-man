@@ -4187,69 +4187,76 @@ class Tags(commands.Cog):
         @self.formatter.register('image')
         async def _image(ctx, url: str = None, **kwargs):
             """
-            ### {image:url_or_key}
-                * Uploads an image from URL, attachment, or media key.
-                * Supports: png, jpg, jpeg, webp, gif
-                * Example: `{image}` (with attachment)
-                * Example: `{image:https://example.com/image.png}`
-                * Example: `{image:my_media_key}` (after using GScript to load media)
+            ### {image:url}
+                * Returns the provided image URL or first image attachment URL
+                * Supported types: PNG, JPG, JPEG, WEBP, GIF
+                * Returns "No valid media found" if no match
+                * Examples:
+                    - `{image:https://example.com/img.png}` → "https://example.com/img.png"
+                    - `{image}` (with image attachment) → attachment URL
+                    - `{image}` (no attachment) → "No valid media found"
             """
-            return await _get_media_url(ctx, url, media_types=IMAGE_TYPES, extract_frame=True)
+            return await _get_media_url(ctx, url, media_types=IMAGE_TYPES)
 
         @self.formatter.register('video')
         async def _video(ctx, url: str = None, **kwargs):
             """
-            ### {video:url_or_key}
-                * Uploads a video from URL, attachment, or media key.
-                * Supports: mp4, webm, mov, mkv, avi, wmv
-                * Example: `{video}` (with attachment)
-                * Example: `{video:https://example.com/video.mp4}`
-                * Example: `{video:my_media_key}` (after using GScript to load media)
+            ### {video:url}
+                * Returns the provided video URL or first video attachment URL
+                * Supported types: MP4, WEBM, MOV, MKV, AVI, WMV
+                * Returns "No valid media found" if no match
+                * Examples:
+                    - `{video:https://example.com/vid.mp4}` → "https://example.com/vid.mp4"
+                    - `{video}` (with video attachment) → attachment URL
             """
             return await _get_media_url(ctx, url, media_types=VIDEO_TYPES)
 
         @self.formatter.register('iv')
         async def _iv(ctx, url: str = None, **kwargs):
             """
-            ### {iv:url_or_key}
-                * Uploads image or video from URL, attachment, or media key.
-                * Example: `{iv}` (with attachment)
-                * Example: `{iv:https://example.com/media.gif}`
-                * Example: `{iv:my_media_key}` (after using GScript to load media)
+            ### {iv:url}
+                * Returns the provided image/video URL or first matching attachment URL
+                * Returns "No valid media found" if no match
+                * Examples:
+                    - `{iv:https://example.com/media.gif}` → URL
+                    - `{iv}` (with image/video attachment) → attachment URL
             """
             return await _get_media_url(ctx, url, media_types=IMAGE_TYPES+VIDEO_TYPES)
 
         @self.formatter.register('audio')
         async def _audio(ctx, url: str = None, **kwargs):
             """
-            ### {audio:url_or_key}
-                * Uploads audio from URL, attachment, or media key.
-                * Supports: mp3, m4a, wav, ogg, opus, flac, mka, wma
-                * Example: `{audio}` (with attachment)
-                * Example: `{audio:https://example.com/sound.mp3}`
-                * Example: `{audio:my_media_key}` (after using GScript to load media)
+            ### {audio:url}
+                * Returns the provided audio URL or first audio attachment URL
+                * Supported types: MP3, WAV, OGG, OPUS, FLAC, M4A, MKA, WMA
+                * Returns "No valid media found" if no match
+                * Examples:
+                    - `{audio:https://example.com/sound.mp3}` → URL
+                    - `{audio}` (with audio attachment) → attachment URL
             """
             return await _get_media_url(ctx, url, media_types=AUDIO_TYPES)
 
         @self.formatter.register('av')
         async def _av(ctx, url: str = None, **kwargs):
             """
-            ### {av:url_or_key}
-                * Uploads audio or video from URL, attachment, or media key.
-                * Example: `{av}` (with attachment)
-                * Example: `{av:https://example.com/media.mp4}`
-                * Example: `{av:my_media_key}` (after using GScript to load media)
+            ### {av:url}
+                * Returns the provided audio/video URL or first matching attachment URL
+                * Returns "No valid media found" if no match
+                * Examples:
+                    - `{av:https://example.com/media.mp4}` → URL
+                    - `{av}` (with audio/video attachment) → attachment URL
             """
             return await _get_media_url(ctx, url, media_types=AUDIO_TYPES+VIDEO_TYPES)
 
         @self.formatter.register('media')
         async def _media(ctx, url: str = None, **kwargs):
             """
-            ### {media:url_or_key}
-                * Uploads any media from URL, attachment, or media key.
-                * Example: `{media}` (with attachment)
-                * Example: `{media:https://example.com/file.png}`
-                * Example: `{media:my_media_key}` (after using GScript to load media)
+            ### {media:url}
+                * Returns the provided URL or first attachment URL (any type)
+                * Returns "No valid media found" if no match
+                * Examples:
+                    - `{media:https://example.com/file.txt}` → URL
+                    - `{media}` (with any attachment) → attachment URL
             """
             return await _get_media_url(ctx, url, media_types=None)
         
