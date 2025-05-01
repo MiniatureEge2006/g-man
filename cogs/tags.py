@@ -544,6 +544,7 @@ class MediaProcessor:
     async def cleanup(self):
         if self.session and not self.session.closed:
             await self.session.close()
+            self.session = None
         for proc in self.active_processes:
             if proc.returncode is None:
                 try:
@@ -4454,10 +4455,8 @@ class Tags(commands.Cog):
         if message.id in self._variables:
             del self._variables[message.id]
     
-    @commands.Cog.listener()
-    async def on_cog_unload(self):
-        if self.processor.session and not self.processor.session.closed():
-            asyncio.create_task(self.processor.session.close())
+    def cog_unload(self):
+        asyncio.create_task(self.cleanup_resources())
 
     
     @commands.hybrid_group(name="tag", description="Tag management commands.", invoke_without_command=True, with_app_command=True, aliases=["t"])

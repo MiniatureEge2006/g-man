@@ -133,8 +133,8 @@ class Code(commands.Cog):
             await ctx.send(embed=error_embed)
     
     
-    @commands.Cog.listener()
-    async def on_cog_unload(self):
+
+    def cog_unload(self):
         if self.session and not self.session.closed:
             asyncio.create_task(self.session.close())
 
