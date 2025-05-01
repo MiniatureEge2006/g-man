@@ -2172,6 +2172,12 @@ class TagFormatter:
         try:
             args = parts[1] if len(parts) > 1 else ''
             func = self.functions[name]
+
+            if name in ('note', 'comment'):
+                return await func(ctx, args, **kwargs)
+            
+            if name == 'ignore':
+                return await func(ctx, args, **kwargs)
                 
 
             if name in self._component_tags:
@@ -2403,7 +2409,17 @@ class Tags(commands.Cog):
                 * Returns the text exactly as provided, without evaluating any nested tags.
                 * Example: `{ignore:{user}}` -> "{user}"
             """
-            return text
+            return text.replace('{', '\\{').replace('}', '\\}')
+        
+        @self.formatter.register('note')
+        @self.formatter.register('comment')
+        async def _note(ctx, text, **kwargs):
+            """
+            ### {note:text}
+                * Acts as a comment - removed from final output but visible in raw content.
+                * Example: `Hello {note:This is a comment}world` -> "Hello world"
+            """
+            return ""
             
         @self.formatter.register('args')
         def args(ctx, _, **kwargs):
