@@ -1554,7 +1554,7 @@ class MediaProcessor:
             'ffmpeg', '-hide_banner',
             '-i', base_path.as_posix(),
             '-i', overlay_path.as_posix(),
-            '-filter_complex', f'overlay={kwargs["x"]}:{kwargs["y"]}',
+            '-filter_complex', f'overlay={x}:{y}',
             '-y', output_file.as_posix()
         ]
 
@@ -1564,23 +1564,20 @@ class MediaProcessor:
                 'ffmpeg', '-hide_banner',
                 '-i', base_path.as_posix(),
                 '-i', overlay_path.as_posix(),
-                '-filter_complex', f'overlay={kwargs["x"]}:{kwargs["y"]}',
+                '-filter_complex', f'overlay={x}:{y}',
                 '-frames:v', '1',
-                '-update', '1',
                 '-y', output_file.as_posix()
             ]
 
 
         elif not is_base_image and is_overlay_image:
-            cmd[3:3] = ['-stream_loop', '-1']
-            cmd.append('-shortest')
+            cmd[4:4] = ['-stream_loop', '-1']
+            cmd.insert(cmd.index('-y'), '-shortest')
         success, error = await self._run_ffmpeg(cmd)
         if success:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
-        else:
-            print(f"Error in overlay: {error}")
-            return error
+        return error
     
     async def _text(self, **kwargs) -> str:
         try:
@@ -2140,15 +2137,16 @@ class TagFormatter:
             return func
         return decorator
     
-    async def format(self, content: str, ctx: commands.Context, **kwargs) -> tuple[str, list[discord.Embed], discord.ui.View | None]:
+    async def format(self, content: str, ctx: commands.Context, **kwargs) -> tuple[str, list[discord.Embed], discord.ui.View | None, list[discord.File]]:
         text_parts = []
         embeds = []
         view = None
+        files = []
         
         for chunk in self._split_chunks(content):
             if chunk.startswith('{') and chunk.endswith('}'):
                 result = await self._process_tag(chunk, ctx, **kwargs)
-                text, new_embeds, new_view = self._normalize_result(result)
+                text, new_embeds, new_view, new_files = self._normalize_result(result)
                 
                 text_parts.append(text)
                 embeds.extend(new_embeds)
@@ -2156,10 +2154,11 @@ class TagFormatter:
                     view = view or discord.ui.View(timeout=None)
                     for item in new_view.children:
                         view.add_item(item)
+                files.extend(new_files)
             else:
                 text_parts.append(chunk)
         
-        return ''.join(text_parts), embeds, view if view and view.children else None
+        return ''.join(text_parts), embeds, view if view and view.children else None, files
 
     async def _process_tag(self, tag: str, ctx: commands.Context, **kwargs):
         inner = tag[1:-1].strip()
@@ -2183,29 +2182,31 @@ class TagFormatter:
             if name in self._component_tags:
                 result = func(ctx, args, **kwargs)
             else:
-                arg_text, _, _ = await self.format(args, ctx, **kwargs)
+                arg_text, _, _, _ = await self.format(args, ctx, **kwargs)
                 result = func(ctx, arg_text.strip(), **kwargs)
                 
             return await result if asyncio.iscoroutine(result) else result
                 
         except Exception as e:
             return f"[Tag Error: {str(e)}]"
-
-    def _normalize_result(self, result) -> tuple[str, list[discord.Embed], discord.ui.View | None]:
+    @staticmethod
+    def _normalize_result(result) -> tuple[str, list[discord.Embed], discord.ui.View | None, list[discord.File]]:
         if result is None or result is discord.utils.MISSING:
-            return ("", [], None)
+            return ("", [], None, [])
         if isinstance(result, discord.Embed):
-            return ("", [result], None)
+            return ("", [result], None, [])
         elif isinstance(result, discord.ui.Item):
             view = discord.ui.View(timeout=None)
             view.add_item(result)
-            return ("", [], view)
+            return ("", [], view, [])
         elif isinstance(result, discord.ui.View):
-            return ("", [], result)
-        elif isinstance(result, tuple) and len(result) == 3:
+            return ("", [], result, [])
+        elif isinstance(result, tuple) and len(result) == 4:
             return result
+        elif isinstance(result, tuple) and len(result) == 3:
+            return (*result, [])
         else:
-            return (str(result), [], None)
+            return (str(result), [], None, [])
 
     def _split_chunks(self, content: str) -> list[str]:
         chunks = []
@@ -2363,33 +2364,18 @@ class Tags(commands.Cog):
                 file_paths = [f for f in file_paths if f.exists() and f.is_file()]
 
                 if not file_paths:
-                    return "\n".join(results)
+                    return "\n".join(results), [], None, []
 
                 files = []
                 for path in file_paths:
                     if path.stat().st_size <= ctx.guild.filesize_limit if ctx.guild else 10 * 1024 * 1024:
                         files.append(discord.File(path))
 
-                if not files:
-                    return "All output files were too large to upload."
+                return ("", [], None, files[:10])
 
-                try:
-                    await ctx.send(files=files[:10])
-                except Exception as e:
-                    return f"Upload error: {str(e)}"
-                finally:
-                    for fp in file_paths:
-                        try:
-                            if fp.exists():
-                                fp.unlink(missing_ok=True)
-                                self.processor.temp_files.discard(str(fp))
-                        except Exception as e:
-                            pass
-
-                return discord.utils.MISSING
             except Exception as e:
                 await self.processor.cleanup()
-                return f"Script processing error: {str(e)}"
+                return f"Script processing error: {str(e)}", [], None, []
 
     
     def setup_formatters(self):
@@ -4354,13 +4340,14 @@ class Tags(commands.Cog):
                 WHERE name = $1 AND (guild_id = $2 OR user_id = $3)""",
                 name, ctx.guild.id if ctx.guild else None, ctx.author.id
             )
-            text, embeds, view = await self.formatter.format(tag['content'], ctx, args=args)
-            if text.strip() or embeds or (view and view.children):
+            text, embeds, view, files = await self.formatter.format(tag['content'], ctx, args=args)
+            if text.strip() or embeds or (view and view.children) or files:
                 try:
                     await ctx.send(
                         content=text[:2000] if text else None,
                         embeds=embeds[:10],
-                        view=view if view and view.children else None
+                        view=view if view and view.children else None,
+                        files=files[:10]
                     )
                 except discord.HTTPException as e:
                     await ctx.send(f"Failed to send tag: {e}")
@@ -4386,13 +4373,14 @@ class Tags(commands.Cog):
                 WHERE name = $1 AND (guild_id = $2 OR user_id = $3)""",
                 name, ctx.guild.id if ctx.guild else None, ctx.author.id
             )
-            text, embeds, view = await self.formatter.format(tag['content'], ctx, args=args)
-            if text.strip() or embeds or (view and view.children):
+            text, embeds, view, files = await self.formatter.format(tag['content'], ctx, args=args)
+            if text.strip() or embeds or (view and view.children) or files:
                 try:
                     await ctx.send(
                         content=text[:2000] if text else None,
                         embeds=embeds[:10],
-                        view=view if view and view.children else None
+                        view=view if view and view.children else None,
+                        files=files[:10]
                     )
                 except discord.HTTPException as e:
                     await ctx.send(f"Failed to send tag: {e}")
@@ -4452,7 +4440,7 @@ class Tags(commands.Cog):
             )
 
             if updated != "UPDATE 0":
-                return await ctx.send(f"Updated personal tag `{name}`.")
+                return await ctx.send(f"Edited personal tag `{name}`.")
 
 
             if ctx.guild:
@@ -4462,7 +4450,7 @@ class Tags(commands.Cog):
                 )
 
                 if updated != "UPDATE 0":
-                    return await ctx.send(f"Updated server tag `{name}`.")
+                    return await ctx.send(f"Edited server tag `{name}`.")
 
                 if ctx.author.guild_permissions.manage_messages:
                     updated = await conn.execute(
@@ -4470,7 +4458,7 @@ class Tags(commands.Cog):
                         new_content, name, ctx.guild.id
                     )
                     if updated != "UPDATE 0":
-                        return await ctx.send(f"Forcefully updated server tag `{name}`.")
+                        return await ctx.send(f"Forcefully edited server tag `{name}`.")
 
         await ctx.send(f"No editable tag named `{name}` found.")
     
