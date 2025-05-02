@@ -323,6 +323,11 @@ class MediaProcessor:
                 'output_key': {'required': True, 'type': str},
                 # Input keys are handled as remaining positional args
             },
+            'convert': {
+                'input_key': {'required': True, 'type': str},
+                'format': {'required': True, 'type': str},
+                'output_key': {'required': True, 'type': str}
+            },
             'render': {
                 'media_key': {'required': True, 'type': str},
                 # Format and filename are handled as remaining positional args
@@ -330,6 +335,52 @@ class MediaProcessor:
             'contrast': {
                 'input_key': {'required': True, 'type': str},
                 'contrast_level': {'required': True, 'type': float},
+                'output_key': {'required': True, 'type': str}
+            },
+            'opacity': {
+                'input_key': {'required': True, 'type': str},
+                'opacity_level': {'required': True, 'type': float},
+                'output_key': {'required': True, 'type': str}
+            },
+            'saturate': {
+                'input_key': {'required': True, 'type': str},
+                'saturation_level': {'required': True, 'type': float},
+                'output_key': {'required': True, 'type': str}
+            },
+            'hue': {
+                'input_key': {'required': True, 'type': str},
+                'hue_shift': {'required': True, 'type': str},
+                'output_key': {'required': True, 'type': str}
+            },
+            'brightness': {
+                'input_key': {'required': True, 'type': str},
+                'brightness_level': {'required': True, 'type': float},
+                'output_key': {'required': True, 'type': str}
+            },
+            'gamma': {
+                'input_key': {'required': True, 'type': str},
+                'gamma_level': {'required': True, 'type': float},
+                'output_key': {'required': True, 'type': str}
+            },
+            'clone': {
+                'input_key': {'required': True, 'type': str},
+                'output_key': {'required': True, 'type': str}
+            },
+            'fps': {
+                'input_key': {'required': True, 'type': str},
+                'fps_value': {'required': True, 'type': str},
+                'output_key': {'required': True, 'type': str}
+            },
+            'grayscale': {
+                'input_key': {'required': True, 'type': str},
+                'output_key': {'required': True, 'type': str}
+            },
+            'sepia': {
+                'input_key': {'required': True, 'type': str},
+                'output_key': {'required': True, 'type': str}
+            },
+            'invert': {
+                'input_key': {'required': True, 'type': str},
                 'output_key': {'required': True, 'type': str}
             },
             'resize': {
@@ -348,12 +399,7 @@ class MediaProcessor:
             },
             'rotate': {
                 'input_key': {'required': True, 'type': str},
-                'angle': {'required': True, 'type': float},
-                'output_key': {'required': True, 'type': str}
-            },
-            'filter': {
-                'input_key': {'required': True, 'type': str},
-                'filter_type': {'required': True, 'type': str},
+                'angle': {'required': True, 'type': str},
                 'output_key': {'required': True, 'type': str}
             },
             'trim': {
@@ -453,11 +499,21 @@ class MediaProcessor:
             'reverse': self._reverse_media,
             'concat': self._concat_media,
             'render': self._render_media,
+            'convert': self._convert_media,
             'contrast': self._adjust_contrast,
+            'opacity': self._adjust_opacity,
+            'saturate': self._adjust_saturation,
+            'hue': self._adjust_hue,
+            'brightness': self._adjust_brightness,
+            'gamma': self._adjust_gamma,
+            'clone': self._clone_media,
+            'fps': self._change_fps,
+            'grayscale': self._apply_grayscale,
+            'sepia': self._apply_sepia,
+            'invert': self._invert_media,
             'resize': self._resize_media,
             'crop': self._crop_media,
             'rotate': self._rotate_media,
-            'filter': self._apply_filter,
             'trim': self._trim_media,
             'speed': self._change_speed,
             'volume': self._adjust_volume,
@@ -610,18 +666,18 @@ class MediaProcessor:
             'ffprobe', '-v', 'error',
             '-select_streams', 'v:0',
             '-show_entries', 'stream=width,height',
-            '-of', 'csv=p=0',
+            '-of', 'json',
             file_path
         ]
         
-        try:
-            success, output = await self._run_ffmpeg(cmd)
-            if success and ',' in output:
-                width, height = output.strip().split(',')
-                return (int(width), int(height))
-        except:
-            pass
-        
+        success, output = await self._run_ffprobe(cmd)
+        if success and output:
+            try:
+                data = json.loads(output)
+                stream = data['streams'][0]
+                return (int(stream['width']), int(stream['height']))
+            except:
+                return (0, 0)
         return (0, 0)
 
     async def _resolve_dimension(self, dim_str: str, context_key: str = None) -> int:
@@ -934,57 +990,77 @@ class MediaProcessor:
         finally:
             self.active_processes.discard(proc)
     
+    async def _run_ffprobe(self, cmd: list) -> tuple:
+        if platform.system() == 'Windows':
+            cmd[0] = 'ffprobe.exe'
+        
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            creationflags=subprocess.CREATE_NO_WINDOW if platform.system() == 'Windows' else 0
+        )
+
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=20)
+            if proc.returncode != 0:
+                error_msg = stderr.decode('utf-8', errors='replace').strip()
+                return False, f"FFprobe error: {error_msg}"
+            return True, stdout.decode('utf-8', errors='replace').strip()
+        except Exception as e:
+            return False, f"FFprobe error: {str(e)}"
+    
     async def _probe_media_info(self, path: Path) -> tuple:
-        probe_cmd = [
+        try:
+            if path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp'):
+                with Image.open(path) as img:
+                    return img.width, img.height, 0.0, False
+        except:
+            pass
+
+
+        cmd = [
             'ffprobe', '-v', 'error',
-            '-select_streams', 'v:0',
-            '-show_entries', 'stream=width,height,duration',
+            '-show_entries', 'stream=codec_type,width,height,duration',
+            '-show_entries', 'format=duration',
             '-of', 'json',
             str(path)
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *probe_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await proc.communicate()
         
+        success, output = await self._run_ffprobe(cmd)
+        if not success:
+            return (1, 1, 0.0, False)
+
         try:
-            info = json.loads(stdout)
-            stream = info['streams'][0]
-            width = int(stream['width'])
-            height = int(stream['height'])
-            duration = float(stream.get('duration', 0))
-        except Exception:
-            try:
-                img = await asyncio.to_thread(Image.open, path)
-                width, height = img.size
-                duration = 0
-            except Exception:
-                width, height= 1920, 1080
-            duration = 0
+            data = json.loads(output)
+            streams = data.get('streams', [])
+            format_info = data.get('format', {})
+            
 
+            width, height = 1, 1
+            for stream in streams:
+                if stream.get('codec_type') == 'video':
+                    width = max(int(stream.get('width', 1)), 1)
+                    height = max(int(stream.get('height', 1)), 1)
+                    break
+                    
 
-        audio_cmd = [
-            'ffprobe', '-v', 'error',
-            '-show_entries', 'stream=codec_type',
-            '-of', 'csv=p=0',
-            str(path)
-        ]
-        a_proc = await asyncio.create_subprocess_exec(
-            *audio_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        a_stdout, _ = await a_proc.communicate()
-        has_audio = b'audio' in a_stdout
+            duration = max(float(format_info.get('duration', 0)), 0.0)
+            
 
-        return width, height, duration, has_audio
+            has_audio = any(s.get('codec_type') == 'audio' for s in streams)
+            
+            return (width, height, duration, has_audio)
+            
+        except Exception as e:
+            return (1, 1, 0.0, False)
     
     async def execute_media_script(self, script: str) -> list[str]:
         output_files = []
         last_output_key = None
         errors = []
+        self.media_cache.clear()
+        
         for line in script.splitlines():
             line = line.strip()
             if not line:
@@ -996,10 +1072,13 @@ class MediaProcessor:
 
             cmd = parts[0].lower()
             args = parts[1:]
+            
 
-            if cmd not in self.gscript_commands:
-                errors.append(f"Unknown command: {cmd}")
-                break
+            if 'output_key' in self.command_specs.get(cmd, {}):
+                parsed_args = self._parse_command_args(cmd, args)
+                output_key = parsed_args.get('output_key')
+                if output_key and output_key in self.media_cache:
+                    del self.media_cache[output_key]
 
             try:
                 parsed_args = self._parse_command_args(cmd, args)
@@ -1008,33 +1087,50 @@ class MediaProcessor:
 
                 if isinstance(result, str) and result.startswith("Error"):
                     errors.append(result)
+                    # Clear partial output on error
+                    if 'output_key' in parsed_args:
+                        output_key = parsed_args['output_key']
+                        if output_key in self.media_cache:
+                            del self.media_cache[output_key]
                     break
+                
                 if 'output_key' in parsed_args:
                     last_output_key = parsed_args['output_key']
-                if cmd == "render" and isinstance(result, str) and result.startswith("media://"):
-                    output_files.append(result[8:])
+                    
+                if cmd == "render":
+                    if result.startswith("media://"):
+                        output_files.append(result[8:])
+                    else:
+                        errors.append(result)
+                        break
+                        
             except Exception as e:
                 errors.append(f"Error processing `{line}`: {str(e)}")
-        
-        if not errors:
-            try:
-                if not output_files and last_output_key:
-                    auto_result = await self._render_media(
-                        media_key=last_output_key, 
-                        extra_args=[]
-                    )
-                    if auto_result.startswith("media://"):
-                        output_files.append(auto_result[8:])
-                    else:
-                        errors.append(auto_result)
-            except Exception as e:
-                errors.append(f"Auto-render failed: {str(e)}")
-
+                if 'output_key' in locals().get('parsed_args', {}):
+                    output_key = parsed_args.get('output_key')
+                    if output_key and output_key in self.media_cache:
+                        del self.media_cache[output_key]
+                break
 
         if errors:
             return errors
+            
+
         if output_files:
             return output_files
+            
+
+        if last_output_key:
+            try:
+                auto_result = await self._render_media(
+                    media_key=last_output_key, 
+                    extra_args=[]
+                )
+                if auto_result.startswith("media://"):
+                    return [auto_result[8:]]
+            except:
+                pass
+
         return ["Processing complete (no output generated)"]
     
     async def _load_media(self, **kwargs) -> str:
@@ -1154,34 +1250,99 @@ class MediaProcessor:
     async def _concat_media_impl(self, **kwargs) -> str:
         input_keys = kwargs['input_keys']
         output_key = kwargs['output_key']
-        if len(input_keys) < 2:
-            return "Error: Need at least 2 inputs"
         
+        if not input_keys:
+            return "Error: No input files specified"
+        
+
         missing = [k for k in input_keys if k not in self.media_cache]
         if missing:
-            return f"Error: Missing keys {', '.join(missing)}"
-        
-        list_file = self._get_temp_path('txt')
-        with list_file.open('w', encoding='utf-8') as f:
-            for key in input_keys:
-                f.write(f"file '{Path(self.media_cache[key]).as_posix()}'\n")
-        
+            return f"Missing input keys: {', '.join(missing)}"
+
+        input_paths = [Path(self.media_cache[k]) for k in input_keys]
         output_file = self._get_temp_path('mp4')
+
+
+        input_info = []
+        for path in input_paths:
+            probe_cmd = [
+                'ffprobe', '-v', 'error',
+                '-show_entries', 'format=duration',
+                '-show_entries', 'stream=codec_type',
+                '-of', 'json',
+                str(path)
+            ]
+            
+            success, output = await self._run_ffprobe(probe_cmd)
+            if not success:
+                return f"Probe failed for {path.name}: {output}"
+
+            try:
+                data = json.loads(output)
+                duration = float(data['format']['duration'])
+                has_video = any(s['codec_type'] == 'video' for s in data.get('streams', []))
+                has_audio = any(s['codec_type'] == 'audio' for s in data.get('streams', []))
+                input_info.append((path, duration, has_video, has_audio))
+            except Exception as e:
+                return f"Invalid probe data for {path.name}: {str(e)}"
+
+
+        video_filters = []
+        audio_filters = []
+        video_streams = []
+        audio_streams = []
+
+        for i, (path, duration, has_video, has_audio) in enumerate(input_info):
+            if has_video:
+                video_filters.append(
+                    f"[{i}:v]scale=1280:720:force_original_aspect_ratio=decrease,"
+                    f"pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1[v{i}];"
+                )
+            else:
+                video_filters.append(
+                    f"color=size=1280x720:color=black:rate=30[d{i}];"
+                    f"[d{i}]trim=duration={duration}[v{i}];"
+                )
+            video_streams.append(f"[v{i}]")
+
+
+            if has_audio:
+                audio_filters.append(f"[{i}:a]aformat=sample_rates=44100:channel_layouts=stereo[a{i}];")
+            else:
+                audio_filters.append(f"aevalsrc=0:d={duration}[a{i}];")
+            audio_streams.append(f"[a{i}]")
+
+
+        filter_complex = (
+            ''.join(video_filters) +
+            ''.join(audio_filters) +
+            f"{''.join(video_streams)}concat=n={len(video_streams)}:v=1:a=0[outv];" +
+            f"{''.join(audio_streams)}concat=n={len(audio_streams)}:v=0:a=1[outa]"
+        )
+
+
+        input_args = []
+        for p in input_paths:
+            input_args.extend(['-i', str(p)])
+
+
         cmd = [
-            'ffmpeg', '-hide_banner',
-            '-f', 'concat',
-            '-safe', '0',
-            '-i', list_file.as_posix(),
-            '-c', 'copy',
-            '-y', output_file.as_posix()
+            'ffmpeg', '-y', '-hide_banner',
+            *input_args,
+            '-filter_complex', filter_complex,
+            '-map', '[outv]',
+            '-map', '[outa]',
+            '-c:v', 'libx264', '-preset', 'fast', '-crf', '20',
+            '-c:a', 'aac', '-b:a', '192k',
+            '-movflags', '+faststart',
+            str(output_file)
         ]
-        
+
         success, error = await self._run_ffmpeg(cmd)
-        list_file.unlink(missing_ok=True)
         
         if success:
             self.media_cache[output_key] = str(output_file)
-            return f"media://{output_file.as_posix()}"
+            return f"media://{output_file}"
         return error
     
     async def _render_media(self, **kwargs) -> str:
@@ -1254,6 +1415,47 @@ class MediaProcessor:
         
         return f"media://{path.as_posix()}"
     
+    async def _convert_media(self, **kwargs) -> str:
+        try:
+            return await self._convert_media_impl(**kwargs)
+        except ValueError as e:
+            return f"Convert error: {str(e)}"
+
+    async def _convert_media_impl(self, **kwargs) -> str:
+        input_key = kwargs['input_key']
+        output_key = kwargs['output_key']
+        output_format = kwargs['format'].lower()
+
+        if input_key not in self.media_cache:
+            return f"Error: {input_key} not found"
+        
+        input_path = Path(self.media_cache[input_key])
+        output_file = self._get_temp_path(output_format)
+        
+        cmd = ['ffmpeg', '-hide_banner', '-i', input_path.as_posix()]
+        
+
+        format_filters = {
+            'gif': ['-vf', 'split[o],palettegen,[o]paletteuse'],
+            'png': ['-vframes', '1'],
+            'jpg': ['-vframes', '1'],
+            'jpeg': ['-vframes', '1'],
+            'webp': ['-vframes', '1']
+        }
+        
+        if output_format in format_filters:
+            cmd.extend(format_filters[output_format])
+        
+
+        cmd.extend(['-y', output_file.as_posix()])
+        
+        success, error = await self._run_ffmpeg(cmd)
+        
+        if success:
+            self.media_cache[output_key] = str(output_file)
+            return f"media://{output_file.as_posix()}"
+        return error
+    
     async def _adjust_contrast(self, **kwargs) -> str:
         try:
             return await self._adjust_contrast_impl(**kwargs)
@@ -1280,6 +1482,300 @@ class MediaProcessor:
             '-vf', f'eq=contrast={contrast_level}',
             '-y', output_file.as_posix()
         ]
+        success, error = await self._run_ffmpeg(cmd)
+        if success:
+            self.media_cache[output_key] = str(output_file)
+            return f"media://{output_file.as_posix()}"
+        return error
+    
+    async def _adjust_opacity(self, **kwargs) -> str:
+        try:
+            return await self._adjust_opacity_impl(**kwargs)
+        except ValueError as e:
+            return f"Opacity error: {str(e)}"
+
+    async def _adjust_opacity_impl(self, **kwargs) -> str:
+        input_key = kwargs['input_key']
+        opacity_level = max(0.0, min(1.0, float(kwargs['opacity_level'])))
+        output_key = kwargs['output_key']
+        
+        if input_key not in self.media_cache:
+            return f"Error: {input_key} not found"
+
+        input_path = Path(self.media_cache[input_key])
+        output_file = self._get_temp_path(input_path.suffix[1:])
+
+        cmd = [
+            'ffmpeg', '-hide_banner',
+            '-i', input_path.as_posix(),
+            '-vf', f'format=rgba,colorchannelmixer=aa={opacity_level}',
+            '-y', output_file.as_posix()
+        ]
+        
+
+        if input_path.suffix.lower() in ('.jpg', '.jpeg'):
+            output_file = output_file.with_suffix('.png')
+            cmd[-1] = output_file.as_posix()
+
+        success, error = await self._run_ffmpeg(cmd)
+        if success:
+            self.media_cache[output_key] = str(output_file)
+            return f"media://{output_file.as_posix()}"
+        return error
+    
+    async def _adjust_saturation(self, **kwargs) -> str:
+        try:
+            return await self._adjust_saturation_impl(**kwargs)
+        except ValueError as e:
+            return f"Saturation error: {str(e)}"
+
+    async def _adjust_saturation_impl(self, **kwargs) -> str:
+        input_key = kwargs['input_key']
+        saturation_level = kwargs['saturation_level']
+        output_key = kwargs['output_key']
+        
+        if input_key not in self.media_cache:
+            return f"Error: {input_key} not found"
+
+        input_path = Path(self.media_cache[input_key])
+        output_file = self._get_temp_path(input_path.suffix[1:])
+
+        cmd = [
+            'ffmpeg', '-hide_banner',
+            '-i', input_path.as_posix(),
+            '-vf', f'eq=saturation={saturation_level}',
+            '-y', output_file.as_posix()
+        ]
+        
+        success, error = await self._run_ffmpeg(cmd)
+        if success:
+            self.media_cache[output_key] = str(output_file)
+            return f"media://{output_file.as_posix()}"
+        return error
+    
+    async def _adjust_hue(self, **kwargs) -> str:
+        try:
+            return await self._adjust_hue_impl(**kwargs)
+        except ValueError as e:
+            return f"Hue error: {str(e)}"
+
+    async def _adjust_hue_impl(self, **kwargs) -> str:
+        input_key = kwargs['input_key']
+        hue_shift = kwargs['hue_shift']
+        output_key = kwargs['output_key']
+        
+        if input_key not in self.media_cache:
+            return f"Error: {input_key} not found"
+
+        input_path = Path(self.media_cache[input_key])
+        output_file = self._get_temp_path(input_path.suffix[1:])
+
+        cmd = [
+            'ffmpeg', '-hide_banner',
+            '-i', input_path.as_posix(),
+            '-vf', f'hue=h={hue_shift}',
+            '-y', output_file.as_posix()
+        ]
+        
+        success, error = await self._run_ffmpeg(cmd)
+        if success:
+            self.media_cache[output_key] = str(output_file)
+            return f"media://{output_file.as_posix()}"
+        return error
+    
+    async def _adjust_brightness(self, **kwargs) -> str:
+        try:
+            return await self._adjust_brightness_impl(**kwargs)
+        except ValueError as e:
+            return f"Brightness error: {str(e)}"
+
+    async def _adjust_brightness_impl(self, **kwargs) -> str:
+        input_key = kwargs['input_key']
+        brightness_level = kwargs['brightness_level']
+        output_key = kwargs['output_key']
+        
+        if input_key not in self.media_cache:
+            return f"Error: {input_key} not found"
+
+        input_path = Path(self.media_cache[input_key])
+        output_file = self._get_temp_path(input_path.suffix[1:])
+
+        cmd = [
+            'ffmpeg', '-hide_banner',
+            '-i', input_path.as_posix(),
+            '-vf', f'eq=brightness={brightness_level}',
+            '-y', output_file.as_posix()
+        ]
+        
+        success, error = await self._run_ffmpeg(cmd)
+        if success:
+            self.media_cache[output_key] = str(output_file)
+            return f"media://{output_file.as_posix()}"
+        return error
+    
+    async def _adjust_gamma(self, **kwargs) -> str:
+        try:
+            return await self._adjust_gamma_impl(**kwargs)
+        except ValueError as e:
+            return f"Gamma error: {str(e)}"
+
+    async def _adjust_gamma_impl(self, **kwargs) -> str:
+        input_key = kwargs['input_key']
+        gamma_level = kwargs['gamma_level']
+        output_key = kwargs['output_key']
+        
+        if input_key not in self.media_cache:
+            return f"Error: {input_key} not found"
+
+        input_path = Path(self.media_cache[input_key])
+        output_file = self._get_temp_path(input_path.suffix[1:])
+
+        cmd = [
+            'ffmpeg', '-hide_banner',
+            '-i', input_path.as_posix(),
+            '-vf', f'eq=gamma={gamma_level}',
+            '-y', output_file.as_posix()
+        ]
+        
+        success, error = await self._run_ffmpeg(cmd)
+        if success:
+            self.media_cache[output_key] = str(output_file)
+            return f"media://{output_file.as_posix()}"
+        return error
+    
+    async def _clone_media(self, **kwargs) -> str:
+        try:
+            return await self._clone_media_impl(**kwargs)
+        except ValueError as e:
+            return f"Clone error: {str(e)}"
+
+    async def _clone_media_impl(self, **kwargs) -> str:
+        input_key = kwargs['input_key']
+        output_key = kwargs['output_key']
+        
+        if input_key not in self.media_cache:
+            return f"Error: {input_key} not found"
+
+        input_path = Path(self.media_cache[input_key])
+        output_file = self._get_temp_path(input_path.suffix[1:])
+        
+
+        shutil.copy(input_path, output_file)
+        
+        self.media_cache[output_key] = str(output_file)
+        return f"media://{output_file.as_posix()}"
+    
+    async def _change_fps(self, **kwargs) -> str:
+        try:
+            return await self._change_fps_impl(**kwargs)
+        except ValueError as e:
+            return f"FPS error: {str(e)}"
+
+    async def _change_fps_impl(self, **kwargs) -> str:
+        input_key = kwargs['input_key']
+        fps_value = kwargs['fps_value']
+        output_key = kwargs['output_key']
+        
+        if input_key not in self.media_cache:
+            return f"Error: {input_key} not found"
+
+        input_path = Path(self.media_cache[input_key])
+        output_file = self._get_temp_path(input_path.suffix[1:])
+
+        cmd = [
+            'ffmpeg', '-hide_banner',
+            '-i', input_path.as_posix(),
+            '-vf', f'fps={fps_value}',
+            '-y', output_file.as_posix()
+        ]
+        
+        success, error = await self._run_ffmpeg(cmd)
+        if success:
+            self.media_cache[output_key] = str(output_file)
+            return f"media://{output_file.as_posix()}"
+        return error
+
+    async def _apply_grayscale(self, **kwargs) -> str:
+        try:
+            return await self._apply_grayscale_impl(**kwargs)
+        except ValueError as e:
+            return f"Grayscale error: {str(e)}"
+
+    async def _apply_grayscale_impl(self, **kwargs) -> str:
+        input_key = kwargs['input_key']
+        output_key = kwargs['output_key']
+        
+        if input_key not in self.media_cache:
+            return f"Error: {input_key} not found"
+
+        input_path = Path(self.media_cache[input_key])
+        output_file = self._get_temp_path(input_path.suffix[1:])
+
+        cmd = [
+            'ffmpeg', '-hide_banner',
+            '-i', input_path.as_posix(),
+            '-vf', 'format=gray',
+            '-y', output_file.as_posix()
+        ]
+        
+        success, error = await self._run_ffmpeg(cmd)
+        if success:
+            self.media_cache[output_key] = str(output_file)
+            return f"media://{output_file.as_posix()}"
+        return error
+
+    async def _apply_sepia(self, **kwargs) -> str:
+        try:
+            return await self._apply_sepia_impl(**kwargs)
+        except ValueError as e:
+            return f"Sepia error: {str(e)}"
+
+    async def _apply_sepia_impl(self, **kwargs) -> str:
+        input_key = kwargs['input_key']
+        output_key = kwargs['output_key']
+        
+        if input_key not in self.media_cache:
+            return f"Error: {input_key} not found"
+
+        input_path = Path(self.media_cache[input_key])
+        output_file = self._get_temp_path(input_path.suffix[1:])
+
+        cmd = [
+            'ffmpeg', '-hide_banner',
+            '-i', input_path.as_posix(),
+            '-vf', 'colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131',
+            '-y', output_file.as_posix()
+        ]
+        
+        success, error = await self._run_ffmpeg(cmd)
+        if success:
+            self.media_cache[output_key] = str(output_file)
+            return f"media://{output_file.as_posix()}"
+        return error
+    
+    async def _invert_media(self, **kwargs) -> str:
+        try:
+            return await self._invert_media_impl(**kwargs)
+        except ValueError as e:
+            return f"Invert error: {str(e)}"
+
+    async def _invert_media_impl(self, **kwargs) -> str:
+        input_key = kwargs['input_key']
+        output_key = kwargs['output_key']
+        
+        if input_key not in self.media_cache:
+            return f"Error: {input_key} not found"
+
+        input_path = Path(self.media_cache[input_key])
+        output_file = self._get_temp_path(input_path.suffix[1:])
+
+        cmd = [
+            'ffmpeg', '-hide_banner',
+            '-i', input_path.as_posix(),
+            '-vf', 'negate',
+            '-y', output_file.as_posix()
+        ]
+        
         success, error = await self._run_ffmpeg(cmd)
         if success:
             self.media_cache[output_key] = str(output_file)
@@ -1381,7 +1877,7 @@ class MediaProcessor:
         cmd = [
             'ffmpeg', '-hide_banner',
             '-i', input_path.as_posix(),
-            '-vf', f'rotate={angle}*PI/180',
+            '-vf', f'rotate={angle}',
             '-y', output_file.as_posix()
         ]
         success, error = await self._run_ffmpeg(cmd)
@@ -1390,45 +1886,6 @@ class MediaProcessor:
             return f"media://{output_file.as_posix()}"
         return error
     
-    async def _apply_filter(self, **kwargs) -> str:
-        try:
-            return await self._apply_filter_impl(**kwargs)
-        except ValueError as e:
-            return f"Filter error: {str(e)}"
-    
-    async def _apply_filter_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        filter_type = kwargs['filter_type']
-        output_key = kwargs['output_key']
-        if input_key not in self.media_cache:
-            return f"Error: {input_key} not found"
-
-        input_path = Path(self.media_cache[input_key])
-        suffix = input_path.suffix.lower()
-        allowed_suffixes = ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv', '.gif', '.png', '.jpg', '.jpeg', '.webp')
-        if suffix not in allowed_suffixes:
-            return f"Error: {input_key} is not a video or image file."
-        output_file = self._get_temp_path(input_path.suffix[1:])
-
-        filter_map = {
-            'grayscale': 'format=gray',
-            'sepia': 'colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131'
-        }
-
-        if filter_type not in filter_map:
-            return f"Error: Unknown filter type {filter_type}"
-
-        cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', input_path.as_posix(),
-            '-vf', filter_map[filter_type],
-            '-y', output_file.as_posix()
-        ]
-        success, error = await self._run_ffmpeg(cmd)
-        if success:
-            self.media_cache[output_key] = str(output_file)
-            return f"media://{output_file.as_posix()}"
-        return error
     
     async def _trim_media(self, **kwargs) -> str:
         try:
@@ -2194,7 +2651,7 @@ class MediaProcessor:
         if success:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
-        return print(f"Error: {error}")
+        return error
 
 
 
