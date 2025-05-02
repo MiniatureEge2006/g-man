@@ -491,6 +491,20 @@ class MediaProcessor:
                 'color': {'default': '#000000', 'type': str},
                 'audio': {'default': True, 'type': bool},
                 'output_key': {'required': True, 'type': str}
+            },
+            'colorkey': {
+                'input_key': {'required': True, 'type': str},
+                'color': {'default': 'black', 'type': str},
+                'similarity': {'default': 0.01, 'type': float},
+                'blend': {'default': 0.0, 'type': float},
+                'output_key': {'required': True, 'type': str}
+            },
+            'chromakey': {
+                'input_key': {'required': True, 'type': str},
+                'color': {'default': 'black', 'type': str},
+                'similarity': {'default': 0.01, 'type': float},
+                'blend': {'default': 0.0, 'type': float},
+                'output_key': {'required': True, 'type': str}
             }
         }
         self.gscript_commands = {
@@ -525,7 +539,9 @@ class MediaProcessor:
             'vibrato': self._vibrato,
             'create': self._create_image,
             'fadein': self._fadein_media,
-            'fadeout': self._fadeout_media
+            'fadeout': self._fadeout_media,
+            'colorkey': self._colorkey,
+            'chromakey': self._chromakey
         }
     
     def start_cleanup_task(self):
@@ -1087,7 +1103,6 @@ class MediaProcessor:
 
                 if isinstance(result, str) and result.startswith("Error"):
                     errors.append(result)
-                    # Clear partial output on error
                     if 'output_key' in parsed_args:
                         output_key = parsed_args['output_key']
                         if output_key in self.media_cache:
@@ -2646,6 +2661,70 @@ class MediaProcessor:
             cmd.append('-shortest')
 
         cmd += ['-y', output_file.as_posix()]
+
+        success, error = await self._run_ffmpeg(cmd)
+        if success:
+            self.media_cache[output_key] = str(output_file)
+            return f"media://{output_file.as_posix()}"
+        return error
+    
+    async def _colorkey(self, **kwargs) -> str:
+        try:
+            return await self._colorkey_impl(**kwargs)
+        except ValueError as e:
+            return f"Colorkey error: {str(e)}"
+    
+    async def _colorkey_impl(self, **kwargs) -> str:
+        input_key = kwargs['input_key']
+        color = kwargs['color']
+        similarity = kwargs['similarity']
+        blend = kwargs['blend']
+        output_key = kwargs['output_key']
+
+        if input_key not in self.media_cache:
+            return f"Error: {input_key} not found"
+        
+        input_path = Path(self.media_cache[input_key])
+        output_file = self._get_temp_path(input_path.suffix[1:])
+
+        cmd = [
+            'ffmpeg', '-hide_banner',
+            '-i', input_path.as_posix(),
+            '-vf', f'colorkey={color}:{similarity}:{blend}',
+            '-y', output_file.as_posix()
+        ]
+
+        success, error = await self._run_ffmpeg(cmd)
+        if success:
+            self.media_cache[output_key] = str(output_file)
+            return f"media://{output_file.as_posix()}"
+        return error
+    
+    async def _chromakey(self, **kwargs) -> str:
+        try:
+            return await self._chromakey_impl(**kwargs)
+        except ValueError as e:
+            return f"Chromakey error: {str(e)}"
+    
+    async def _chromakey_impl(self, **kwargs) -> str:
+        input_key = kwargs['input_key']
+        color = kwargs['color']
+        similarity = kwargs['similarity']
+        blend = kwargs['blend']
+        output_key = kwargs['output_key']
+
+        if input_key not in self.media_cache:
+            return f"Error: {input_key} not found"
+        
+        input_path = Path(self.media_cache[input_key])
+        output_file = self._get_temp_path(input_path.suffix[1:])
+
+        cmd = [
+            'ffmpeg', '-hide_banner',
+            '-i', input_path.as_posix(),
+            '-vf', f'chromakey={color}:{similarity}:{blend}',
+            '-y', output_file.as_posix()
+        ]
 
         success, error = await self._run_ffmpeg(cmd)
         if success:
