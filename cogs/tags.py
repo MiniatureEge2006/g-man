@@ -3097,6 +3097,41 @@ class Tags(commands.Cog):
                 * Example: `Hello {note:This is a comment}world` -> "Hello world"
             """
             return ""
+        
+        @self.formatter.register('text')
+        async def _fetch_text(ctx, url, **kwargs):
+            """
+            ### {text:url}
+                * Fetches the text or HTML content from a URL.
+                * Example: `{text:https://example.com}`
+            """
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url) as response:
+                        if response.status != 200:
+                            return f"[text error: HTTP Exception: {response.status}]"
+                        content = await response.text()
+                        return content
+            except Exception as e:
+                return f"[text error: {str(e)}]"
+        
+        @self.formatter.register('attachtext')
+        async def _attach_text(ctx, text, **kwargs):
+            """
+            ### {attachtext:text}
+                * Sends text content as a .txt attachment.
+                * Example: `{attachtext:MiniatureEge2006}`
+            """
+            try:
+                buffer = BytesIO(text.encode('utf-8'))
+                
+                file = discord.File(buffer, filename="attachment.txt")
+
+                return ("", [], None, [file])
+            
+            except Exception as e:
+                return f"[attachtext error: {str(e)}", [], None, []
+
             
         @self.formatter.register('args')
         def args(ctx, _, **kwargs):
@@ -4866,53 +4901,50 @@ class Tags(commands.Cog):
         async def _attach(ctx, args_str, **kwargs):
             """
             ### {attach:optional_url}
-                * Sends media as an attachment from URL or message attachment.
-                * Example with URL: `{attach:https://example.com/image.png}`
-                * Example with attachment: `{attach}` (with file attached)
+                * Attaches media to the message from URL or message attachment
                 * Works with any media type (images, videos, audio, etc.)
+                * Examples:
+                    - `{attach:https://example.com/image.png}`
+                    - `{attach}` (with file attached)
             """
             try:
                 url = args_str.strip() if args_str else None
                 attachments = ctx.message.attachments
-                
+                files = []
+
 
                 if not url and attachments:
-                    attachment = attachments[0]
-                    file = discord.File(
-                        BytesIO(await attachment.read()),
-                        filename=attachment.filename
-                    )
-                    await ctx.send(file=file)
-                    return discord.utils.MISSING
-                    
+                    for attachment in attachments[:10]:
+                        file = discord.File(
+                            BytesIO(await attachment.read()),
+                            filename=attachment.filename
+                        )
+                        files.append(file)
+                    return ("", [], None, files)
+
 
                 if url:
                     async with aiohttp.ClientSession() as session:
                         async with session.get(url) as resp:
                             if resp.status != 200:
-                                return f"Failed to download media (HTTP Exception: {resp.status})"
+                                return (f"[attach error: HTTP {resp.status}]", [], None, [])
                             
-
                             content_type = resp.headers.get('Content-Type', '')
-                            filename = unquote(urlparse(url).path.split('/')[-1]) or "media"
-                            
-
-                            file_data = BytesIO(await resp.read())
-                            file_data.seek(0)
+                            filename = unquote(urlparse(url).path.split('/'))[-1] or "attachment"
                             
 
                             ext = self._get_extension(content_type, filename)
                             filename = f"{filename.split('.')[0]}.{ext}" if '.' not in filename else filename
                             
 
+                            file_data = BytesIO(await resp.read())
                             file = discord.File(file_data, filename=filename)
-                            await ctx.send(file=file)
-                            return discord.utils.MISSING
-                            
-                return "No media URL provided and no attachments found"
-                
+                            return ("", [], None, [file])
+
+                return ("[attach error: No URL or attachment found]", [], None, [])
+            
             except Exception as e:
-                return f"[Attach Error: {str(e)}]"
+                return (f"[attach error: {str(e)}]", [], None, [])
             
         
         async def _get_media_url(ctx, url_arg: str, media_types: tuple):
