@@ -752,32 +752,26 @@ class MediaProcessor:
 
 
     
-    def _hex_to_rgb(self, hex_color: str) -> tuple:
-        hex_color = hex_color.lstrip('#')
-        if len(hex_color) == 6:
-            r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-            return r, g, b, 255
-        elif len(hex_color) == 8:
-            r, g, b, a = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4, 6))
-            return r, g, b, a
-        return 0, 0, 0, 255
-    
-
     def _parse_color(self, color_str: str, size: tuple = None) -> Union[tuple, Image.Image]:
+        if color_str.lower() in ('random', 'rand'):
+            if size is None:
+                return self._generate_random_color()
+            else:
+                angle = random.randint(0, 359)
+                color_str = f'linear-gradient({angle}deg, random, random)'
+        
         if color_str.startswith('#'):
             return self._hex_to_rgb(color_str)
         
-        if not color_str.startswith(('linear-gradient(', 'repeating-linear-gradient(', 'radial-gradient(', 'repeating-radial-gradient(')):
+        if not color_str.startswith(('linear-gradient(', 'radial-gradient(')):
             return self._parse_single_color(color_str)
 
 
-        is_repeating = color_str.startswith('repeating-')
-        base_str = color_str.replace('repeating-', '', 1)
-
+        color_str = self._replace_random_in_gradient(color_str)
+        base_str = color_str
 
         body = base_str[base_str.index('(')+1 : base_str.rindex(')')]
         parts = [p.strip().strip('"').strip("'") for p in body.split(',')]
-
 
         angle = 90.0
         colors_and_stops = []
@@ -810,27 +804,17 @@ class MediaProcessor:
             if p is None:
                 colors_and_stops[i] = (c, i/(n-1) if n>1 else 0.0)
 
-
-        size_factor = colors_and_stops[-1][1] if colors_and_stops[-1][1] is not None else 1.0
         width, height = size
         cx, cy = width//2, height//2
-
 
         if base_str.startswith('linear-gradient('):
             rad = math.radians(angle)
             dx, dy = math.sin(rad), -math.cos(rad)
-            pattern = max(width, height) * size_factor
-
+            pattern = max(width, height)
 
             x_coords, y_coords = np.meshgrid(np.arange(width), np.arange(height))
-            if pattern == 0:
-                pattern = 1
             pos = (x_coords * dx + y_coords * dy) / pattern
-            if is_repeating:
-                pos = pos % 1.0
-            else:
-                pos = np.clip(pos, 0.0, 1.0)
-
+            pos = np.clip(pos, 0.0, 1.0)
 
             gradient = np.zeros((height, width, 4), dtype=np.uint8)
             for i in range(n-1):
@@ -850,57 +834,142 @@ class MediaProcessor:
         img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
         max_diag = math.hypot(cx, cy)
-        max_radius = max_diag * size_factor
 
-
-        stop_radii = [pct * max_radius for (_, pct) in colors_and_stops]
-        tile_r = stop_radii[-1]
-
+        stop_radii = [pct * max_diag for (_, pct) in colors_and_stops]
 
         def lerp(c1, c2, t_val):
             return tuple(int(c1[i] + (c2[i] - c1[i]) * t_val) for i in range(4))
 
-
         stop_colors = [self._parse_single_color(c) for (c, _) in colors_and_stops]
 
-        offset = 0.0
-        while True:
-            if offset > max_radius:
-                break
-            for i in range(n-1):
-                r0 = int(stop_radii[i] + offset)
-                r1 = int(stop_radii[i+1] + offset)
-                c0, c1 = stop_colors[i], stop_colors[i+1]
-                for r in range(r0, r1):
-                    t = (r - (stop_radii[i] + offset)) / (stop_radii[i+1] - stop_radii[i])
-                    color = lerp(c0, c1, t)
-                    bbox = [cx - r, cy - r, cx + r, cy + r]
-                    draw.ellipse(bbox, outline=color)
-            if not is_repeating:
-                break
-            offset += tile_r
+        for i in range(len(colors_and_stops)-1):
+            r0 = int(stop_radii[i])
+            r1 = int(stop_radii[i+1])
+            c0, c1 = stop_colors[i], stop_colors[i+1]
+            for r in range(r0, r1):
+                t = (r - stop_radii[i]) / (stop_radii[i+1] - stop_radii[i])
+                color = lerp(c0, c1, t)
+                bbox = [cx - r, cy - r, cx + r, cy + r]
+                draw.ellipse(bbox, outline=color)
 
         return img
 
+    def _replace_random_in_gradient(self, gradient_str: str) -> str:
+        parts = gradient_str.split('(')
+        prefix = parts[0]
+        body = '('.join(parts[1:])
+        
+        color_parts = []
+        current_part = []
+        in_quotes = False
+        for char in body:
+            if char in ('"', "'"):
+                in_quotes = not in_quotes
+            if char == ',' and not in_quotes:
+                color_parts.append(''.join(current_part).strip())
+                current_part = []
+            else:
+                current_part.append(char)
+        if current_part:
+            color_parts.append(''.join(current_part).strip().rstrip(')'))
+        
+        processed_parts = []
+        for part in color_parts:
+            if part.endswith('deg'):
+                processed_parts.append(part)
+                continue
+            
+            if '%' in part:
+                color_part, percent_part = part.rsplit('%', 1)
+                color_part = color_part.strip()
+                if color_part.lower() in ('random', 'rand'):
+                    color_part = self._rgb_to_hex(self._generate_random_color())
+                processed_parts.append(f"{color_part}%{percent_part}")
+            else:
+                if part.lower() in ('random', 'rand'):
+                    part = self._rgb_to_hex(self._generate_random_color())
+                processed_parts.append(part)
+        
+        return f"{prefix}({', '.join(processed_parts)})"
 
+    def _generate_random_color(self, alpha: int = None) -> tuple:
+        return (
+            random.randint(0, 255),
+            random.randint(0, 255),
+            random.randint(0, 255),
+            alpha if alpha is not None else 255
+        )
+
+    def _rgb_to_hex(self, color: tuple) -> str:
+        if len(color) == 4:
+            return f"#{color[0]:02x}{color[1]:02x}{color[2]:02x}{color[3]:02x}"
+        return f"#{color[0]:02x}{color[1]:02x}{color[2]:02x}"
+
+    def _hex_to_rgb(self, hex_str: str) -> tuple:
+        hex_str = hex_str.lstrip('#')
+        length = len(hex_str)
+        if length == 3:  # RGB
+            return tuple(int(c*2, 16) for c in hex_str) + (255,)
+        elif length == 4:  # RGBA
+            return tuple(int(c*2, 16) for c in hex_str[:3]) + (int(hex_str[3]*2, 16),)
+        elif length == 6:  # RRGGBB
+            return tuple(int(hex_str[i:i+2], 16) for i in (0, 2, 4)) + (255,)
+        elif length == 8:  # RRGGBBAA
+            return tuple(int(hex_str[i:i+2], 16) for i in (0, 2, 4, 6))
+        return (0, 0, 0, 255)
 
     def _parse_single_color(self, color_str: str) -> tuple:
         color_str = color_str.strip().lower()
+        
+
         if color_str in ('none', 'transparent'):
             return (0, 0, 0, 0)
         
 
+        if color_str in ('random', 'rand'):
+            return self._generate_random_color()
+        
+
         if color_str.startswith('#'):
-            color_str = color_str.lstrip('#')
-            length = len(color_str)
-            if length == 3:  # RGB
-                return tuple(int(c*2, 16) for c in color_str) + (255,)
-            elif length == 4:  # RGBA
-                return tuple(int(c*2, 16) for c in color_str[:3]) + (int(color_str[3]*2, 16),)
-            elif length == 6:  # RRGGBB
-                return tuple(int(color_str[i:i+2], 16) for i in (0, 2, 4)) + (255,)
-            elif length == 8:  # RRGGBBAA
-                return tuple(int(color_str[i:i+2], 16) for i in (0, 2, 4, 6))
+            return self._hex_to_rgb(color_str)
+        
+
+        if color_str.startswith(('rgb(', 'rgba(')):
+            try:
+                values_str = color_str.split('(')[1].split(')')[0]
+                values = [v.strip() for v in values_str.split(',')]
+                
+
+                r = int(values[0])
+                g = int(values[1])
+                b = int(values[2])
+                
+
+                a = 255
+                if len(values) > 3:
+                    alpha = float(values[3])
+                    if alpha <= 1.0:
+                        a = int(alpha * 255)
+                    else:
+                        a = int(alpha)
+                
+                return (r, g, b, a)
+            except (ValueError, IndexError):
+                pass
+        
+
+        if ',' in color_str or ' ' in color_str:
+            separators = ',' if ',' in color_str else ' '
+            try:
+                parts = [p.strip() for p in color_str.split(separators)]
+                if len(parts) >= 3:
+                    r = int(parts[0])
+                    g = int(parts[1])
+                    b = int(parts[2])
+                    a = 255 if len(parts) < 4 else int(float(parts[3])) * 255 if float(parts[3]) <= 1.0 else int(parts[3])
+                    return (r, g, b, a)
+            except (ValueError, IndexError):
+                pass
         
 
         return {
@@ -908,7 +977,18 @@ class MediaProcessor:
             'black': (0, 0, 0, 255),
             'red': (255, 0, 0, 255),
             'green': (0, 255, 0, 255),
-            'blue': (0, 0, 255, 255)
+            'blue': (0, 0, 255, 255),
+            'yellow': (255, 255, 0, 255),
+            'cyan': (0, 255, 255, 255),
+            'magenta': (255, 0, 255, 255),
+            'orange': (255, 165, 0, 255),
+            'purple': (128, 0, 128, 255),
+            'pink': (255, 192, 203, 255),
+            'brown': (165, 42, 42, 255),
+            'gray': (128, 128, 128, 255),
+            'grey': (128, 128, 128, 255),
+            'silver': (192, 192, 192, 255),
+            'gold': (255, 215, 0, 255),
         }.get(color_str, (0, 0, 0, 255))
 
 
