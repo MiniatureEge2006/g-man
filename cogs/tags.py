@@ -204,11 +204,16 @@ class DiscordGenerator:
         if isinstance(data, discord.ui.Button):
             return data
             
+
+        custom_id = data.get('custom_id') or data.get('id')
+        if not custom_id and not data.get('url'):
+            custom_id = f"btn_{random.randint(1000,9999)}"
+        
         return discord.ui.Button(
             style=DiscordGenerator.parse_button_style(data.get('style', 'primary')),
             label=str(data.get('label', 'Button')),
             emoji=data.get('emoji'),
-            custom_id=data.get('id'),
+            custom_id=custom_id,
             url=data.get('url'),
             disabled=data.get('disabled', False)
         )
@@ -2958,6 +2963,11 @@ class Tags(commands.Cog):
         self.active_processes = set()
         self._cleanup_task = None
         self.start_cleanup_task()
+        self._custom_id_map = {}
+        self._stored_custom_ids = {}
+    
+    def _find_original_custom_id(self, display_id):
+        return self._custom_id_map.get(display_id)
     
     def start_cleanup_task(self):
         if self._cleanup_task is None or self._cleanup_task.done():
@@ -4769,40 +4779,91 @@ class Tags(commands.Cog):
                 return ("", [embed], None, [])
             except Exception as e:
                 return (f"[Embed Error: {str(e)}]", [], None, [])
+        
+        async def parse_component_input(ctx, input_str: str):
+            try:
+                if input_str.strip().startswith(('{', '[')):
+                    data = json.loads(input_str)
+                    return await resolve_json_tags(ctx, data)
+            except json.JSONDecodeError:
+                pass
+            
+
+            return await parse_builder_syntax(ctx, input_str)
+
+        async def resolve_json_tags(ctx, data):
+            if isinstance(data, dict):
+                return {k: await resolve_json_tags(ctx, v) for k, v in data.items()}
+            elif isinstance(data, list):
+                return [await resolve_json_tags(ctx, item) for item in data]
+            elif isinstance(data, str):
+                processed, _, _, _ = await ctx.cog.formatter.format(data, ctx)
+                return processed
+            return data
+
+        async def parse_builder_syntax(ctx, input_str: str):
+            params = {}
+            current_key = None
+            buffer = []
+            in_quotes = False
+            escape = False
+            
+            for char in input_str + ' ':
+                if escape:
+                    buffer.append(char)
+                    escape = False
+                elif char == '\\':
+                    escape = True
+                elif char == '"':
+                    in_quotes = not in_quotes
+                elif char == '=' and not in_quotes and not current_key:
+                    current_key = ''.join(buffer).strip()
+                    buffer = []
+                elif char in (' ', '\n') and not in_quotes:
+                    if buffer:
+                        value = ''.join(buffer).strip()
+                        if current_key:
+                            processed, _, _, _ = await ctx.cog.formatter.format(value, ctx)
+                            params[current_key.lower()] = processed
+                            current_key = None
+                        else:
+                            params.setdefault('_args', []).append(value)
+                        buffer = []
+                else:
+                    buffer.append(char)
+            
+            return params
             
         @self.formatter.register('button')
         async def _button(ctx, args_str, **kwargs):
             """
             ### {button:[label] [style] [id/url] [emoji] [disabled]}
-            Flexible button builder (JSON or builder syntax)
+            Flexible button builder with support for command and tag function execution. (JSON or builder syntax)
             JSON Example: {button:{"label":"Click","style":"primary"}}
             Builder Example: {button:label=Click style=primary}
             """
             try:
-                processed_args, _, _, _ = await ctx.cog.formatter.format(args_str, ctx, **kwargs)
+                params = await parse_component_input(ctx, args_str)
                 
 
-                if processed_args.strip().startswith('{'):
-                    try:
-                        button = DiscordGenerator.create_button(json.loads(processed_args))
-                        return ("", [], discord.ui.View().add_item(button), [])
-                    except json.JSONDecodeError:
-                        pass
-                
+                if 'command' in params:
+                    cmd = params.pop('command').strip()
+                    params['custom_id'] = f"cmd:{cmd}"
+                elif 'tag' in params:
+                    tag = params.pop('tag').strip()
+                    params['custom_id'] = f"tag:{tag}"
+                elif 'custom_id' not in params and 'url' not in params:
+                    params['custom_id'] = f"btn_{uuid.uuid4().hex[:8]}"
 
-                params = {'label': 'Button', 'style': 'primary'}
-                for pair in shlex.split(processed_args):
-                    if '=' in pair:
-                        key, val = pair.split('=', 1)
-                        params[key.lower()] = val
-                    elif not params.get('label'):
-                        params['label'] = pair
-                
+
+                if 'style' not in params and 'url' not in params:
+                    params['style'] = 'secondary'
+
                 button = DiscordGenerator.create_button(params)
                 return ("", [], discord.ui.View().add_item(button), [])
             
             except Exception as e:
-                return (f"[Button Error: {str(e)}]", [], None)
+                return (f"[Button Error: {str(e)}]", [], None, [])
     
 
         @self.formatter.register('view')
@@ -4822,44 +4883,36 @@ class Tags(commands.Cog):
             {view:{row:{button:Submit primary submit_btn}|{button:Cancel danger cancel_btn}}|{row:{select:placeholder=Choose... min=1 option1=A option2=B}}}
             """
             try:
+                components = []
+                
+
+                params = await parse_component_input(ctx, args_str)
+                
+
+                if isinstance(params, list):
+                    for component in params:
+                        processed = await parse_component_input(ctx, json.dumps(component))
+                        components.append(processed)
+
+                else:
+                    components = [params]
+
+
                 view = discord.ui.View(timeout=None)
+                for component in components:
+                    if component.get('type') == 1:
+                        action_row = []
+                        for item in component.get('components', []):
+                            if item.get('type') == 2:
+                                btn = DiscordGenerator.create_button(item)
+                                action_row.append(btn)
+                            elif item.get('type') == 3:
+                                sel = DiscordGenerator.create_select(item)
+                                action_row.append(sel)
+                        if action_row:
+                            view.add_item(*action_row)
                 
-
-                processed_content, _, _, _ = await ctx.cog.formatter.format(args_str, ctx, **kwargs)
-                
-
-                if processed_content.strip().startswith('['):
-                    try:
-                        components = json.loads(processed_content)
-                        for component in components:
-                            if component.get('type') == 1:
-                                for item in component.get('components', []):
-                                    if item.get('type') == 2:
-                                        view.add_item(DiscordGenerator.create_button(item))
-                                    elif item.get('type') == 3:
-                                        view.add_item(DiscordGenerator.create_select(item))
-                        return ("", [], view, []) if view.children else ("[View Error: Empty JSON components]", [], None, [])
-                    except json.JSONDecodeError:
-                        pass
-                
-
-                for component_str in args_str.split('|'):
-                    component_str = component_str.strip()
-                    if not component_str:
-                        continue
-                        
-                    component = await ctx.cog.formatter.format(component_str, ctx, **kwargs)
-                    if isinstance(component, tuple):
-                        if component[2]:
-                            for item in component[2].children:
-                                view.add_item(item)
-                    elif isinstance(component, discord.ui.Item):
-                        view.add_item(component)
-                    elif isinstance(component, discord.ui.View):
-                        for item in component.children:
-                            view.add_item(item)
-                
-                return ("", [], view, []) if view.children else ("[View Error: No valid components]", [], None, [])
+                return ("", [], view, [])
             
             except Exception as e:
                 return (f"[View Error: {str(e)}]", [], None, [])
@@ -4868,7 +4921,7 @@ class Tags(commands.Cog):
         async def _select(ctx, args_str, **kwargs):
             """
             ### {select:placeholder|min|max|option1_label|option1_value|option1_desc|...}
-            Create select menu with options.
+            Create select menu with options. Supports command/tax execution.
             
             JSON Example:
             {select:{
@@ -4889,13 +4942,30 @@ class Tags(commands.Cog):
             }
             """
             try:
-                processed_content, _, _, _ = await ctx.cog.formatter.format(args_str, ctx, **kwargs)
+                params = await parse_component_input(ctx, args_str)
                 
 
-                select = DiscordGenerator.create_select(processed_content)
+                if 'options' not in params:
+                    options = []
+                    i = 1
+                    while f'option{i}_label' in params:
+                        option = {
+                            'label': params[f'option{i}_label'],
+                            'value': params.get(f'option{i}_value', params[f'option{i}_label']),
+                            'description': params.get(f'option{i}_desc'),
+                            'emoji': params.get(f'option{i}_emoji'),
+                            'default': params.get(f'option{i}_default', 'false').lower() == 'true'
+                        }
+                        options.append(option)
+                        i += 1
+                    params['options'] = options
+                
+
+                select = DiscordGenerator.create_select(params)
                 view = discord.ui.View(timeout=None)
                 view.add_item(select)
                 return ("", [], view, [])
+            
             except Exception as e:
                 return (f"[Select Error: {str(e)}]", [], None, [])
         
@@ -5104,6 +5174,143 @@ class Tags(commands.Cog):
     async def on_message_delete(self, message):
         if message.id in self._variables:
             del self._variables[message.id]
+    
+    @commands.Cog.listener()
+    async def on_interaction(self, interaction: discord.Interaction):
+        if interaction.type != discord.InteractionType.component:
+            return
+
+        try:
+
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+
+            custom_id = interaction.data.get("custom_id")
+            component_type = interaction.data.get("component_type")
+
+            if component_type == 2:
+                await self.handle_button(interaction, custom_id)
+
+            elif component_type == 3:
+                values = interaction.data.get("values", [])
+                if not values:
+                    return await interaction.followup.send("No selection made.", ephemeral=True)
+                await self.handle_select(interaction, values[0])
+
+            else:
+                await interaction.followup.send("Unknown component type.", ephemeral=True)
+
+        except Exception as e:
+            try:
+                await interaction.followup.send(f"Interaction failed: {str(e)}", ephemeral=True)
+            except:
+                await interaction.channel.send(f"Interaction failed: {str(e)}")
+    
+    async def handle_button(self, interaction: discord.Interaction, custom_id: str):
+        if not custom_id:
+            return await interaction.followup.send("This button has no action configured.", ephemeral=True)
+
+
+        if custom_id.startswith("cmd:"):
+            await self.execute_command(interaction, custom_id[4:])
+        elif custom_id.startswith("tag:"):
+            await self.execute_tag(interaction, custom_id[4:])
+        else:
+            await interaction.followup.send(f"Button pressed: {custom_id}", ephemeral=True)
+
+    async def handle_select(self, interaction: discord.Interaction, selected: str):
+
+        if selected.startswith("cmd:"):
+            await self.execute_command(interaction, selected[4:])
+        elif selected.startswith("tag:"):
+            await self.execute_tag(interaction, selected[4:])
+        else:
+            await interaction.followup.send(f"Selected: {selected}", ephemeral=True)
+
+
+
+
+    async def execute_command(self, interaction: discord.Interaction, command_str: str):
+        command_name, *args = command_str.split()
+        command = self.bot.get_command(command_name)
+        
+        if not command:
+            return await interaction.followup.send(
+                f"Command not found: {command_name}",
+                ephemeral=True
+            )
+
+
+        fake_message = interaction.message
+        fake_message.author = interaction.user
+
+
+        prefix = await self.bot.get_prefix(fake_message)
+        if isinstance(prefix, list):
+            prefix = prefix[0]
+
+        fake_message.content = prefix + command_str
+
+        ctx = await self.bot.get_context(fake_message)
+
+        try:
+            await self.bot.invoke(ctx)
+        except Exception as e:
+            await interaction.followup.send(
+                f"Command failed: {str(e)}",
+                ephemeral=True
+            )
+
+
+    async def execute_tag(self, interaction: discord.Interaction, tag_str: str):
+        tag_name = tag_str.split(maxsplit=1)[0]
+
+        async with self.pool.acquire() as conn:
+            tag = await conn.fetchrow(
+                """SELECT content FROM tags 
+                WHERE name = $1 AND (guild_id = $2 OR user_id = $3)""",
+                tag_name,
+                interaction.guild.id if interaction.guild else None,
+                interaction.user.id
+            )
+
+        if not tag:
+            return await interaction.followup.send(
+                f"Tag not found: {tag_name}",
+                ephemeral=True
+            )
+
+        args = tag_str[len(tag_name):].strip()
+
+
+        fake_message = interaction.message
+        fake_message.author = interaction.user
+        fake_message.content = ""
+
+        ctx = await self.bot.get_context(fake_message)
+
+
+        text, embeds, view, files = await self.formatter.format(tag['content'], ctx, args=args)
+
+        try:
+            send_kwargs = {
+                "content": text[:2000] if text else None,
+                "embeds": embeds[:10],
+                "files": files[:10],
+                "ephemeral": True
+            }
+
+            if view and getattr(view, "children", []):
+                send_kwargs["view"] = view
+
+            await interaction.followup.send(**send_kwargs)
+
+        except Exception as e:
+            await interaction.followup.send(
+                f"Failed to send tag result: {str(e)}",
+                ephemeral=True
+            )
+
     
     def cog_unload(self):
         asyncio.create_task(self.cleanup_resources())
