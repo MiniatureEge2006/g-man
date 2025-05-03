@@ -2892,10 +2892,10 @@ class TagFormatter:
             return ("", [], view, [])
         elif isinstance(result, discord.ui.View):
             return ("", [], result, [])
-        elif isinstance(result, tuple) and len(result) == 4:
+        elif isinstance(result, tuple):
+            if len(result) == 3:
+                return (*result, [])
             return result
-        elif isinstance(result, tuple) and len(result) == 3:
-            return (*result, [])
         else:
             return (str(result), [], None, [])
 
@@ -4756,17 +4756,19 @@ class Tags(commands.Cog):
             Builder Example: {embed:title=Hello color=blue}
             """
             try:
-                processed_content, _, _ = await  ctx.cog.formatter.format(args_str, ctx, **kwargs)
+                processed_content, _, _, _ = await  ctx.cog.formatter.format(args_str, ctx, **kwargs)
                 if processed_content.strip().startswith(('{', '[')):
                     try:
                         embed_data = json.loads(processed_content)
-                        return DiscordGenerator.create_embed(embed_data)
+                        embed = DiscordGenerator.create_embed(embed_data)
+                        return ("", [embed], None, [])
                     except json.JSONDecodeError:
                         pass
                 params = DiscordGenerator._parse_kwargs(processed_content)
-                return DiscordGenerator.create_embed(params)
+                embed = DiscordGenerator.create_embed(params)
+                return ("", [embed], None, [])
             except Exception as e:
-                return f"[Embed Error: {str(e)}]"
+                return (f"[Embed Error: {str(e)}]", [], None, [])
             
         @self.formatter.register('button')
         async def _button(ctx, args_str, **kwargs):
@@ -4777,13 +4779,13 @@ class Tags(commands.Cog):
             Builder Example: {button:label=Click style=primary}
             """
             try:
-                processed_args, _, _ = await ctx.cog.formatter.format(args_str, ctx, **kwargs)
+                processed_args, _, _, _ = await ctx.cog.formatter.format(args_str, ctx, **kwargs)
                 
 
                 if processed_args.strip().startswith('{'):
                     try:
                         button = DiscordGenerator.create_button(json.loads(processed_args))
-                        return ("", [], discord.ui.View().add_item(button))
+                        return ("", [], discord.ui.View().add_item(button), [])
                     except json.JSONDecodeError:
                         pass
                 
@@ -4797,7 +4799,7 @@ class Tags(commands.Cog):
                         params['label'] = pair
                 
                 button = DiscordGenerator.create_button(params)
-                return ("", [], discord.ui.View().add_item(button))
+                return ("", [], discord.ui.View().add_item(button), [])
             
             except Exception as e:
                 return (f"[Button Error: {str(e)}]", [], None)
@@ -4823,7 +4825,7 @@ class Tags(commands.Cog):
                 view = discord.ui.View(timeout=None)
                 
 
-                processed_content, _, _ = await ctx.cog.formatter.format(args_str, ctx, **kwargs)
+                processed_content, _, _, _ = await ctx.cog.formatter.format(args_str, ctx, **kwargs)
                 
 
                 if processed_content.strip().startswith('['):
@@ -4836,7 +4838,7 @@ class Tags(commands.Cog):
                                         view.add_item(DiscordGenerator.create_button(item))
                                     elif item.get('type') == 3:
                                         view.add_item(DiscordGenerator.create_select(item))
-                        return ("", [], view) if view.children else ("[View Error: Empty JSON components]", [], None)
+                        return ("", [], view, []) if view.children else ("[View Error: Empty JSON components]", [], None, [])
                     except json.JSONDecodeError:
                         pass
                 
@@ -4857,10 +4859,10 @@ class Tags(commands.Cog):
                         for item in component.children:
                             view.add_item(item)
                 
-                return ("", [], view) if view.children else ("[View Error: No valid components]", [], None)
+                return ("", [], view, []) if view.children else ("[View Error: No valid components]", [], None, [])
             
             except Exception as e:
-                return (f"[View Error: {str(e)}]", [], None)
+                return (f"[View Error: {str(e)}]", [], None, [])
         
         @self.formatter.register('select')
         async def _select(ctx, args_str, **kwargs):
@@ -4887,15 +4889,15 @@ class Tags(commands.Cog):
             }
             """
             try:
-                processed_content, _, _ = await ctx.cog.formatter.format(args_str, ctx, **kwargs)
+                processed_content, _, _, _ = await ctx.cog.formatter.format(args_str, ctx, **kwargs)
                 
 
                 select = DiscordGenerator.create_select(processed_content)
                 view = discord.ui.View(timeout=None)
                 view.add_item(select)
-                return ("", [], view)
+                return ("", [], view, [])
             except Exception as e:
-                return (f"[Select Error: {str(e)}]", [], None)
+                return (f"[Select Error: {str(e)}]", [], None, [])
         
         @self.formatter.register('attach')
         async def _attach(ctx, args_str, **kwargs):
