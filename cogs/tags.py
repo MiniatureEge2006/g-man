@@ -4327,25 +4327,23 @@ class Tags(commands.Cog):
             return str(val).capitalize()
             
         @self.formatter.register('set')
-        async def _set(ctx, args_str, **kwargs):
+        async def _set(ctx, val, **kwargs):
             """
             ### {set:name|value}
                 * Sets a variable for the tag.
                 * Example: `{set:name|John}`
             """
-            if not args_str:
-                return "[error: missing name|value]"
+            tags_cog = ctx.bot.get_cog('Tags')
+            if not tags_cog:
+                return "[error: Tags cog not loaded]"
             
-            processed_input = str(args_str)
-
-            parts = processed_input.split('|', 1)
+            parts = val.split('|', 1)
             if len(parts) < 2:
                 return "[error: format should be {set:name|value}]"
+            name, value = parts[0].strip(), parts[1].strip()
             
-            name = parts[0].strip()
-            value = parts[1].strip()
 
-            ctx.cog._variables.setdefault(ctx.message.id, {})[name] = value
+            tags_cog._variables.setdefault(ctx.message.id, {})[name] = value
             return ""
             
         @self.formatter.register('get')
@@ -4355,11 +4353,11 @@ class Tags(commands.Cog):
                 * Retrieves a previously set variable in the tag.
                 * Example: `Hello {get:name}!`
             """
-            name = name.strip()
-            processed_name = str(name)
-            variables = ctx.cog._variables.get(ctx.message.id, {})
-            value = variables.get(processed_name, "")
-            return str(value)
+            tags_cog = ctx.bot.get_cog('Tags')
+            if not tags_cog:
+                return ""
+            variables = tags_cog._variables.get(ctx.message.id, {})
+            return str(variables.get(name.strip(), ""))
             
         @self.formatter.register('math')
         def _math(ctx, expr, **kwargs):
@@ -4379,63 +4377,121 @@ class Tags(commands.Cog):
         @self.formatter.register('python')
         @self.formatter.register('py')
         async def _python(ctx, code, **kwargs):
+            """
+            ### {python:code}
+                * Execute Python code.
+                * Example: `{py:print("hi")}` -> "hi"
+            """
             return await self.execute_language(ctx, 'python', code, **kwargs)
 
         @self.formatter.register('bash')
         @self.formatter.register('sh')
         async def _bash(ctx, code, **kwargs):
+            """
+            ### {bash:code}
+                * Execute Bash code.
+                * Example: `{sh:echo hi}` -> "hi"
+            """
             return await self.execute_language(ctx, 'bash', code, **kwargs)
 
         @self.formatter.register('javascript')
         @self.formatter.register('js')
         @self.formatter.register('node')
         async def _javascript(ctx, code, **kwargs):
+            """
+            ### {javascript:code}
+                * Execute JavaScript code.
+                * Example: `{js:console.log('hi');}` -> "hi"
+            """
             return await self.execute_language(ctx, 'javascript', code, **kwargs)
 
         @self.formatter.register('typescript')
         @self.formatter.register('ts')
         async def _typescript(ctx, code, **kwargs):
+            """
+            ### {typescript:code}
+                * Execute TypeScript code.
+                * Example: `{ts:console.log('hi');}` -> "hi"
+            """
             return await self.execute_language(ctx, 'typescript', code, **kwargs)
         
         @self.formatter.register('php')
         async def _php(ctx, code, **kwargs):
+            """
+            ### {php:code}
+                * Execute PHP code.
+            """
             return await self.execute_language(ctx, 'php', code, **kwargs)
         
         @self.formatter.register('ruby')
         @self.formatter.register('rb')
         async def _ruby(ctx, code, **kwargs):
+            """
+            ### {ruby:code}
+                * Execute Ruby code.
+                * Example: `{rb:puts "hi"}` -> "hi"
+            """
             return await self.execute_language(ctx, 'ruby', code, **kwargs)
         
         @self.formatter.register('lua')
         async def _lua(ctx, code, **kwargs):
+            """
+            ### {lua:code}
+                * Execute Lua code.
+                * Example: `{lua:print("hi")}` -> "hi"
+            """
             return await self.execute_language(ctx, 'lua', code, **kwargs)
 
         @self.formatter.register('go')
         async def _go(ctx, code, **kwargs):
+            """
+            ### {go:code}
+                * Execute Go code.
+            """
             return await self.execute_language(ctx, 'go', code, **kwargs)
 
         @self.formatter.register('rust')
         @self.formatter.register('rs')
         async def _rust(ctx, code, **kwargs):
+            """
+            ### {rust:code}
+                * Execute Rust code.
+            """
             return await self.execute_language(ctx, 'rust', code, **kwargs)
 
         @self.formatter.register('c')
         async def _c(ctx, code, **kwargs):
+            """
+            ### {c:code}
+                * Execute C code.
+            """
             return await self.execute_language(ctx, 'c', code, **kwargs)
 
         @self.formatter.register('cpp')
         @self.formatter.register('c++')
         async def _cpp(ctx, code, **kwargs):
+            """
+            ### {cpp:code}
+                * Execute C++ code.
+            """
             return await self.execute_language(ctx, 'cpp', code, **kwargs)
 
         @self.formatter.register('csharp')
         @self.formatter.register('cs')
         @self.formatter.register('c#')
         async def _csharp(ctx, code, **kwargs):
+            """
+            ### {csharp:code}
+                * Execute C# code.
+            """
             return await self.execute_language(ctx, 'csharp', code, **kwargs)
 
         @self.formatter.register('zig')
         async def _zig(ctx, code, **kwargs):
+            """
+            ### {zig:code}
+                * Execute Zig code.
+            """
             return await self.execute_language(ctx, 'zig', code, **kwargs)
         
         @self.formatter.register('user')
@@ -4766,7 +4822,10 @@ class Tags(commands.Cog):
             Builder Example: {embed:title=Hello color=blue}
             """
             try:
-                processed_content, _, _, _ = await  ctx.cog.formatter.format(args_str, ctx, **kwargs)
+                tags_cog = ctx.bot.get_cog('Tags')
+                if not tags_cog:
+                    return ("[Embed Error: Tags cog not loaded]", [], None, [])
+                processed_content, _, _, _ = await tags_cog.formatter.format(args_str, ctx, **kwargs)
                 if processed_content.strip().startswith(('{', '[')):
                     try:
                         embed_data = json.loads(processed_content)

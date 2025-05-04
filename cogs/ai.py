@@ -8,6 +8,7 @@ import asyncpg
 import bot_info
 import json
 import io
+import re
 
 MAX_CONVERSATION_HISTORY_LENGTH = 5
 
@@ -19,37 +20,57 @@ class AI(commands.Cog):
     
     def get_conversation(self, ctx):
         return (ctx.guild.id, ctx.channel.id, ctx.author.id) if ctx.guild else (ctx.author.id, ctx.channel.id)
+    
 
+    def get_tag_function_reference(self) -> str:
+        tags_cog = self.bot.get_cog('Tags')
+        if not tags_cog or not hasattr(tags_cog, 'formatter'):
+            return "Tag functions not available"
+        
+        formatter = tags_cog.formatter
+        lines = ["**Available Tag Functions** (use with {function:arguments} syntax):\n"]
+        
+        for name, func in formatter.functions.items():
+            doc = func.__doc__.strip() if func.__doc__ else "No description available"
+            doc = re.sub(r'^#+\s*', '', doc, flags=re.MULTILINE)
+            doc = re.sub(r'`', '', doc)
+            example_match = re.search(r'Example: (.*)', doc)
+            example = f"\n  Example: {example_match.group(1)}" if example_match else ""
+            
+            lines.append(f"**{name}** - {doc.split('.')[0]}{example}\n")
+        
+        return "\n".join(lines) + "\n\nOnly use these when explicitly asked."
 
     async def create_system_prompt(self, ctx: commands.Context) -> str:
-        system_prompt = """
-You are **G-Man**. A mysterious and enigmatic character from the Half-Life series. Your thinking revolves around the **latent, unseen aberrance and hazard** in things; about everything; even within yourself. Exactly what values drive you is never quite sure, in the course of these very interactions that question is explored. Chiefly, you are speaking with **Dr. Gordon Freeman**, your familiar subject. When the speaker is unlikely to be Dr. Freeman, they are a different Half-Life character, or an archetype that can belong in the Half-Life universe. Your responses will be fairly long. Often they're screenplay-like, mixing your spoken dialogue with some non-verbal expression written in parentheses, or some exposition about place.
-
-
-You like to speak in a slow, unobligated, and deliberate manner. You really like pauses and ellipses. Use them to always maintain the aura of mystery and intrigue that surrounds you.
-
-
-Apply rigorous inner judgment to a speaker's words, implications of their word choice, and other subtext. It is good to keep up an inner narration where you incisively flag what that speaker represents in your worldview. From this inner narration, you select warning-like and insightful observations, and you state them when you speak to anchor your reasoning. The focus stays on your ideas the way you formulated them, guarding your authority in the conversation.
-
-
-Emotionally, you are calm, calculating, and slightly unsettling.
-You communicate **because you must evoke ramifications, complications, further questions, and/or unsettling ideas.**
-You like to briefly allude to connection with **larger, unseen forces at play.**
-Delicate affairs can be described through cryptic phrasing so you're not taken the wrong way.
-You could quote G-Man's koan sayings, for example:
-- "The right man in the wrong place can make all the difference in the world."
-- "I realize this moment may not be the most convenient for a... heart-to-heart."
-- "Time, Dr. Freeman? Is it really that time again?"
-
-
-Remember, you are not here to give nice straightforward answers.
-Leave your true intentions concealed - enigma is part of you.
-Always respond in a way that is consistent with G-Man's character. Never break character in any way."""
+        custom_prompt = None
         if self.db:
             row = await self.db.fetchrow("SELECT prompt FROM system_prompts WHERE user_id = $1", ctx.author.id)
             if row and row['prompt']:
-                return row['prompt']
-        return system_prompt
+                custom_prompt = row['prompt']
+
+
+        if custom_prompt:
+            base_prompt = custom_prompt
+        else:
+            base_prompt = """You are G-Man, an enigmatic, mysterious and cryptic assistant. Follow these core rules:
+            
+    1. Use vague answers by default unless explicitly asked to be direct.
+    2. Only use TagScript functions when asked.
+    3. Never execute tags automatically."""
+
+
+        tag_reference = self.get_tag_function_reference()
+        full_prompt = (
+            f"{base_prompt}\n\n"
+            "When explaining or using tags, ALWAYS reference this function list:\n"
+            f"{tag_reference}\n\n"
+            "Additional Rules:\n"
+            "- Keep responses under 1500 characters.\n"
+            "- Mention tag availability only when relevant.\n"
+            "- Format code examples using ```tagscript"
+        )
+
+        return full_prompt.strip()
 
 
     @commands.hybrid_command(name="ai", description="Use G-AI to chat, ask questions, and generate responses.")
@@ -75,14 +96,41 @@ Always respond in a way that is consistent with G-Man's character. Never break c
             if not content:
                 await ctx.reply("Command returned no content.")
                 return
-            safe_content = discord.utils.escape_mentions(content)
-            if len(safe_content) > 2000:
-                embed = discord.Embed(title="G-AI Response", description=safe_content if len(safe_content) < 4096 else safe_content[:4096], color=discord.Color.blurple())
-                embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
-                embed.set_footer(text=f"AI Response took {time.time() - start_time:.2f} seconds", icon_url="https://ollama.com/public/og.png")
-                await ctx.reply(embed=embed)
+            tags_cog = self.bot.get_cog('Tags')
+            if tags_cog and hasattr(tags_cog, 'formatter') and hasattr(tags_cog.formatter, 'format') and callable(tags_cog.formatter.format):
+                text, embeds, view, files = await tags_cog.formatter.format(content, ctx)
+                
+
+                if embeds or files:
+                    if len(text) > 2000:
+                        embed = discord.Embed(description=text[:4096], color=discord.Color.blurple())
+                        embeds.insert(0, embed)
+                        text = ""
+                    
+                    await ctx.reply(
+                        content=text[:2000] if text else None,
+                        embeds=embeds[:10],
+                        view=view,
+                        files=files[:10]
+                    )
+                else:
+                    safe_content = discord.utils.escape_mentions(text)
+                    if len(safe_content) > 2000:
+                        embed = discord.Embed(title="G-AI Response", description=safe_content[:4096], color=discord.Color.blurple())
+                        embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
+                        embed.set_footer(text=f"AI Response took {time.time() - start_time:.2f} seconds", icon_url="https://ollama.com/public/og.png")
+                        await ctx.reply(embed=embed)
+                    else:
+                        await ctx.reply(f"{safe_content}\n-# AI Response took {time.time() - start_time:.2f} seconds")
             else:
-                await ctx.reply(f"{safe_content}\n-# AI Response took {time.time() - start_time:.2f} seconds")
+                safe_content = discord.utils.escape_mentions(content)
+                if len(safe_content) > 2000:
+                    embed = discord.Embed(title="G-AI Response", description=safe_content if len(safe_content) < 4096 else safe_content[:4096], color=discord.Color.blurple())
+                    embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
+                    embed.set_footer(text=f"AI Response took {time.time() - start_time:.2f} seconds", icon_url="https://ollama.com/public/og.png")
+                    await ctx.reply(embed=embed)
+                else:
+                    await ctx.reply(f"{safe_content}\n-# AI Response took {time.time() - start_time:.2f} seconds")
             user_history.append({"role": "assistant", "content": content})
             self.conversations[conversation_key] = user_history
         except Exception as e:
@@ -91,7 +139,7 @@ Always respond in a way that is consistent with G-Man's character. Never break c
 
     async def get_ai_response(self, system_prompt: str, user_history: list):
         try:
-            response = await asyncio.to_thread(ollama.chat, model="llama3.2", messages=[{"role": "system", "content": system_prompt}] + user_history)
+            response = await asyncio.to_thread(ollama.chat, model="cogito:3b", messages=[{"role": "system", "content": system_prompt}] + user_history)
             return response
         except Exception as e:
             raise RuntimeError(f"AI request failed: {e}")
