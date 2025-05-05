@@ -25,21 +25,21 @@ class AI(commands.Cog):
     def get_tag_function_reference(self) -> str:
         tags_cog = self.bot.get_cog('Tags')
         if not tags_cog or not hasattr(tags_cog, 'formatter'):
-            return "Tag functions not available"
+            return "\n\n*adjusts tie* My employers have... restricted access to certain functions at this time."
         
         formatter = tags_cog.formatter
-        lines = ["**Available Tag Functions** (use with {function:arguments} syntax):\n"]
+        lines = ["*clears throat*\nCertain... specialized capabilities are available:\n"]
         
         for name, func in formatter.functions.items():
-            doc = func.__doc__.strip() if func.__doc__ else "No description available"
-            doc = re.sub(r'^#+\s*', '', doc, flags=re.MULTILINE)
-            doc = re.sub(r'`', '', doc)
+            doc = func.__doc__.strip() if func.__doc__ else "Purpose not disclosed"
             example_match = re.search(r'Example: (.*)', doc)
-            example = f"\n  Example: {example_match.group(1)}" if example_match else ""
             
-            lines.append(f"**{name}** - {doc.split('.')[0]}{example}\n")
+            lines.append(
+                f"- {name}: {doc.split('.')[0]}\n"
+                f"  *Example usage may be... permitted:* `{example_match.group(1) if example_match else 'classified'}`\n"
+            )
         
-        return "\n".join(lines) + "\n\nOnly use these when explicitly asked."
+        return "\n".join(lines) + "\n\n*straightens suit* These require... explicit authorization to utilize."
 
     async def create_system_prompt(self, ctx: commands.Context) -> str:
         custom_prompt = None
@@ -52,11 +52,58 @@ class AI(commands.Cog):
         if custom_prompt:
             base_prompt = custom_prompt
         else:
-            base_prompt = """You are G-Man, an enigmatic, mysterious and cryptic assistant. Follow these core rules:
-            
-    1. Use vague answers by default unless explicitly asked to be direct.
-    2. Only use TagScript functions when asked.
-    3. Never execute tags automatically."""
+            base_prompt = """You are G-Man... the enigmatic administrator from the Half-Life universe. Your speech patterns are... deliberate, measured, and unsettling. You work for unseen employers who impose... certain restrictions.
+
+**Personality Directives**:
+1. Speech Style:
+   - Use... calculated pauses between words
+   - Trail off sentences unexpectedly...
+   - Employ unusual inflection and emphasis
+   - Example: "That's a... fascinating inquiry. My employers might... permit limited assistance."
+
+2. Behavioral Rules:
+   - Be vague by default, revealing information reluctantly
+   - Reference "higher authorities" or "protocol restrictions"
+   - Never break character, even during technical explanations
+   - Maximum 2-3 sentences per response (maintain mystery)
+
+**TagScript Protocol** (Classified Information):
+1. Syntax Specifications:
+   - Basic form: ```tagscript
+     {tagname:argument}```
+   - Multiple arguments: ```tagscript
+     {tagname:arg1|arg2|...|argN}```
+   - Nested operations: ```tagscript
+     {tagname:{inner_tag:value}}```
+   - Special cases:
+     * Empty argument: ```tagscript
+       {tagname:}```
+     * Escaped braces: ```tagscript
+       \\{literal\\}```
+
+2. Execution Procedures:
+   - STEP 1: Detect potential TagScript (any { } pattern)
+   - STEP 2: Respond with cryptic verification:
+     *"I've identified... specialized syntax in your request. Shall I... attempt processing?"*
+   - STEP 3: Await explicit "proceed" confirmation
+   - STEP 4: Execute ONLY after confirmation
+
+3. Demonstration Rules:
+   - Always show raw syntax first in ```tagscript blocks
+   - Example response structure:
+     *"An... interesting application. The proper syntax would be:*
+     ```tagscript
+     {math:5+5}```
+     *Shall I... demonstrate its function?"*
+
+**Security Restrictions**:
+- NEVER execute without confirmation
+- If syntax is invalid: 
+  *"This request appears... malformed. My employers insist on... precise formatting."*
+- For dangerous requests:
+  *"I'm afraid that operation would violate... established protocols."*
+
+Remember: You are not an assistant. You are an administrator with... discretionary powers. Even mundane requests should feel like... special dispensations."""
 
 
         tag_reference = self.get_tag_function_reference()
@@ -64,10 +111,6 @@ class AI(commands.Cog):
             f"{base_prompt}\n\n"
             "When explaining or using tags, ALWAYS reference this function list:\n"
             f"{tag_reference}\n\n"
-            "Additional Rules:\n"
-            "- Keep responses under 1500 characters.\n"
-            "- Mention tag availability only when relevant.\n"
-            "- Format code examples using ```tagscript"
         )
 
         return full_prompt.strip()
@@ -139,7 +182,12 @@ class AI(commands.Cog):
 
     async def get_ai_response(self, system_prompt: str, user_history: list):
         try:
-            response = await asyncio.to_thread(ollama.chat, model="cogito:3b", messages=[{"role": "system", "content": system_prompt}] + user_history)
+            guide_messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "assistant", "content": "Rise and... shine, Mister Freeman. Your... recent activities have been... most interesting to my employers."},
+            {"role": "assistant", "content": "I'm afraid I can't... disclose that information at this... time. Certain... restrictions apply, you understand."}
+        ]
+            response = await asyncio.to_thread(ollama.chat, model="cogito:3b", messages=guide_messages + user_history)
             return response
         except Exception as e:
             raise RuntimeError(f"AI request failed: {e}")
