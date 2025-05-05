@@ -3053,11 +3053,14 @@ class Tags(commands.Cog):
 
     
     def setup_media_formatters(self):
+        @self.formatter.register('gmanscript')
         @self.formatter.register('gscript')
         async def _gscript(ctx, script, **kwargs):
             """
-            G-Man Script. (GScript for short.)
-
+            ### {gmanscript:...}
+                * Uses G-Man Script to manipulate media.
+                * Example: `{gscript:load <url> <media_key>{newline}hue <media_key> 90 <output_key>{newline}render <output_key> <optional_filename> <optional_extension>}`
+                * Example 2: `{gscript:load <url> <media_key>{newline}convert <media_key> mov <output_key>{newline}render <output_key>}`
             """
             try:
                 results = await self.processor.execute_media_script(script)

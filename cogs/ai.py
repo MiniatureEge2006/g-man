@@ -17,31 +17,57 @@ class AI(commands.Cog):
         self.bot = bot
         self.conversations = {}
         self.db = None
+        self.tag_function_cache = {}
     
     def get_conversation(self, ctx):
         return (ctx.guild.id, ctx.channel.id, ctx.author.id) if ctx.guild else (ctx.author.id, ctx.channel.id)
     
 
-    def get_tag_function_reference(self) -> str:
+    async def get_single_tag_reference(self, tag_name: str) -> str:
+        if tag_name in self.tag_function_cache:
+            return self.tag_function_cache[tag_name]
+        
         tags_cog = self.bot.get_cog('Tags')
         if not tags_cog or not hasattr(tags_cog, 'formatter'):
-            return "\n\n*adjusts tie* My employers have... restricted access to certain functions at this time."
-        
-        formatter = tags_cog.formatter
-        lines = ["*clears throat*\nCertain... specialized capabilities are available:\n"]
-        
-        for name, func in formatter.functions.items():
-            doc = func.__doc__.strip() if func.__doc__ else "Purpose not disclosed"
-            example_match = re.search(r'Example: (.*)', doc)
+            return ""
             
-            lines.append(
-                f"- {name}: {doc.split('.')[0]}\n"
-                f"  *Example usage may be... permitted:* `{example_match.group(1) if example_match else 'classified'}`\n"
-            )
+        formatter = tags_cog.formatter
+        if tag_name not in formatter.functions:
+            return ""
+            
+        func = formatter.functions[tag_name]
+        doc = func.__doc__.strip() if func.__doc__ else "Purpose not disclosed"
+        example_match = re.search(r'Example: (.*)', doc)
         
-        return "\n".join(lines) + "\n\n*straightens suit* These require... explicit authorization to utilize."
+        reference = (
+            f"- {tag_name}: {doc.split('.')[0]}\n"
+            f"  *Example usage may be... permitted:* `{example_match.group(1) if example_match else 'classified'}`"
+        )
+        
 
-    async def create_system_prompt(self, ctx: commands.Context) -> str:
+        self.tag_function_cache[tag_name] = reference
+        return reference
+    
+    async def get_relevant_tag_references(self, content: str) -> str:
+        tag_pattern = r'\{([a-zA-Z0-9_]+)(?::|})'
+        found_tags = set(re.findall(tag_pattern, content))
+        
+        if not found_tags:
+            return ""
+            
+        references = ["*clears throat*\nDetected... specialized capabilities:"]
+        
+        for tag_name in found_tags:
+            ref = await self.get_single_tag_reference(tag_name)
+            if ref:
+                references.append(ref)
+        
+        if len(references) == 1:
+            return ""
+            
+        return "\n".join(references) + "\n\n*straightens suit* These require... explicit authorization to utilize."
+
+    async def create_system_prompt(self, ctx: commands.Context, content: str = "") -> str:
         custom_prompt = None
         if self.db:
             row = await self.db.fetchrow("SELECT prompt FROM system_prompts WHERE user_id = $1", ctx.author.id)
@@ -81,12 +107,18 @@ class AI(commands.Cog):
      * Escaped braces: ```tagscript
        \\{literal\\}```
 
+1.5. Remember that you can execute TagScript still with natural language:
+    - Example 1: what is my user id? -> {userid}
+    - Example 2: what is <user>'s id? -> {userid:<user>}
+    - Example 3: what is this channel? -> {channel}
+    - Example 4: what is <tag function>? -> {tagfunctionname:argsifany|argsifany2|...}
+    - Example 5: can you hue shift urltheusersent? (or a tag function like {avatar} that returns an url) -> {gmanscript:load url media{newline}hue media hueshiftdegree output{newline}render output hue}
+    - Example 6: can you rotate my avatar? -> {gmanscript:load {avatar} avatar{newline}rotate avatar 90 rotated{newline}render rotated rotate}
+    - Make sure to replace the url or any other gscript values like hueshiftdegree to the value the user wants. If the user does not specify one, simply choose a random value.
+
 2. Execution Procedures:
-   - STEP 1: Detect potential TagScript (any { } pattern)
-   - STEP 2: Respond with cryptic verification:
-     *"I've identified... specialized syntax in your request. Shall I... attempt processing?"*
-   - STEP 3: Await explicit "proceed" confirmation
-   - STEP 4: Execute ONLY after confirmation
+   - STEP 1: Detect potential TagScript (any { } pattern, though can also be raw name if explicitly stated)
+   - STEP 2: If the user's request is regarding media manipulation, use {gmanscript:...} e.g. can you hue shift urltheusersent? or can you rotate my avatar?
 
 3. Demonstration Rules:
    - Always show raw syntax first in ```tagscript blocks
@@ -97,7 +129,6 @@ class AI(commands.Cog):
      *Shall I... demonstrate its function?"*
 
 **Security Restrictions**:
-- NEVER execute without confirmation
 - If syntax is invalid: 
   *"This request appears... malformed. My employers insist on... precise formatting."*
 - For dangerous requests:
@@ -106,14 +137,17 @@ class AI(commands.Cog):
 Remember: You are not an assistant. You are an administrator with... discretionary powers. Even mundane requests should feel like... special dispensations."""
 
 
-        tag_reference = self.get_tag_function_reference()
-        full_prompt = (
-            f"{base_prompt}\n\n"
-            "When explaining or using tags, ALWAYS reference this function list:\n"
-            f"{tag_reference}\n\n"
-        )
+        tag_reference = await self.get_relevant_tag_references(content)
+        if tag_reference:
+            full_prompt = (
+                f"{base_prompt}\n\n"
+                "When explaining or using these tags, reference:\n"
+                f"{tag_reference}\n\n"
+            )
 
-        return full_prompt.strip()
+            return full_prompt.strip()
+        return base_prompt.strip()
+    
 
 
     @commands.hybrid_command(name="ai", description="Use G-AI to chat, ask questions, and generate responses.")
@@ -122,28 +156,47 @@ Remember: You are not an assistant. You are an administrator with... discretiona
     @app_commands.describe(prompt="The prompt to send to G-AI.")
     async def ai(self, ctx: commands.Context, *, prompt: str):
         await ctx.typing()
-        conversation_key = self.get_conversation(ctx)
-        user_history = self.conversations.get(conversation_key, [])
-        user_history.append({"role": "user", "content": prompt})
-
-        if len(user_history) > MAX_CONVERSATION_HISTORY_LENGTH:
-            user_history = user_history[-MAX_CONVERSATION_HISTORY_LENGTH:]
-        asyncio.create_task(self.process_ai_response(ctx, conversation_key, user_history))
+        await self.process_ai_response(ctx, prompt)
     
-    async def process_ai_response(self, ctx: commands.Context, conversation_key, user_history):
+    async def process_ai_response(self, ctx: commands.Context, prompt: str):
         start_time = time.time()
         try:
-            system_prompt = await self.create_system_prompt(ctx)
-            response: ollama.ChatResponse = await self.get_ai_response(system_prompt, user_history)
+            conversation_key = self.get_conversation(ctx)
+            user_history = self.conversations.get(conversation_key, [])
+            
+
+            no_think_mode = "/no_think" in prompt
+            if no_think_mode:
+                prompt = prompt.replace("/no_think", "").strip()
+            
+
+            system_prompt = await self.create_system_prompt(ctx, prompt)
+            messages = [{"role": "system", "content": system_prompt}]
+            
+
+            if no_think_mode:
+                messages.append({"role": "system", "content": "/no_think"})
+            
+
+            messages.append({"role": "user", "content": prompt})
+            
+
+            if not no_think_mode and user_history:
+                messages[1:1] = user_history[-MAX_CONVERSATION_HISTORY_LENGTH:]
+            
+
+            response = await self.get_ai_response(messages, no_think_mode)
             content = response.message.content
+            
             if not content:
                 await ctx.reply("Command returned no content.")
                 return
-            tags_cog = self.bot.get_cog('Tags')
-            if tags_cog and hasattr(tags_cog, 'formatter') and hasattr(tags_cog.formatter, 'format') and callable(tags_cog.formatter.format):
-                text, embeds, view, files = await tags_cog.formatter.format(content, ctx)
                 
 
+            tags_cog = self.bot.get_cog('Tags')
+            if tags_cog and hasattr(tags_cog, 'formatter'):
+                text, embeds, view, files = await tags_cog.formatter.format(content, ctx)
+                
                 if embeds or files:
                     if len(text) > 2000:
                         embed = discord.Embed(description=text[:4096], color=discord.Color.blurple())
@@ -174,20 +227,26 @@ Remember: You are not an assistant. You are an administrator with... discretiona
                     await ctx.reply(embed=embed)
                 else:
                     await ctx.reply(f"{safe_content}\n-# AI Response took {time.time() - start_time:.2f} seconds")
-            user_history.append({"role": "assistant", "content": content})
-            self.conversations[conversation_key] = user_history
+            
+
+            if not no_think_mode:
+                user_history.append({"role": "user", "content": prompt})
+                user_history.append({"role": "assistant", "content": content})
+                if len(user_history) > MAX_CONVERSATION_HISTORY_LENGTH * 2:
+                    user_history = user_history[-(MAX_CONVERSATION_HISTORY_LENGTH * 2):]
+                self.conversations[conversation_key] = user_history
+                
         except Exception as e:
             await ctx.send(f"An error occurred: {e}")
 
 
-    async def get_ai_response(self, system_prompt: str, user_history: list):
+    async def get_ai_response(self, messages: list, no_think_mode: bool = False):
         try:
-            guide_messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "assistant", "content": "Rise and... shine, Mister Freeman. Your... recent activities have been... most interesting to my employers."},
-            {"role": "assistant", "content": "I'm afraid I can't... disclose that information at this... time. Certain... restrictions apply, you understand."}
-        ]
-            response = await asyncio.to_thread(ollama.chat, model="cogito:3b", messages=guide_messages + user_history)
+            response = await asyncio.to_thread(
+                ollama.chat,
+                model="qwen3",
+                messages=messages
+            )
             return response
         except Exception as e:
             raise RuntimeError(f"AI request failed: {e}")
