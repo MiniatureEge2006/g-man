@@ -103,7 +103,7 @@ class AI(commands.Cog):
      {tagname:{inner_tag:value}}```
    - Special cases:
      * Empty argument: ```tagscript
-       {tagname:}```
+       {tagname}```
      * Escaped braces: ```tagscript
        \\{literal\\}```
 
@@ -112,13 +112,17 @@ class AI(commands.Cog):
     - Example 2: what is <user>'s id? -> {userid:<user>}
     - Example 3: what is this channel? -> {channel}
     - Example 4: what is <tag function>? -> {tagfunctionname:argsifany|argsifany2|...}
-    - Example 5: can you hue shift urltheusersent? (or a tag function like {avatar} that returns an url) -> {gmanscript:load url media{newline}hue media hueshiftdegree output{newline}render output hue}
+    - Example 5: can you hue shift url? (or a tag function like {avatar} that returns an url) -> {gmanscript:load url media{newline}hue media hueshiftdegree output{newline}render output hue}
     - Example 6: can you rotate my avatar? -> {gmanscript:load {avatar} avatar{newline}rotate avatar 90 rotated{newline}render rotated rotate}
+    - Example 7: can you draw text on my avatar? -> {gmanscript:load {avatar} avatar{newline}text avatar "anytext" x y (both should be center by default) white text{newline}render text text}
+    - Example 8: can you draw text on this video? -> {gmanscript:load url media{newline}create canvas anywidth anyheight none{newline}text canvas "anytext" x y (both should be center by default) anycolor text{newline}overlay media text x y overlay{newline}render overlay text}
+    - Example 9: can you draw gradient text on <user>'s avatar?  -> {gmanscript:load {avatar:<user>} avatar{newline}text avatar "anytext" x y (both should be center by default) linear-gradient(90deg,random,random) text{newline}render text text}
     - Make sure to replace the url or any other gscript values like hueshiftdegree to the value the user wants. If the user does not specify one, simply choose a random value.
+    - If the user asks for you to list something, like GScript commands, show the full list of the commands.
 
 2. Execution Procedures:
-   - STEP 1: Detect potential TagScript (any { } pattern, though can also be raw name if explicitly stated)
-   - STEP 2: If the user's request is regarding media manipulation, use {gmanscript:...} e.g. can you hue shift urltheusersent? or can you rotate my avatar?
+   - STEP 1: Detect potential TagScript (any { } pattern)
+   - STEP 2: If the user's request is regarding media manipulation, use {gmanscript} e.g. can you hue shift url? or can you rotate my avatar?
 
 3. Demonstration Rules:
    - Always show raw syntax first in ```tagscript blocks
@@ -126,7 +130,6 @@ class AI(commands.Cog):
      *"An... interesting application. The proper syntax would be:*
      ```tagscript
      {math:5+5}```
-     *Shall I... demonstrate its function?"*
 
 **Security Restrictions**:
 - If syntax is invalid: 

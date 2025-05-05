@@ -3059,8 +3059,42 @@ class Tags(commands.Cog):
             """
             ### {gmanscript:...}
                 * Uses G-Man Script to manipulate media.
-                * Example: `{gscript:load <url> <media_key>{newline}hue <media_key> 90 <output_key>{newline}render <output_key> <optional_filename> <optional_extension>}`
-                * Example 2: `{gscript:load <url> <media_key>{newline}convert <media_key> mov <output_key>{newline}render <output_key>}`
+                * Example: `{gscript:load url key{newline}convert key mov converted{newline}render converted}
+                * Available GScript commands:
+                    - load [url] [media_key]
+                    - loadsvg [svg_content] [media_key] [width] [height] [background]
+                    - reverse [input_key] [output_key]
+                    - concat [output_key] [input_keys...]
+                    - convert [input_key] [format] [output_key]
+                    - render [media_key] [format] [filename]
+                    - contrast [input_key] [contrast_level] [output_key]
+                    - opacity [input_key] [opacity_level] [output_key]
+                    - saturate [input_key] [saturation_level] [output_key]
+                    - hue [input_key] [hue_shift] [output_key]
+                    - brightness [input_key] [brightness_level] [output_key]
+                    - gamma [input_key] [gamma_level] [output_key]
+                    - clone [input_key] [output_key]
+                    - fps [input_key] [fps_value] [output_key]
+                    - grayscale [input_key] [output_key]
+                    - sepia [input_key] [output_key]
+                    - invert [input_key] [output_key]
+                    - resize [input_key] [width] [height] [output_key]
+                    - crop [input_key] [x] [y] [width] [height] [output_key]
+                    - rotate [input_key] [angle] [output_key]
+                    - trim [input_key] [start_time] [end_time] [output_key]
+                    - speed [input_key] [speed] [output_key]
+                    - volume [input_key] [volume_level] [output_key]
+                    - overlay [base_key] [overlay_key] [x] [y] [output_key]
+                    - text [input_key] [text] [x] [y] [color] [output_key] [font_size] [font] [outline_color] [outline_width] [shadow_color] [shadow_offset] [shadow_blur] [wrap_width] [line_spacing]
+                    - audioputreplace [media_key] [audio_key] [output_key] [preserve_length] [force_video] [loop_media]
+                    - audioputmix [media_key] [audio_key] [output_key] [volume] [preserve_length] [loop_audio] [loop_media]
+                    - tremolo [input_key] [frequency] [depth] [output_key]
+                    - vibrato [input_key] [frequency] [depth] [output_key]
+                    - create [media_key] [width] [height] [color]
+                    - fadein [input_key] [duration] [color] [audio] [output_key]
+                    - fadeout [input_key] [start_time] [duration] [color] [audio] [output_key]
+                    - colorkey [input_key] [color] [similarity] [blend] [output_key]
+                    - chromakey [input_key] [color] [similarity] [blend] [output_key]
             """
             try:
                 results = await self.processor.execute_media_script(script)
