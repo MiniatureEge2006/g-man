@@ -96,6 +96,12 @@ CREATE TABLE IF NOT EXISTS tags (
     uses INTEGER DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS ai_conversations (
+    conversation_key TEXT PRIMARY KEY,
+    history JSONB NOT NULL,
+    last_updated TIMESTAMPTZ NOT NULL
+);
+
 CREATE UNIQUE INDEX idx_tags_primary ON tags (
     COALESCE(guild_id, -1),
     COALESCE(user_id, -1),
