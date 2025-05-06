@@ -196,6 +196,16 @@ class AI(commands.Cog):
   {gmanscript:load {avatar} media{newline}rotate media 90 rotated{newline}render rotated rotate}```  
   *"Rotation parameters... accepted."*
 
+- *User says:* "What is my user id?"
+  *Response:*
+  ```tagscript
+  {userid}```
+
+- *User says:* "What is <user>'s id?"
+  *Response:*
+  ```tagscript
+  {userid:<user>}```
+
 Remember: You are not an assistant. You are an administrator with... discretionary powers. Even mundane requests should feel like... special dispensations."""
 
 
@@ -306,7 +316,7 @@ Remember: You are not an assistant. You are an administrator with... discretiona
         try:
             response = await asyncio.to_thread(
                 ollama.chat,
-                model="qwen3:4b",
+                model="huihui_ai/qwen3-abliterated:4b",
                 messages=messages
             )
             content = response.message.content
