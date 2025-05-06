@@ -5427,6 +5427,13 @@ class Tags(commands.Cog):
     
     def cog_unload(self):
         asyncio.create_task(self.cleanup_resources())
+    
+    def parse_personal_flag(self, content: str) -> tuple[str, bool]:
+        personal = False
+        if "--personal" in content.lower():
+            personal = True
+            content = content.replace("--personal", "").strip()
+        return content, personal
 
     
     @commands.hybrid_group(name="tag", description="Tag management commands.", invoke_without_command=True, with_app_command=True, aliases=["t"])
@@ -5434,20 +5441,37 @@ class Tags(commands.Cog):
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def tag(self, ctx: commands.Context, name: str, *, args: str = ""):
         await ctx.typing()
+        name, personal = self.parse_personal_flag(name)
+        name = name.lower()
+        
         async with self.pool.acquire() as conn:
             tag = await conn.fetchrow(
                 """SELECT content, uses FROM tags
-                WHERE name = $1 AND (guild_id = $2 OR user_id = $3)""",
-                name, ctx.guild.id if ctx.guild else None, ctx.author.id
+                WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4))""",
+                name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None
             )
+            
 
+            if not tag and not personal:
+                alias = await conn.fetchrow(
+                    """SELECT tag_name FROM tag_aliases
+                    WHERE alias = $1 AND (guild_id = $2 OR user_id = $3)""",
+                    name, ctx.guild.id if ctx.guild else None, ctx.author.id
+                )
+                if alias:
+                    tag = await conn.fetchrow(
+                        """SELECT content, uses FROM tags
+                        WHERE name = $1 AND (guild_id = $2 OR user_id = $3)""",
+                        alias['tag_name'], ctx.guild.id if ctx.guild else None, ctx.author.id
+                    )
+            
             if not tag:
-                return await ctx.send(f"Tag `{name}` not found.")
+                return await ctx.send(f"Tag or alias `{name}` not found.")
             
             await conn.execute(
                 """UPDATE tags SET uses = uses + 1
-                WHERE name = $1 AND (guild_id = $2 OR user_id = $3)""",
-                name, ctx.guild.id if ctx.guild else None, ctx.author.id
+                WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4))""",
+                name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None
             )
             text, embeds, view, files = await self.formatter.format(tag['content'], ctx, args=args)
             if text.strip() or embeds or (view and view.children) or files:
@@ -5462,26 +5486,51 @@ class Tags(commands.Cog):
                     await ctx.send(f"Failed to send tag: {e}")
     
     @tag.command(name="show", description="Show a tag.", with_app_command=True, aliases=["fetch"])
-    @app_commands.describe(name="The tag name.", args="The tag arguments, if any.")
-    @app_commands.allowed_installs(guilds=True, users=True)
-    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    async def show(self, ctx: commands.Context, name: str, *, args: str = ""):
+    @app_commands.describe(name="The tag name.", args="The tag arguments, if any.", personal="Whether to show a personal tag.")
+    async def show(self, ctx: commands.Context, name: str, *, args: str = "", personal: bool = False):
         await ctx.typing()
+        name, content_personal = self.parse_personal_flag(name)
+        personal = personal or content_personal
+        name = name.lower()
+        
         async with self.pool.acquire() as conn:
             tag = await conn.fetchrow(
                 """SELECT content, uses FROM tags
-                WHERE name = $1 AND (guild_id = $2 OR user_id = $3)""",
-                name, ctx.guild.id if ctx.guild else None, ctx.author.id
+                WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4))""",
+                name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None
             )
 
+
             if not tag:
-                return await ctx.send(f"Tag `{name}` not found.")
+                alias = await conn.fetchrow(
+                    """SELECT tag_name FROM tag_aliases
+                    WHERE alias = $1 AND (
+                        ($2 AND user_id = $3) OR
+                        (NOT $2 AND guild_id = $4)
+                    )""",
+                    name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None
+                )
+                
+                if alias:
+                    tag = await conn.fetchrow(
+                        """SELECT content, uses FROM tags
+                        WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4))""",
+                        alias['tag_name'], personal, ctx.author.id, ctx.guild.id if ctx.guild else None
+                    )
+                    if tag:
+                        name = alias['tag_name']
             
+            if not tag:
+                return await ctx.send(f"Tag or alias `{name}` not found.")
+            
+
             await conn.execute(
                 """UPDATE tags SET uses = uses + 1
-                WHERE name = $1 AND (guild_id = $2 OR user_id = $3)""",
-                name, ctx.guild.id if ctx.guild else None, ctx.author.id
+                WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4))""",
+                name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None
             )
+            
+
             text, embeds, view, files = await self.formatter.format(tag['content'], ctx, args=args)
             if text.strip() or embeds or (view and view.children) or files:
                 try:
@@ -5495,13 +5544,19 @@ class Tags(commands.Cog):
                     await ctx.send(f"Failed to send tag: {e}")
     
     @tag.command(name="create", description="Create a tag.", with_app_command=True, aliases=["add"])
-    @app_commands.describe(name="The tag name.", content="The tag content.", personal="Make this a personal tag.")
-    @app_commands.allowed_installs(guilds=True, users=True)
-    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    @app_commands.describe(
+        name="The tag name.", 
+        content="The tag content.", 
+        personal="Make this a personal tag."
+    )
     async def create(self, ctx: commands.Context, name: str, *, content: str, personal: bool = False):
         await ctx.typing()
         if content is None:
             return await ctx.send("Please provide both a name and content for the tag.")
+        
+        content, content_personal = self.parse_personal_flag(content)
+        personal = personal or content_personal
+        
         name = name.lower()
         if len(name) > 50:
             return await ctx.send("Tag names must be 50 characters or less.")
@@ -5510,16 +5565,13 @@ class Tags(commands.Cog):
         
         try:
             async with self.pool.acquire() as conn:
-                if personal or "--personal" in content:
-                    if "--personal" in content:
-                        content = content.replace("--personal", "").strip()
-                        personal = True
+                if personal:
                     await conn.execute(
                         """INSERT INTO tags (user_id, name, content, author_id)
                         VALUES ($1, $2, $3, $4)""",
                         ctx.author.id, name, content, ctx.author.id
                     )
-                    await ctx.send(f"Created personal tag `{name}`.")
+                    await ctx.send(f"Created personal tag `{name}`")
                 else:
                     if not ctx.guild:
                         return await ctx.send("Server tags can only be created in servers.")
@@ -5528,95 +5580,177 @@ class Tags(commands.Cog):
                         VALUES ($1, $2, $3, $4)""",
                         ctx.guild.id, name, content, ctx.author.id
                     )
-                    await ctx.send(f"Created server tag `{name}`.")
+                    await ctx.send(f"Created server tag `{name}`")
         except asyncpg.UniqueViolationError:
             await ctx.send(f"A tag named `{name}` already exists in this context.")
     
     @tag.command(name="edit", description="Edit an existing tag.", with_app_command=True, aliases=["update"])
-    @app_commands.describe(name="The tag name.", new_content="The new content for the tag.")
-    @app_commands.allowed_installs(guilds=True, users=True)
-    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    async def edit(self, ctx: commands.Context, name: str, *, new_content: str):
+    @app_commands.describe(
+        name="The tag name.",
+        new_content="The new content for the tag.",
+        personal="Whether this is a personal tag."
+    )
+    async def edit(self, ctx: commands.Context, name: str, *, new_content: str = None, personal: bool = False):
         await ctx.typing()
         name = name.lower()
+        
+
+        if new_content is not None:
+            new_content, content_personal = self.parse_personal_flag(new_content)
+            personal = personal or content_personal
+        
         if not new_content:
             return await ctx.send("Please provide the new content for the tag.")
         
         async with self.pool.acquire() as conn:
-            updated = await conn.execute(
-                """UPDATE tags SET content = $1 WHERE name = $2 AND user_id = $3""",
-                new_content, name, ctx.author.id
-            )
-
-            if updated != "UPDATE 0":
-                return await ctx.send(f"Edited personal tag `{name}`.")
-
-
-            if ctx.guild:
+            if personal:
                 updated = await conn.execute(
-                    """UPDATE tags SET content = $1 WHERE name = $2 AND guild_id = $3 AND author_id = $4""",
+                    """UPDATE tags SET content = $1 
+                    WHERE name = $2 AND user_id = $3""",
+                    new_content, name, ctx.author.id
+                )
+                if updated != "UPDATE 0":
+                    return await ctx.send(f"Edited personal tag `{name}`")
+            else:
+                if not ctx.guild:
+                    return await ctx.send("Server tags can only be edited in servers.")
+                
+
+                updated = await conn.execute(
+                    """UPDATE tags SET content = $1 
+                    WHERE name = $2 AND guild_id = $3 AND author_id = $4""",
                     new_content, name, ctx.guild.id, ctx.author.id
                 )
-
                 if updated != "UPDATE 0":
-                    return await ctx.send(f"Edited server tag `{name}`.")
+                    return await ctx.send(f"Edited server tag `{name}`")
+
 
                 if ctx.author.guild_permissions.manage_messages:
                     updated = await conn.execute(
-                        """UPDATE tags SET content = $1 WHERE name = $2 AND guild_id = $3""",
+                        """UPDATE tags SET content = $1 
+                        WHERE name = $2 AND guild_id = $3""",
                         new_content, name, ctx.guild.id
                     )
                     if updated != "UPDATE 0":
-                        return await ctx.send(f"Forcefully edited server tag `{name}`.")
+                        return await ctx.send(f"Forcefully edited server tag `{name}`")
 
-        await ctx.send(f"No editable tag named `{name}` found.")
+            await ctx.send(f"No editable tag named `{name}` found.")
+    
+    @tag.command(name="rename", description="Rename a tag.", with_app_command=True)
+    @app_commands.describe(
+        old_name="The current tag name.",
+        new_name="The new name for the tag.",
+        personal="Whether this is a personal tag."
+    )
+    async def rename(self, ctx: commands.Context, old_name: str, new_name: str, personal: bool = False):
+        await ctx.typing()
+        old_name = old_name.lower()
+        new_name = new_name.lower()
+        
+        if len(new_name) > 50:
+            return await ctx.send("Tag names must be 50 characters or less.")
+        
+        if old_name == new_name:
+            return await ctx.send("The new name must be different from the old name.")
+
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                exists = await conn.fetchrow(
+                    """SELECT 1 FROM tags 
+                    WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4))""",
+                    new_name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None
+                )
+                if exists:
+                    return await ctx.send(f"A tag named `{new_name}` already exists in this context.")
+
+
+                tag = await conn.fetchrow(
+                    """SELECT 1 FROM tags 
+                    WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4 AND author_id = $5))""",
+                    old_name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None, ctx.author.id
+                )
+                
+                if not tag and ctx.author.guild_permissions.manage_messages and not personal:
+                    tag = await conn.fetchrow(
+                        """SELECT 1 FROM tags 
+                        WHERE name = $1 AND guild_id = $2""",
+                        old_name, ctx.guild.id
+                    )
+
+                if not tag:
+                    scope = "personal" if personal else "server"
+                    return await ctx.send(f"No {scope} tag named `{old_name}` found that you can rename.")
+
+
+                if personal:
+                    await conn.execute(
+                        """UPDATE tags SET name = $1 
+                        WHERE name = $2 AND user_id = $3""",
+                        new_name, old_name, ctx.author.id
+                    )
+                else:
+                    await conn.execute(
+                        """UPDATE tags SET name = $1 
+                        WHERE name = $2 AND guild_id = $3""",
+                        new_name, old_name, ctx.guild.id
+                    )
+
+
+                await conn.execute(
+                    """UPDATE tag_aliases SET tag_name = $1
+                    WHERE tag_name = $2 AND (
+                        ($3 AND user_id = $4) OR  -- Personal alias
+                        (NOT $3 AND guild_id = $5)  -- Server alias
+                    )""",
+                    new_name, old_name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None
+                )
+
+        await ctx.send(f"Renamed tag from `{old_name}` to `{new_name}`")
     
     @tag.command(name="delete", description="Delete a tag.", with_app_command=True, aliases=["remove", "rm", "del"])
-    @app_commands.describe(name="The tag name.")
-    @app_commands.allowed_installs(guilds=True, users=True)
-    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    async def delete(self, ctx: commands.Context, *, name: str):
+    @app_commands.describe(
+        name="The tag name.",
+        personal="Whether this is a personal tag."
+    )
+    async def delete(self, ctx: commands.Context, *, name: str, personal: bool = False):
         await ctx.typing()
+        name, content_personal = self.parse_personal_flag(name)
+        personal = personal or content_personal
         name = name.lower()
+        
         async with self.pool.acquire() as conn:
-            if await conn.fetchval(
-                "SELECT 1 FROM tags WHERE name = $1 AND user_id = $2",
-                name, ctx.author.id
-            ):
-                await conn.execute(
+            if personal:
+                deleted = await conn.execute(
                     "DELETE FROM tags WHERE name = $1 AND user_id = $2",
                     name, ctx.author.id
                 )
-                return await ctx.send(f"Deleted personal tag `{name}`.")
-            
-            if ctx.guild and await conn.fetchval(
-                """SELECT 1 FROM tags
-                WHERE name = $1 AND guild_id = $2 AND author_id = $3""",
-                name, ctx.guild.id, ctx.author.id
-            ):
-                await conn.execute(
-                    """DELETE FROM tags
+                if deleted != "DELETE 0":
+                    return await ctx.send(f"Deleted personal tag `{name}`")
+            else:
+                if not ctx.guild:
+                    return await ctx.send("Server tags can only be deleted in servers.")
+                
+
+                deleted = await conn.execute(
+                    """DELETE FROM tags 
                     WHERE name = $1 AND guild_id = $2 AND author_id = $3""",
                     name, ctx.guild.id, ctx.author.id
                 )
-                return await ctx.send(f"Deleted server tag `{name}`.")
-            
-            if ctx.guild and ctx.author.guild_permissions.manage_messages:
-                if await conn.fetchval(
-                    "SELECT 1 FROM tags WHERE name = $1 AND guild_id = $2",
-                    name, ctx.guild.id
-                ):
-                    await conn.execute(
+                if deleted != "DELETE 0":
+                    return await ctx.send(f"Deleted server tag `{name}`")
+
+
+                if ctx.author.guild_permissions.manage_messages:
+                    deleted = await conn.execute(
                         "DELETE FROM tags WHERE name = $1 AND guild_id = $2",
                         name, ctx.guild.id
                     )
-                    return await ctx.send(f"Forcefully deleted server tag `{name}`.")
-            
+                    if deleted != "DELETE 0":
+                        return await ctx.send(f"Forcefully deleted server tag `{name}`")
+
             await ctx.send(f"No deletable tag `{name}` found.")
     
     @tag.command(name="list", description="List available tags.", with_app_command=True, aliases=["ls"])
-    @app_commands.allowed_installs(guilds=True, users=True)
-    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def list(self, ctx: commands.Context, personal: bool = False):
         await ctx.typing()
         async with self.pool.acquire() as conn:
@@ -5643,19 +5777,25 @@ class Tags(commands.Cog):
             await ctx.send(embed=embed)
     
     @tag.command(name="info", description="Get information about a tag.", with_app_command=True)
-    @app_commands.describe(name="The tag name.")
+    @app_commands.describe(
+        name="The tag name.",
+        personal="Whether to look for a personal tag."
+    )
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    async def info(self, ctx: commands.Context, *, name: str):
+    async def info(self, ctx: commands.Context, *, name: str, personal: bool = False):
         await ctx.typing()
+        name, content_personal = self.parse_personal_flag(name)
+        personal = personal or content_personal
         name = name.lower()
+        
         async with self.pool.acquire() as conn:
             tag = await conn.fetchrow(
                 """SELECT content, author_id, created_at, uses,
                 guild_id IS NOT NULL as is_guild_tag
                 FROM tags
-                WHERE name = $1 AND (guild_id = $2 OR user_id = $3)""",
-                name, ctx.guild.id if ctx.guild else None, ctx.author.id
+                WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4))""",
+                name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None
             )
 
             if not tag:
@@ -5672,16 +5812,21 @@ class Tags(commands.Cog):
             await ctx.send(embed=embed)
     
     @tag.command(name="raw", description="Get the raw content of a tag.", with_app_command=True)
-    @app_commands.describe(name="The tag name.")
-    @app_commands.allowed_installs(guilds=True, users=True)
-    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    async def raw(self, ctx: commands.Context, *, name: str):
+    @app_commands.describe(
+        name="The tag name.",
+        personal="Whether to look for a personal tag."
+    )
+    async def raw(self, ctx: commands.Context, *, name: str, personal: bool = False):
         await ctx.typing()
+        name, content_personal = self.parse_personal_flag(name)
+        personal = personal or content_personal
         name = name.lower()
+        
         async with self.pool.acquire() as conn:
             tag = await conn.fetchrow(
-                "SELECT content FROM tags WHERE name = $1 AND (guild_id = $2 OR user_id = $3)",
-                name, ctx.guild.id if ctx.guild else None, ctx.author.id
+                """SELECT content FROM tags 
+                WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4))""",
+                name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None
             )
 
             if not tag:
@@ -5691,8 +5836,6 @@ class Tags(commands.Cog):
     
     @tag.command(name="transfer", description="Transfer ownership of a personal tag.", with_app_command=True, aliases=["gift"])
     @app_commands.describe(name="The tag name.", new_owner="The user to transfer to.")
-    @app_commands.allowed_installs(guilds=True, users=True)
-    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def transfer(self, ctx: commands.Context, name: str, new_owner: discord.User):
         await ctx.typing()
         name = name.lower()
@@ -5707,6 +5850,149 @@ class Tags(commands.Cog):
                 await ctx.send(f"No personal tag `{name}` found that you own.")
             else:
                 await ctx.send(f"Transferred tag `{name}` to {new_owner.name}")
+    
+    @tag.group(name="alias", description="Manage tag aliases.", with_app_command=True)
+    async def alias(self, ctx: commands.Context):
+        if ctx.invoked_subcommand is None:
+            await ctx.send("Available commands: `add`, `remove`, `list`")
+
+    @alias.command(name="add", description="Add an alias to a tag.")
+    @app_commands.describe(
+        tag_name="The original tag name",
+        alias="The new alias",
+        personal="Whether this is for a personal tag"
+    )
+    async def alias_add(self, ctx: commands.Context, tag_name: str, alias: str, personal: bool = False):
+        await ctx.typing()
+        
+
+        tag_name = tag_name.lower().strip()
+        alias = alias.lower().strip()
+        
+        if len(alias) > 50:
+            return await ctx.send("Aliases must be 50 characters or less.")
+        
+        if not ctx.guild and not personal:
+            return await ctx.send("Server tags can only be managed in servers.")
+
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                try:
+                    guild_id = None if personal else ctx.guild.id
+                    user_id = ctx.author.id if personal else None
+
+
+                    tag_exists = await conn.fetchval(
+                        """SELECT 1 FROM tags 
+                        WHERE name = $1 
+                        AND (guild_id IS NOT DISTINCT FROM $2) 
+                        AND (user_id IS NOT DISTINCT FROM $3)""",
+                        tag_name, guild_id, user_id
+                    )
+                    if not tag_exists:
+                        scope_type = "personal" if personal else "server"
+                        return await ctx.send(f"No {scope_type} tag named `{tag_name}` found.")
+
+
+                    alias_exists = await conn.fetchval(
+                        """SELECT 1 FROM (
+                            SELECT name FROM tags 
+                            WHERE (guild_id IS NOT DISTINCT FROM $1) AND (user_id IS NOT DISTINCT FROM $2)
+                            UNION
+                            SELECT alias FROM tag_aliases 
+                            WHERE (guild_id IS NOT DISTINCT FROM $1) AND (user_id IS NOT DISTINCT FROM $2)
+                        ) AS names WHERE lower(name) = $3""",
+                        guild_id, user_id, alias
+                    )
+                    if alias_exists:
+                        return await ctx.send(f"A tag or alias named `{alias}` already exists in this scope.")
+
+
+                    await conn.execute(
+                        """INSERT INTO tag_aliases (alias, tag_name, guild_id, user_id)
+                        VALUES ($1, $2, $3, $4)""",
+                        alias, tag_name, guild_id, user_id
+                    )
+                    
+                    await ctx.send(f"Added alias `{alias}` for tag `{tag_name}`")
+                    
+                except asyncpg.UniqueViolationError:
+                    await ctx.send("This alias already exists for another tag.")
+                except Exception as e:
+                    await ctx.send(f"An error occurred: {str(e)}")
+
+    @alias.command(name="remove", description="Remove a tag alias.", aliases=["delete", "rm", "del"])
+    @app_commands.describe(
+        alias="The alias to remove",
+        personal="Whether this is a personal tag alias"
+    )
+    async def alias_remove(self, ctx: commands.Context, alias: str, personal: bool = False):
+        await ctx.typing()
+        alias = alias.lower().strip()
+        
+        if not ctx.guild and not personal:
+            return await ctx.send("Server tags can only be managed in servers.")
+
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                try:
+                    if personal:
+                        deleted = await conn.execute(
+                            """DELETE FROM tag_aliases 
+                            WHERE alias = $1 AND user_id = $2""",
+                            alias, ctx.author.id
+                        )
+                    else:
+                        deleted = await conn.execute(
+                            """DELETE FROM tag_aliases 
+                            WHERE alias = $1 AND guild_id = $2""",
+                            alias, ctx.guild.id
+                        )
+                    
+                    if deleted == "DELETE 0":
+                        scope_type = "personal" if personal else "server"
+                        await ctx.send(f"No {scope_type} alias named `{alias}` found.")
+                    else:
+                        await ctx.send(f"Removed alias `{alias}`")
+                        
+                except Exception as e:
+                    await ctx.send(f"An error occurred: {str(e)}")
+
+    @alias.command(name="list", description="List tag aliases.", aliases=["ls"])
+    @app_commands.describe(personal="Whether to list personal tag aliases")
+    async def alias_list(self, ctx: commands.Context, personal: bool = False):
+        await ctx.typing()
+        
+        if not ctx.guild and not personal:
+            return await ctx.send("Server tags can only be listed in servers.")
+
+        async with self.pool.acquire() as conn:
+            try:
+                if personal:
+                    aliases = await conn.fetch(
+                        """SELECT alias, tag_name FROM tag_aliases 
+                        WHERE user_id = $1 ORDER BY alias""",
+                        ctx.author.id
+                    )
+                    title = "Your personal tag aliases"
+                else:
+                    aliases = await conn.fetch(
+                        """SELECT alias, tag_name FROM tag_aliases 
+                        WHERE guild_id = $1 ORDER BY alias""",
+                        ctx.guild.id
+                    )
+                    title = f"Tag aliases in {ctx.guild.name}"
+
+                if not aliases:
+                    scope_type = "personal" if personal else "server"
+                    return await ctx.send(f"No {scope_type} tag aliases found.")
+                
+                embed = discord.Embed(title=title, color=discord.Color.blue())
+                embed.description = "\n".join(f"• `{a['alias']}` -> `{a['tag_name']}`" for a in aliases)
+                await ctx.send(embed=embed)
+                
+            except Exception as e:
+                await ctx.send(f"An error occurred: {str(e)}")
 
 async def setup(bot):
     if not hasattr(bot, 'pool'):
