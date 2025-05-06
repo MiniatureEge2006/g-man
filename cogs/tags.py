@@ -701,7 +701,7 @@ class MediaProcessor:
                 return (0, 0)
         return (0, 0)
 
-    async def _resolve_dimension(self, dim_str: str, context_key: str = None) -> int:
+    async def _resolve_dimension(self, dim_str: str, context_key: str = None, overlay_key: str = None) -> int:
         try:
             ctx_w, ctx_h = (0, 0)
             if context_key:
@@ -710,30 +710,27 @@ class MediaProcessor:
 
 
             var_map = {
-                'iw': ctx_w, 'w': ctx_w, 'W': ctx_w, 'width': ctx_w, 'main_w': ctx_w,
-                'ih': ctx_h, 'h': ctx_h, 'H': ctx_h, 'height': ctx_h, 'main_h': ctx_h,
-                'ow': 0, 'oh': 0, 'overlay_w': 0, 'overlay_h': 0, 'overlay_W': 0, 'overlay_H': 0
+                'iw': ctx_w, 'W': ctx_w, 'width': ctx_w, 'main_w': ctx_w,
+                'ih': ctx_h, 'H': ctx_h, 'height': ctx_h, 'main_h': ctx_h,
+                'ow': 0, 'oh': 0, 'w': 0, 'h': 0
             }
 
 
-            if 'overlay' in self.media_cache:
-                overlay_dims = await self._get_media_dimensions('overlay') or (0, 0)
+            if overlay_key and overlay_key in self.media_cache:
+                overlay_dims = await self._get_media_dimensions(overlay_key) or (0, 0)
                 var_map.update({
-                    'ow': overlay_dims[0], 'oW': overlay_dims[0],
-                    'oh': overlay_dims[1], 'oH': overlay_dims[1],
-                    'overlay_w': overlay_dims[0], 'overlay_W': overlay_dims[0],
-                    'overlay_h': overlay_dims[1], 'overlay_H': overlay_dims[1]
+                    'ow': overlay_dims[0], 'w': overlay_dims[0],
+                    'oh': overlay_dims[1], 'h': overlay_dims[1]
                 })
 
 
-            for var_lower, val in var_map.items():
-                for var in [var_lower, var_lower.upper()]:
-                    dim_str = dim_str.replace(var, str(val))
+            for var, val in var_map.items():
+                dim_str = dim_str.replace(var, str(val))
 
 
             if '(' in dim_str:
                 mode, args_str = dim_str.split('(')[0].lower(), dim_str.split(')')[0].split('(')[1]
-                args = [await self._resolve_dimension(arg.strip(), context_key) for arg in args_str.split(',')]
+                args = [await self._resolve_dimension(arg.strip(), context_key, overlay_key) for arg in args_str.split(',')]
                 
                 if mode == 'fill': return max(args)
                 if mode == 'contain': return min(args)
@@ -746,13 +743,14 @@ class MediaProcessor:
 
 
             if '%' in dim_str:
-                base = ctx_w if any(c in dim_str.lower() for c in ['w','width']) else ctx_h
-                return int(base * float(dim_str.replace('%', '')) / 100)
+                base = ctx_w if any(c in dim_str.lower() for c in ['w','width','x']) else ctx_h
+                return int(base * float(dim_str.replace('%', ''))) / 100
 
 
             return int(float(eval(dim_str, {'__builtins__': None}, {}))) if any(op in dim_str for op in '+-*/') else int(float(dim_str))
         
-        except Exception:
+        except Exception as e:
+            print(f"Dimension resolution failed: {str(e)}")
             return 0
 
 
@@ -2119,8 +2117,8 @@ class MediaProcessor:
         is_overlay_image = overlay_path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp')
         output_file = self._get_temp_path(base_path.suffix[1:])
 
-        x = await self._resolve_dimension(x, base_key)
-        y = await self._resolve_dimension(y, base_key)
+        x = await self._resolve_dimension(x, base_key, overlay_key)
+        y = await self._resolve_dimension(y, base_key, overlay_key)
 
         cmd = [
             'ffmpeg', '-hide_banner',
