@@ -703,8 +703,14 @@ class MediaProcessor:
 
     async def _resolve_dimension(self, dim_str: str, context_key: str = None, overlay_key: str = None) -> int:
         try:
+            try:
+                return int(float(dim_str))
+            except ValueError:
+                pass
+
+
             ctx_w, ctx_h = (0, 0)
-            if context_key:
+            if context_key and context_key in self.media_cache:
                 dims = await self._get_media_dimensions(context_key) or (0, 0)
                 ctx_w, ctx_h = dims
 
@@ -714,6 +720,20 @@ class MediaProcessor:
                 'ih': ctx_h, 'H': ctx_h, 'height': ctx_h, 'main_h': ctx_h,
                 'ow': 0, 'oh': 0, 'w': 0, 'h': 0
             }
+
+
+            if '_' in dim_str or any(c.isalpha() and c.islower() for c in dim_str if not c in ['w','h']):
+                parts = dim_str.split('_') if '_' in dim_str else [dim_str[:-1], dim_str[-1]]
+                if len(parts) >= 2 and parts[-1] in ['w', 'h']:
+                    media_key = '_'.join(parts[:-1]) if '_' in dim_str else dim_str[:-1]
+                    dimension = parts[-1]
+                    
+                    if media_key in self.media_cache:
+                        media_w, media_h = await self._get_media_dimensions(media_key) or (0, 0)
+                        if dimension == 'w':
+                            dim_str = str(media_w)
+                        elif dimension == 'h':
+                            dim_str = str(media_h)
 
 
             if overlay_key and overlay_key in self.media_cache:
@@ -749,8 +769,7 @@ class MediaProcessor:
 
             return int(float(eval(dim_str, {'__builtins__': None}, {}))) if any(op in dim_str for op in '+-*/') else int(float(dim_str))
         
-        except Exception as e:
-            print(f"Dimension resolution failed: {str(e)}")
+        except Exception:
             return 0
 
 
