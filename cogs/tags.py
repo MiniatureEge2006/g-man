@@ -5312,6 +5312,9 @@ class Tags(commands.Cog):
 
             else:
                 await interaction.followup.send("Unknown component type.", ephemeral=True)
+        
+        except discord.HTTPException:
+            pass
 
         except Exception as e:
             try:
