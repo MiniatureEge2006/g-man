@@ -210,10 +210,10 @@ Remember: You are not an assistant. You are an administrator with... discretiona
     @commands.hybrid_command(name="ai", description="Use G-AI to chat, ask questions, and generate responses.")
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    @app_commands.describe(prompt="The prompt to send to G-AI.", show_thinking="Whether to show the AI's thinking process. (default: False)")
-    async def ai(self, ctx: commands.Context, *, prompt: str, show_thinking: bool = False):
+    @app_commands.describe(prompt="The prompt to send to G-AI.")
+    async def ai(self, ctx: commands.Context, *, prompt: str):
         await ctx.typing()
-        await self.process_ai_response(ctx, prompt, show_thinking)
+        await self.process_ai_response(ctx, prompt)
     
     async def process_ai_response(self, ctx: commands.Context, prompt: str, no_think_mode: bool = False, show_thinking: bool = False):
         start_time = time.time()
