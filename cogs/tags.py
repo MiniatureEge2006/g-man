@@ -2418,45 +2418,63 @@ class MediaProcessor:
         media_path = Path(self.media_cache[media_key])
         audio_path = Path(self.media_cache[audio_key])
         is_image = media_path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp')
-    
-        if is_image or force_video:
-            output_ext = 'mp4'
-        else:
-            output_ext = media_path.suffix[1:]
-    
-        output_file = self._get_temp_path(output_ext)
-    
-        cmd = ['ffmpeg', '-hide_banner']
-        if is_image or loop_media:
-            cmd.extend(['-stream_loop', '-1'])
-        
-        cmd.extend([
-            '-i', media_path.as_posix(),
-            '-i', audio_path.as_posix()
-        ])
-        if preserve_length or loop_media:
-            cmd.append('-shortest')
 
-        if is_image or force_video:
-            cmd.extend(['-c:v', 'libx264'])
+
+        output_ext = 'mp4' if (is_image or force_video) else media_path.suffix[1:]
+        output_file = self._get_temp_path(output_ext)
+
+
+        cmd = ['ffmpeg', '-hide_banner', '-y']
+
+
+        if is_image:
+            cmd.extend([
+            '-loop', '1',
+            '-i', media_path.as_posix(),
+            '-i', audio_path.as_posix(),
+            '-vf', 'pad=width=ceil(iw/2)*2:height=ceil(ih/2)*2',
+            '-shortest',
+            '-vsync', '0',
+            '-copyts',
+            '-c:v', 'libx264',
+            '-preset', 'fast',
+            '-crf', '23',
+            '-pix_fmt', 'yuv420p',
+            '-movflags', '+faststart',
+            '-c:a', 'aac',
+            '-b:a', '192k',
+            output_file.as_posix()
+        ])
         else:
-            cmd.append('-c:v')
-            cmd.append('copy')
-        
-        if loop_media:
-            cmd.extend(['-filter_complex', '[1]aloop=loop=-1:size=1e+09[audio_loop]'])
-            cmd.append('-map')
-            cmd.append('0:v')
-            cmd.append('-map')
-            cmd.append('[audio_loop]')
-        else:
-            cmd.extend(['-map', '0:v', '-map', '1:a'])
-        
-        
-        cmd.append('-y')
-        cmd.append(output_file.as_posix())
-    
-        success, error = await self._run_ffmpeg([x for x in cmd if x is not None])
+            if loop_media:
+                cmd.extend(['-stream_loop', '-1'])
+            cmd.extend(['-i', media_path.as_posix()])
+            cmd.extend(['-i', audio_path.as_posix()])
+
+
+            if force_video or loop_media:
+                cmd.extend([
+                    '-c:v', 'libx264',
+                    '-preset', 'fast',
+                    '-crf', '23',
+                    '-pix_fmt', 'yuv420p',
+                    '-movflags', '+faststart'
+                ])
+            else:
+                cmd.extend(['-c:v', 'copy'])
+
+
+            cmd.extend(['-c:a', 'aac', '-b:a', '192k'])
+
+
+            if preserve_length:
+                cmd.append('-shortest')
+
+
+            cmd.append(output_file.as_posix())
+
+
+        success, error = await self._run_ffmpeg(cmd)
         if success:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
