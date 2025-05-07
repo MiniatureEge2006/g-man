@@ -5444,38 +5444,57 @@ class Tags(commands.Cog):
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def tag(self, ctx: commands.Context, name: str, *, args: str = ""):
         await ctx.typing()
-        name, personal = self.parse_personal_flag(name)
+        name, forced_personal = self.parse_personal_flag(name)
         name = name.lower()
         
         async with self.pool.acquire() as conn:
-            tag = await conn.fetchrow(
-                """SELECT content, uses FROM tags
-                WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4))""",
-                name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None
-            )
-            
+            if not forced_personal:
+                tag = await conn.fetchrow(
+                    """SELECT content, uses FROM tags
+                    WHERE name = $1 AND user_id = $2""",
+                    name, ctx.author.id
+                )
+                
 
-            if not tag and not personal:
+                if not tag and ctx.guild:
+                    tag = await conn.fetchrow(
+                        """SELECT content, uses FROM tags
+                        WHERE name = $1 AND guild_id = $2""",
+                        name, ctx.guild.id
+                    )
+            else:
+                tag = await conn.fetchrow(
+                    """SELECT content, uses FROM tags
+                    WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4))""",
+                    name, forced_personal, ctx.author.id, ctx.guild.id if ctx.guild else None
+                )
+
+
+            if not tag:
                 alias = await conn.fetchrow(
                     """SELECT tag_name FROM tag_aliases
-                    WHERE alias = $1 AND (guild_id = $2 OR user_id = $3)""",
-                    name, ctx.guild.id if ctx.guild else None, ctx.author.id
+                    WHERE alias = $1 AND (user_id = $2 OR guild_id = $3)""",
+                    name, ctx.author.id, ctx.guild.id if ctx.guild else None
                 )
                 if alias:
                     tag = await conn.fetchrow(
                         """SELECT content, uses FROM tags
-                        WHERE name = $1 AND (guild_id = $2 OR user_id = $3)""",
-                        alias['tag_name'], ctx.guild.id if ctx.guild else None, ctx.author.id
+                        WHERE name = $1 AND (user_id = $2 OR guild_id = $3)""",
+                        alias['tag_name'], ctx.author.id, ctx.guild.id if ctx.guild else None
                     )
+                    if tag:
+                        name = alias['tag_name']
             
             if not tag:
                 return await ctx.send(f"Tag or alias `{name}` not found.")
             
+
             await conn.execute(
                 """UPDATE tags SET uses = uses + 1
-                WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4))""",
-                name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None
+                WHERE name = $1 AND (user_id = $2 OR guild_id = $3)""",
+                name, ctx.author.id, ctx.guild.id if ctx.guild else None
             )
+            
             text, embeds, view, files = await self.formatter.format(tag['content'], ctx, args=args)
             if text.strip() or embeds or (view and view.children) or files:
                 try:
@@ -5497,28 +5516,37 @@ class Tags(commands.Cog):
         name = name.lower()
         
         async with self.pool.acquire() as conn:
-            tag = await conn.fetchrow(
-                """SELECT content, uses FROM tags
-                WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4))""",
-                name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None
-            )
+            if not personal:
+                tag = await conn.fetchrow(
+                    """SELECT content, uses FROM tags
+                    WHERE name = $1 AND user_id = $2""",
+                    name, ctx.author.id
+                )
+                if not tag and ctx.guild:
+                    tag = await conn.fetchrow(
+                        """SELECT content, uses FROM tags
+                        WHERE name = $1 AND guild_id = $2""",
+                        name, ctx.guild.id
+                    )
+            else:
+                tag = await conn.fetchrow(
+                    """SELECT content, uses FROM tags
+                    WHERE name = $1 AND user_id = $2""",
+                    name, ctx.author.id
+                )
 
 
-            if not tag:
+            if not tag and not personal:
                 alias = await conn.fetchrow(
                     """SELECT tag_name FROM tag_aliases
-                    WHERE alias = $1 AND (
-                        ($2 AND user_id = $3) OR
-                        (NOT $2 AND guild_id = $4)
-                    )""",
-                    name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None
+                    WHERE alias = $1 AND (guild_id = $2 OR user_id = $3)""",
+                    name, ctx.guild.id if ctx.guild else None, ctx.author.id
                 )
-                
                 if alias:
                     tag = await conn.fetchrow(
                         """SELECT content, uses FROM tags
-                        WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4))""",
-                        alias['tag_name'], personal, ctx.author.id, ctx.guild.id if ctx.guild else None
+                        WHERE name = $1 AND (guild_id = $2 OR user_id = $3)""",
+                        alias['tag_name'], ctx.guild.id if ctx.guild else None, ctx.author.id
                     )
                     if tag:
                         name = alias['tag_name']
@@ -5526,7 +5554,6 @@ class Tags(commands.Cog):
             if not tag:
                 return await ctx.send(f"Tag or alias `{name}` not found.")
             
-
             await conn.execute(
                 """UPDATE tags SET uses = uses + 1
                 WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4))""",
