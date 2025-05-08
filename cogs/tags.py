@@ -8,6 +8,7 @@ import operator
 import asyncio
 from typing import Callable, Dict, Set, Union
 import aiohttp
+import yt_dlp
 import os
 import uuid
 import platform
@@ -31,6 +32,7 @@ from zoneinfo import ZoneInfo
 import dateparser
 from wand.image import Image as Img
 from wand.color import Color
+import traceback
 
 IMAGE_TYPES = ('image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif')
 VIDEO_TYPES = ('video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska', 'video/x-msvideo', 'video/x-ms-wmv')
@@ -510,6 +512,13 @@ class MediaProcessor:
                 'similarity': {'default': 0.01, 'type': float},
                 'blend': {'default': 0.0, 'type': float},
                 'output_key': {'required': True, 'type': str}
+            },
+            'dobetween': {
+                'input_key': {'required': True, 'type': str},
+                'start_time': {'required': True, 'type': str},
+                'end_time': {'required': True, 'type': str},
+                'output_key': {'required': True, 'type': str},
+                'segment_key': {'default': '_dobetween_segment', 'type': str}
             }
         }
         self.gscript_commands = {
@@ -546,7 +555,8 @@ class MediaProcessor:
             'fadein': self._fadein_media,
             'fadeout': self._fadeout_media,
             'colorkey': self._colorkey,
-            'chromakey': self._chromakey
+            'chromakey': self._chromakey,
+            'dobetween': self._dobetween_media
         }
     
     def start_cleanup_task(self):
@@ -1093,7 +1103,7 @@ class MediaProcessor:
         self.active_processes.add(proc)
 
         try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
             if proc.returncode != 0:
                 error_msg = stderr.decode('utf-8', errors='replace').strip()
                 if platform.system() == 'Windows':
@@ -1102,7 +1112,7 @@ class MediaProcessor:
             return True, stdout.decode('utf-8', errors='replace').strip()
         except asyncio.TimeoutError:
             proc.kill()
-            return False, "FFmpeg processing took longer than 60 seconds."
+            return False, "FFmpeg processing took longer than 120 seconds."
         except Exception as e:
             return False, f"Unexpected error: {str(e)}"
         finally:
@@ -1173,82 +1183,62 @@ class MediaProcessor:
         except Exception as e:
             return (1, 1, 0.0, False)
     
-    async def execute_media_script(self, script: str) -> list[str]:
+    async def execute_media_script(self, script):
+        lines = [line.strip() for line in script.splitlines() if line.strip()]
         output_files = []
-        last_output_key = None
         errors = []
-        self.media_cache.clear()
-        
-        for line in script.splitlines():
-            line = line.strip()
-            if not line:
-                continue
+        last_output_key = None
+        i = 0
 
-            parts = shlex.split(line)
-            if not parts:
-                continue
-
-            cmd = parts[0].lower()
-            args = parts[1:]
-            
-
-            if 'output_key' in self.command_specs.get(cmd, {}):
-                parsed_args = self._parse_command_args(cmd, args)
-                output_key = parsed_args.get('output_key')
-                if output_key and output_key in self.media_cache:
-                    del self.media_cache[output_key]
-
+        while i < len(lines):
+            line = lines[i]
             try:
-                parsed_args = self._parse_command_args(cmd, args)
-                func = self.gscript_commands[cmd]
-                result = await func(**parsed_args)
-
-                if isinstance(result, str) and result.startswith("Error"):
-                    errors.append(result)
-                    if 'output_key' in parsed_args:
-                        output_key = parsed_args['output_key']
-                        if output_key in self.media_cache:
-                            del self.media_cache[output_key]
-                    break
-                
-                if 'output_key' in parsed_args:
-                    last_output_key = parsed_args['output_key']
-                    
-                if cmd == "render":
-                    if result.startswith("media://"):
-                        output_files.append(result[8:])
-                    else:
-                        errors.append(result)
+                if line.lower().startswith('dobetween'):
+                    parts = line.split()
+                    input_key = parts[1]
+                    start = parts[2]
+                    end = parts[3]
+                    output_key = parts[4]
+                    sub_script = []
+                    i += 1
+                    while i < len(lines) and not lines[i].lower() == 'end':
+                        sub_script.append(lines[i])
+                        i += 1
+                    if i >= len(lines):
+                        errors.append("Missing 'end' for dobetween")
                         break
-                        
+                    result = await self._dobetween_media(input_key=input_key, start_time=start, end_time=end, output_key=output_key, sub_script='\n'.join(sub_script))
+                    last_output_key = output_key
+                    if result.startswith("Error"):
+                        errors.append(result)
+                    i += 1
+                else:
+                    parts = shlex.split(line)
+                    cmd = parts[0].lower()
+                    args = parts[1:]
+                    parsed = self._parse_command_args(cmd, args)
+                    func = self.gscript_commands[cmd]
+                    result = await func(**parsed)
+                    if 'output_key' in parsed:
+                        last_output_key = parsed['output_key']
+                    if result.startswith("Error"):
+                        errors.append(result)
+                    elif cmd == "render" and result.startswith("media://"):
+                        output_files.append(result[8:])
+                    i += 1
             except Exception as e:
                 errors.append(f"Error processing `{line}`: {str(e)}")
-                if 'output_key' in locals().get('parsed_args', {}):
-                    output_key = parsed_args.get('output_key')
-                    if output_key and output_key in self.media_cache:
-                        del self.media_cache[output_key]
-                break
+                i += 1
 
-        if errors:
-            return errors
-            
-
-        if output_files:
-            return output_files
-            
-
-        if last_output_key:
+        if not errors and not output_files and last_output_key:
             try:
-                auto_result = await self._render_media(
-                    media_key=last_output_key, 
-                    extra_args=[]
-                )
+                auto_result = await self._render_media(media_key=last_output_key)
                 if auto_result.startswith("media://"):
-                    return [auto_result[8:]]
-            except:
-                pass
+                    output_files.append(auto_result[8:])
+            except Exception as e:
+                errors.append(f"Auto-render failed: {str(e)}")
 
-        return ["Processing complete (no output generated)"]
+        return errors if errors else output_files or ["Processing complete"]
     
     async def _load_media(self, **kwargs) -> str:
         try:
@@ -1261,22 +1251,56 @@ class MediaProcessor:
         url = kwargs['url']
         media_key = kwargs['media_key']
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as resp:
+            temp_file = self._get_temp_path()
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'outtmpl': f'{temp_file}.%(ext)s',
+                'noplaylist': True
+            }
+
+            def sync_ydl_download():
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    return ydl.prepare_filename(info)
+
+            downloaded_path = await asyncio.get_event_loop().run_in_executor(None, sync_ydl_download)
+            downloaded_path = Path(downloaded_path)
+
+            if not downloaded_path.exists():
+                raise RuntimeError("Downloaded file not found")
+
+
+            ext = downloaded_path.suffix[1:]
+            final_temp_file = self._get_temp_path(ext)
+            
+
+            shutil.move(str(downloaded_path), final_temp_file)
+            downloaded_path.unlink(missing_ok=True)
+
+            self.media_cache[media_key] = str(final_temp_file)
+            return f"Loaded {media_key} via yt-dlp"
+        
+        except Exception as e:
+            try:
+                await self.ensure_session()
+                async with self.session.get(url) as resp:
                     if resp.status != 200:
                         return f"HTTP Error {resp.status}"
-                
+
+
                     ext = Path(url.split('?')[0]).suffix[1:] or 'tmp'
                     temp_file = self._get_temp_path(ext)
 
                     with temp_file.open('wb') as f:
                         async for chunk in resp.content.iter_chunked(8192):
                             f.write(chunk)
-                
+
                     self.media_cache[media_key] = str(temp_file)
                     return f"Loaded {media_key}"
-        except Exception as e:
-            return f"Download error: {str(e)}"
+            
+            except Exception as http_error:
+                return f"Download error: {str(http_error)}"
     
     async def _load_svg(self, **kwargs) -> str:
         try:
@@ -1470,7 +1494,7 @@ class MediaProcessor:
     
     async def _render_media_impl(self, **kwargs) -> str:
         media_key = kwargs['media_key']
-        extra_args = kwargs['extra_args']
+        extra_args = kwargs.get('extra_args', [])
         path = Path(self.media_cache[media_key])
         if not path.exists():
             return f"Error: File for {media_key} missing"
@@ -2851,6 +2875,66 @@ class MediaProcessor:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
+    
+    async def _dobetween_media(self, **kwargs) -> str:
+        try:
+            return await self._dobetween_media_impl(**kwargs)
+        except ValueError as e:
+            return f"Dobetween error: {str(e)}"
+    
+    async def _dobetween_media_impl(self, **kwargs) -> str:
+        input_key   = kwargs['input_key']
+        start_time  = kwargs['start_time']
+        end_time    = kwargs['end_time']
+        output_key  = kwargs['output_key']
+        segment_key = kwargs.get('segment_key', '_dobetween_segment')
+        sub_script  = kwargs.get('sub_script', '')
+
+        before_key  = f"{segment_key}_before"
+        after_key   = f"{segment_key}_after"
+        edited_key  = f"{segment_key}_edited"
+
+
+        tasks = [
+            self._trim_media(input_key=input_key, start_time='0', end_time=start_time, output_key=before_key),
+            self._trim_media(input_key=input_key, start_time=start_time, end_time=end_time, output_key=segment_key),
+            self._trim_media(input_key=input_key, start_time=end_time, end_time='9999999', output_key=after_key)
+        ]
+        results = await asyncio.gather(*tasks)
+        if any(r.startswith("Error") for r in results):
+            return f"Trim error(s): {results}"
+
+
+        patched_lines = []
+        for line in sub_script.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+
+            parts = shlex.split(line)
+            cmd = parts[0]
+            pos = [p for p in parts[1:] if '=' not in p]
+            kw = dict(p.split('=', 1) for p in parts[1:] if '=' in p)
+
+            if 'input_key' not in kw:
+                kw['input_key'] = segment_key
+            if 'output_key' not in kw:
+                kw['output_key'] = edited_key
+
+            new_parts = [cmd] + pos + [f"{k}={v}" for k, v in kw.items()]
+            patched_lines.append(shlex.join(new_parts))
+
+        patched_script = "\n".join(patched_lines)
+        script_result = await self.execute_media_script(patched_script)
+        if any(r.startswith("Error") for r in script_result):
+            return f"Sub-script error: {script_result}"
+
+
+        concat_result = await self._concat_media(
+            input_keys=[before_key, edited_key, after_key],
+            output_key=output_key
+        )
+        return concat_result
 
 
 
