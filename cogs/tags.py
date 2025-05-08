@@ -3353,7 +3353,7 @@ class Tags(commands.Cog):
             """
             ### {join:delimiter|json_array}
                 * Joins JSON array elements with delimiter.
-                * Example: `{join:, |["a","b","c"]}` → "a, b, c"
+                * Example: `{join:, |["a","b","c"]}` -> "a, b, c"
             """
             try:
                 delim, arr = val.split('|', 1)
@@ -3367,9 +3367,9 @@ class Tags(commands.Cog):
             ### {split:delimiter|text}
                 * Properly handles space delimiter and special cases.
                 * Examples:
-                - {split: |hello world} → ["hello","world"]
-                - {split:space|hello world} → ["hello","world"]
-                - {split:whitespace|hello   world} → ["hello","world"]
+                - {split: |hello world} -> ["hello","world"]
+                - {split:space|hello world} -> ["hello","world"]
+                - {split:whitespace|hello   world} -> ["hello","world"]
             """
             try:
                 if not val:
@@ -3405,7 +3405,7 @@ class Tags(commands.Cog):
             """
             ### {trim:text}
                 * Removes leading/trailing whitespace.
-                * Example: `{trim:  test  }` → "test"
+                * Example: `{trim:  test  }` -> "test"
             """
             return val.strip()
         
@@ -3552,7 +3552,7 @@ class Tags(commands.Cog):
                     - strftime: Any valid format string
                     - unix/iso: UNIX timestamp or ISO-8601
                 * Timezone: IANA name (e.g. "Europe/Paris")
-                * Offset: ± hours adjustment (e.g. "+1")
+                * Offset: +- hours adjustment (e.g. "+1")
                 * Example: `{timestamp:F|Europe/Paris|+1}`
             """
             try:
@@ -3612,9 +3612,9 @@ class Tags(commands.Cog):
                     - Absolute: ISO dates, Unix timestamps
                     - Relative: now+2h, now-30m
                 * Examples:
-                    - {duration:now|now+3h|human} → "3h"
+                    - {duration:now|now+3h|human} -> "3h"
                     - {duration:2023-01-01|now|precise}
-                    - {duration:now-30m|now+1h|colon} → "01:30:00"
+                    - {duration:now-30m|now+1h|colon} -> "01:30:00"
             """
             try:
                 parts = str(val).split('|', 3)
@@ -3887,7 +3887,7 @@ class Tags(commands.Cog):
             ### {hash:algorithm|text}
                 * Generates hash digest.
                 * Supported algorithms: md5, sha1, sha256, sha512
-                * Example: `{hash:sha256|hello}` → "2cf24d...b2b4"
+                * Example: `{hash:sha256|hello}` -> "2cf24d...b2b4"
             """
             try:
                 algo, text = val.split('|', 1)
@@ -4137,17 +4137,17 @@ class Tags(commands.Cog):
             """
             ### {and:value1|value2|...}
                 * Returns last value if ALL values are non-empty strings
-                * Returns empty string if any value is empty
+                * Returns 0 if any value is empty
                 * Example: `{and:Yes|{get:var}}` returns "Yes" only if {get:var} exists
             """
             args = self.parse_args(args_str)
             if not args:
-                return ""
+                return "0"
             
             last_valid = ""
             for arg in args:
                 if not arg.strip():
-                    return ""
+                    return "0"
                 last_valid = arg
             return last_valid
         
@@ -4161,13 +4161,13 @@ class Tags(commands.Cog):
             for arg in self.parse_args(args_str):
                 if arg.strip():
                     return arg
-            return ""
+            return "0"
         
         @self.formatter.register('equals')
         async def _equals(ctx, args_str, **kwargs):
             """
             ### {equals:val1|val2|...}
-                * Returns "1" if ALL values match exactly
+                * Returns "1" if ALL values match exactly. 0 Otherwise.
                 * Example: `{equals:{get:var}|hello}`
             """
             args = self.parse_args(args_str)
@@ -4177,7 +4177,7 @@ class Tags(commands.Cog):
             first = args[0]
             for val in args[1:]:
                 if val != first:
-                    return ""
+                    return "0"
             return "1"
         
         @self.formatter.register('notequals')
@@ -4185,7 +4185,7 @@ class Tags(commands.Cog):
         async def _notequals(ctx, args_str, **kwargs):
             """
             ### {notequals:val1|val2|...}
-                * Returns "1" if any value differs from others
+                * Returns "1" if any value differs from others. 0 Otherwise.
                 * Example: `{notequals:{get:var}|{get:var2}}`
             """
             args = self.parse_args(args_str)
@@ -4196,7 +4196,7 @@ class Tags(commands.Cog):
             for val in args[1:]:
                 if val != first:
                     return "1"
-            return ""
+            return "0"
         
         @self.formatter.register('range')
         async def _range(ctx, args_str, **kwargs):
@@ -5536,9 +5536,9 @@ class Tags(commands.Cog):
                 * Supported types: PNG, JPG, JPEG, WEBP, GIF
                 * Returns "No valid media found" if no match
                 * Examples:
-                    - `{image:https://example.com/img.png}` → "https://example.com/img.png"
-                    - `{image}` (with image attachment) → attachment URL
-                    - `{image}` (no attachment) → "No valid media found"
+                    - `{image:https://example.com/img.png}` -> "https://example.com/img.png"
+                    - `{image}` (with image attachment) -> attachment URL
+                    - `{image}` (no attachment) -> "No valid media found"
             """
             return await _get_media_url(ctx, url, media_types=IMAGE_TYPES)
 
@@ -5550,8 +5550,8 @@ class Tags(commands.Cog):
                 * Supported types: MP4, WEBM, MOV, MKV, AVI, WMV
                 * Returns "No valid media found" if no match
                 * Examples:
-                    - `{video:https://example.com/vid.mp4}` → "https://example.com/vid.mp4"
-                    - `{video}` (with video attachment) → attachment URL
+                    - `{video:https://example.com/vid.mp4}` -> "https://example.com/vid.mp4"
+                    - `{video}` (with video attachment) -> attachment URL
             """
             return await _get_media_url(ctx, url, media_types=VIDEO_TYPES)
 
@@ -5562,8 +5562,8 @@ class Tags(commands.Cog):
                 * Returns the provided image/video URL or first matching attachment URL
                 * Returns "No valid media found" if no match
                 * Examples:
-                    - `{iv:https://example.com/media.gif}` → URL
-                    - `{iv}` (with image/video attachment) → attachment URL
+                    - `{iv:https://example.com/media.gif}` -> URL
+                    - `{iv}` (with image/video attachment) -> attachment URL
             """
             return await _get_media_url(ctx, url, media_types=IMAGE_TYPES+VIDEO_TYPES)
 
@@ -5575,8 +5575,8 @@ class Tags(commands.Cog):
                 * Supported types: MP3, WAV, OGG, OPUS, FLAC, M4A, MKA, WMA
                 * Returns "No valid media found" if no match
                 * Examples:
-                    - `{audio:https://example.com/sound.mp3}` → URL
-                    - `{audio}` (with audio attachment) → attachment URL
+                    - `{audio:https://example.com/sound.mp3}` -> URL
+                    - `{audio}` (with audio attachment) -> attachment URL
             """
             return await _get_media_url(ctx, url, media_types=AUDIO_TYPES)
 
@@ -5587,8 +5587,8 @@ class Tags(commands.Cog):
                 * Returns the provided audio/video URL or first matching attachment URL
                 * Returns "No valid media found" if no match
                 * Examples:
-                    - `{av:https://example.com/media.mp4}` → URL
-                    - `{av}` (with audio/video attachment) → attachment URL
+                    - `{av:https://example.com/media.mp4}` -> URL
+                    - `{av}` (with audio/video attachment) -> attachment URL
             """
             return await _get_media_url(ctx, url, media_types=AUDIO_TYPES+VIDEO_TYPES)
 
@@ -5599,8 +5599,8 @@ class Tags(commands.Cog):
                 * Returns the provided URL or first attachment URL (any type)
                 * Returns "No valid media found" if no match
                 * Examples:
-                    - `{media:https://example.com/file.txt}` → URL
-                    - `{media}` (with any attachment) → attachment URL
+                    - `{media:https://example.com/file.txt}` -> URL
+                    - `{media}` (with any attachment) -> attachment URL
             """
             return await _get_media_url(ctx, url, media_types=None)
         
