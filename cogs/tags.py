@@ -5100,6 +5100,372 @@ class Tags(commands.Cog):
             except Exception as e:
                 return (f"[Select Error: {str(e)}]", [], None, [])
         
+        @self.formatter.register('json.user')
+        async def _json_user(ctx, user_ref='', **kwargs):
+            """
+            ### {json.user:user}
+                * Returns an user's JSON object. Defaults to self.
+            """
+            try:
+                if not user_ref.strip():
+                    user = ctx.author
+                else:
+                    user = await self.formatter.resolve_user(ctx, user_ref)
+                
+                user_data = {
+                    "id": str(user.id),
+                    "name": user.name,
+                    "display_name": getattr(user, "display_name", user.name),
+                    "discriminator": user.discriminator,
+                    "bot": user.bot,
+                    "created_at": user.created_at.isoformat(),
+                    "avatar_url": str(user.display_avatar.url),
+                    "mention": user.mention
+                }
+                
+                if isinstance(user, discord.Member):
+                    user_data.update({
+                        "nick": user.nick,
+                        "joined_at": user.joined_at.isoformat() if user.joined_at else None,
+                        "roles": [{"id": str(r.id), "name": r.name} for r in user.roles],
+                        "top_role": {"id": str(user.top_role.id), "name": user.top_role.name},
+                        "guild_permissions": list(user.guild_permissions),
+                        "timed_out_until": user.timed_out_until.isoformat() if user.timed_out_until else None
+                    })
+                
+                return json.dumps(user_data)
+            except Exception as e:
+                return f"[JSON User Error: {str(e)}]"
+        
+        @self.formatter.register('json.message')
+        async def _json_message(ctx, message_ref='', **kwargs):
+            """
+            ### {json.message:message}
+                * Returns a message's JSON object. Defaults to current message.
+            """
+            try:
+                if not message_ref.strip():
+                    if ctx.message.reference:
+                        message = await ctx.channel.fetch_message(ctx.message.reference.message_id)
+                    else:
+                        message = ctx.message
+                else:
+                    message_id = int(message_ref.strip())
+                    message = await ctx.channel.fetch_message(message_id)
+                
+                message_data = {
+                    "id": str(message.id),
+                    "content": message.content,
+                    "clean_content": message.clean_content,
+                    "created_at": message.created_at.isoformat(),
+                    "edited_at": message.edited_at.isoformat() if message.edited_at else None,
+                    "author": json.loads(await _json_user(ctx, str(message.author.id))),
+                    "channel": {
+                        "id": str(message.channel.id),
+                        "name": getattr(message.channel, "name", "DM"),
+                        "mention": message.channel.mention
+                    },
+                    "attachments": [{
+                        "id": str(a.id),
+                        "filename": a.filename,
+                        "url": a.url,
+                        "size": a.size,
+                        "content_type": a.content_type
+                    } for a in message.attachments],
+                    "embeds": [e.to_dict() for e in message.embeds],
+                    "mention_everyone": message.mention_everyone,
+                    "mentions": [json.loads(await _json_user(ctx, str(u.id))) for u in message.mentions],
+                    "reference": {
+                        "message_id": str(message.reference.message_id),
+                        "channel_id": str(message.reference.channel_id),
+                        "guild_id": str(message.reference.guild_id)
+                    } if message.reference else None,
+                    "pinned": message.pinned,
+                    "type": str(message.type)
+                }
+                
+                
+                return json.dumps(message_data)
+            except Exception as e:
+                return f"[JSON Message Error: {str(e)}]"
+        
+        @self.formatter.register('json.guild')
+        async def _json_guild(ctx, guild_ref='', **kwargs):
+            """
+            ### {json.guild}
+                * Returns the current server's JSON object.
+            """
+            try:
+                if not ctx.guild:
+                    return "{}"
+                    
+                guild_data = {
+                    "id": str(ctx.guild.id),
+                    "name": ctx.guild.name,
+                    "description": ctx.guild.description,
+                    "icon_url": str(ctx.guild.icon.url) if ctx.guild.icon else None,
+                    "banner_url": str(ctx.guild.banner.url) if ctx.guild.banner else None,
+                    "owner_id": str(ctx.guild.owner_id),
+                    "created_at": ctx.guild.created_at.isoformat(),
+                    "member_count": ctx.guild.member_count,
+                    "premium_tier": ctx.guild.premium_tier,
+                    "premium_subscription_count": ctx.guild.premium_subscription_count,
+                    "features": ctx.guild.features,
+                    "verification_level": str(ctx.guild.verification_level),
+                    "explicit_content_filter": str(ctx.guild.explicit_content_filter),
+                    "default_notifications": str(ctx.guild.default_notifications),
+                    "mfa_level": str(ctx.guild.mfa_level),
+                    "system_channel": {
+                        "id": str(ctx.guild.system_channel.id),
+                        "name": ctx.guild.system_channel.name
+                    } if ctx.guild.system_channel else None,
+                    "rules_channel": {
+                        "id": str(ctx.guild.rules_channel.id),
+                        "name": ctx.guild.rules_channel.name
+                    } if ctx.guild.rules_channel else None,
+                    "afk_channel": {
+                        "id": str(ctx.guild.afk_channel.id),
+                        "name": ctx.guild.afk_channel.name
+                    } if ctx.guild.afk_channel else None,
+                    "afk_timeout": ctx.guild.afk_timeout,
+                    "emojis": [{
+                        "id": str(e.id),
+                        "name": e.name,
+                        "animated": e.animated,
+                        "url": str(e.url)
+                    } for e in ctx.guild.emojis],
+                    "roles": [{
+                        "id": str(r.id),
+                        "name": r.name,
+                        "color": r.color.value,
+                        "position": r.position,
+                        "permissions": r.permissions.value,
+                        "mentionable": r.mentionable
+                    } for r in ctx.guild.roles]
+                }
+                
+                return json.dumps(guild_data)
+            except Exception as e:
+                return f"[JSON Guild Error: {str(e)}]"
+        
+        @self.formatter.register('json.channel')
+        async def _json_channel(ctx, channel_ref='', **kwargs):
+            """
+            ### {json.channel}
+                * Returns the current channel's JSON object.
+            """
+            try:
+                channel_data = {
+                    "id": str(ctx.channel.id),
+                    "name": getattr(ctx.channel, 'name', 'DM'),
+                    "type": str(ctx.channel.type),
+                    "created_at": ctx.channel.created_at.isoformat() if hasattr(ctx.channel, 'created_at') else None,
+                    "position": getattr(ctx.channel, 'position', None),
+                    "topic": getattr(ctx.channel, 'topic', None),
+                    "nsfw": getattr(ctx.channel, 'nsfw', None),
+                    "bitrate": getattr(ctx.channel, 'bitrate', None),
+                    "user_limit": getattr(ctx.channel, 'user_limit', None),
+                    "slowmode_delay": getattr(ctx.channel, 'slowmode_delay', None),
+                    "category": {
+                        "id": str(ctx.channel.category.id),
+                        "name": ctx.channel.category.name
+                    } if getattr(ctx.channel, 'category', None) else None,
+                    "mention": ctx.channel.mention
+                }
+                
+                
+                return json.dumps(channel_data)
+            except Exception as e:
+                return f"[JSON Channel Error: {str(e)}]"
+        
+        @self.formatter.register('json.role')
+        async def _json_role(ctx, role_ref='', **kwargs):
+            """
+            ### {json.role:role}
+                * Returns a server role's JSON object. Defaults to all roles.
+            """
+            try:
+                if not ctx.guild:
+                    return "[]"
+                    
+                if not role_ref:
+                    roles_data = []
+                    for role in ctx.guild.roles:
+                        role_data = {
+                            "id": str(role.id),
+                            "name": role.name,
+                            "color": role.color.value,
+                            "position": role.position,
+                            "permissions": role.permissions.value,
+                            "mentionable": role.mentionable,
+                            "managed": role.managed,
+                            "hoist": role.hoist,
+                            "created_at": role.created_at.isoformat(),
+                            "mention": role.mention
+                        }
+                        roles_data.append(role_data)
+                    return json.dumps(roles_data)
+                
+                try:
+                    role_id = int(role_ref.strip('<@&>'))
+                    role = ctx.guild.get_role(role_id)
+                    if role:
+                        role_data = {
+                            "id": str(role.id),
+                            "name": role.name,
+                            "color": role.color.value,
+                            "position": role.position,
+                            "permissions": role.permissions.value,
+                            "mentionable": role.mentionable,
+                            "managed": role.managed,
+                            "hoist": role.hoist,
+                            "created_at": role.created_at.isoformat(),
+                            "mention": role.mention
+                        }
+                        return json.dumps(role_data)
+                except ValueError:
+                    pass
+                
+
+                role = discord.utils.get(ctx.guild.roles, name=role_ref)
+                if role:
+                    role_data = {
+                        "id": str(role.id),
+                        "name": role.name,
+                        "color": role.color.value,
+                        "position": role.position,
+                        "permissions": role.permissions.value,
+                        "mentionable": role.mentionable,
+                        "managed": role.managed,
+                        "hoist": role.hoist,
+                        "created_at": role.created_at.isoformat(),
+                        "mention": role.mention
+                    }
+                    return json.dumps(role_data)
+                
+                return "[JSON Role Error: Role not found]"
+            except Exception as e:
+                return f"[JSON Role Error: {str(e)}]"
+        
+        @self.formatter.register('json.emoji')
+        async def _json_emoji(ctx, emoji_ref, **kwargs):
+            """
+            ### {json.emoji:emoji}
+                * Returns a server emoji's JSON object. Defaults to all emojis.
+            """
+            try:
+                if not ctx.guild:
+                    return "[]"
+                    
+                emoji_ref = emoji_ref.strip()
+                
+                if not emoji_ref:
+                    emojis_data = [{
+                        "id": str(e.id),
+                        "name": e.name,
+                        "animated": e.animated,
+                        "url": str(e.url),
+                        "created_at": e.created_at.isoformat(),
+                        "mention": str(e)
+                    } for e in ctx.guild.emojis]
+                    return json.dumps(emojis_data)
+                
+
+                try:
+                    emoji_id = int(emoji_ref)
+                    emoji = ctx.guild.get_emoji(emoji_id)
+                    if emoji:
+                        emoji_data = {
+                            "id": str(emoji.id),
+                            "name": emoji.name,
+                            "animated": emoji.animated,
+                            "url": str(emoji.url),
+                            "created_at": emoji.created_at.isoformat(),
+                            "mention": str(emoji)
+                        }
+                        return json.dumps(emoji_data)
+                except ValueError:
+                    pass
+                
+
+                emoji = discord.utils.get(ctx.guild.emojis, name=emoji_ref)
+                if emoji:
+                    emoji_data = {
+                        "id": str(emoji.id),
+                        "name": emoji.name,
+                        "animated": emoji.animated,
+                        "url": str(emoji.url),
+                        "created_at": emoji.created_at.isoformat(),
+                        "mention": str(emoji)
+                    }
+                    return json.dumps(emoji_data)
+                
+                return "[JSON Emoji Error: Emoji not found]"
+            except Exception as e:
+                return f"[JSON Emoji Error: {str(e)}]"
+        
+        @self.formatter.register('json.attachment')
+        async def _json_attachment(ctx, attachment_ref, **kwargs):
+            """
+            ### {json.attachment:index}
+                * Returns the current message's specific attachment. Defaults to all attachments. 
+            """
+            try:
+                attachments = ctx.message.attachments
+                if not attachments:
+                    return "[]"
+                    
+                attachment_ref = attachment_ref.strip().lower()
+                
+                if not attachment_ref.strip():
+                    attachments_data = [{
+                        "id": str(a.id),
+                        "filename": a.filename,
+                        "url": a.url,
+                        "size": a.size,
+                        "content_type": a.content_type,
+                        "height": getattr(a, 'height', None),
+                        "width": getattr(a, 'width', None)
+                    } for a in attachments]
+                    return json.dumps(attachments_data)
+                
+
+                try:
+                    index = int(attachment_ref)
+                    if 0 <= index < len(attachments):
+                        a = attachments[index]
+                        attachment_data = {
+                            "id": str(a.id),
+                            "filename": a.filename,
+                            "url": a.url,
+                            "size": a.size,
+                            "content_type": a.content_type,
+                            "height": getattr(a, 'height', None),
+                            "width": getattr(a, 'width', None)
+                        }
+                        return json.dumps(attachment_data)
+                    return "[JSON Attachment Error: Invalid index]"
+                except ValueError:
+                    pass
+                
+
+                for a in attachments:
+                    if attachment_ref in (a.url, a.filename):
+                        attachment_data = {
+                            "id": str(a.id),
+                            "filename": a.filename,
+                            "url": a.url,
+                            "size": a.size,
+                            "content_type": a.content_type,
+                            "height": getattr(a, 'height', None),
+                            "width": getattr(a, 'width', None)
+                        }
+                        return json.dumps(attachment_data)
+                
+                return "[JSON Attachment Error: Attachment not found]"
+            except Exception as e:
+                return f"[JSON Attachment Error: {str(e)}]"
+        
         @self.formatter.register('attach')
         async def _attach(ctx, args_str, **kwargs):
             """
@@ -5520,7 +5886,8 @@ class Tags(commands.Cog):
                         content=text[:2000] if text else None,
                         embeds=embeds[:10],
                         view=view if view and view.children else None,
-                        files=files[:10]
+                        files=files[:10],
+                        allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=False, replied_user=True)
                     )
                 except discord.HTTPException as e:
                     await ctx.send(f"Failed to send tag: {e}")
@@ -5586,7 +5953,8 @@ class Tags(commands.Cog):
                         content=text[:2000] if text else None,
                         embeds=embeds[:10],
                         view=view if view and view.children else None,
-                        files=files[:10]
+                        files=files[:10],
+                        allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=False, replied_user=True)
                     )
                 except discord.HTTPException as e:
                     await ctx.send(f"Failed to send tag: {e}")
