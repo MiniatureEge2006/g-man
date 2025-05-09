@@ -449,7 +449,7 @@ class MediaProcessor:
                 'line_spacing': {'required': False, 'type': int}
             },
             'audioputreplace': {
-                'media_key': {'required': True, 'type': str},
+                'input_key': {'required': True, 'type': str},
                 'audio_key': {'required': True, 'type': str},
                 'output_key': {'required': True, 'type': str},
                 'preserve_length': {'default': True, 'type': bool},
@@ -457,7 +457,7 @@ class MediaProcessor:
                 'loop_media': {'default': False, 'type': bool}
             },
             'audioputmix': {
-                'media_key': {'required': True, 'type': str},
+                'input_key': {'required': True, 'type': str},
                 'audio_key': {'required': True, 'type': str},
                 'output_key': {'required': True, 'type': str},
                 'volume': {'default': 1.0, 'type': float},
@@ -2162,7 +2162,7 @@ class MediaProcessor:
             return f"Overlay error: {str(e)}"
     
     async def _overlay_media_impl(self, **kwargs) -> str:
-        base_key = kwargs['base_key']
+        base_key = kwargs.get('base_key') or kwargs['input_key']
         overlay_key = kwargs['overlay_key']
         x = kwargs['x']
         y = kwargs['y']
@@ -2446,16 +2446,16 @@ class MediaProcessor:
             return f"Audio Put Replace error: {str(e)}"
     
     async def _replace_audio_impl(self, **kwargs) -> str:
-        media_key = kwargs['media_key']
+        input_key = kwargs['input_key']
         audio_key = kwargs['audio_key']
         output_key = kwargs['output_key']
         preserve_length = kwargs['preserve_length']
         force_video = kwargs['force_video']
         loop_media = kwargs['loop_media']
-        if media_key not in self.media_cache or audio_key not in self.media_cache:
+        if input_key not in self.media_cache or audio_key not in self.media_cache:
             return "Error: Missing input media"
     
-        media_path = Path(self.media_cache[media_key])
+        media_path = Path(self.media_cache[input_key])
         audio_path = Path(self.media_cache[audio_key])
         is_image = media_path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp')
 
@@ -2527,24 +2527,31 @@ class MediaProcessor:
             return f"Audio Put Mix error: {str(e)}"
     
     async def _mix_audio_impl(self, **kwargs) -> str:
-        media_key = kwargs['media_key']
+        input_key = kwargs['input_key']
         audio_key = kwargs['audio_key']
         output_key = kwargs['output_key']
         volume = kwargs['volume']
         loop_audio = kwargs['loop_audio']
         preserve_length = kwargs['preserve_length']
         loop_media = kwargs['loop_media']
-        if media_key not in self.media_cache or audio_key not in self.media_cache:
+        
+        if input_key not in self.media_cache or audio_key not in self.media_cache:
             return "Error: Missing input media"
-    
-        media_path = Path(self.media_cache[media_key])
+
+        media_path = Path(self.media_cache[input_key])
         audio_path = Path(self.media_cache[audio_key])
         is_image = media_path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp')
         is_audio = media_path.suffix.lower() in ('.mp3', '.wav', '.ogg', '.opus', '.flac', '.m4a', '.mka', '.wma')
-    
+
         output_ext = 'mp4' if (is_image or not is_audio) else media_path.suffix[1:]
         output_file = self._get_temp_path(output_ext)
-    
+
+
+        audio_duration = None
+        if loop_media:
+            _, _, duration, _ = await self._probe_media_info(audio_path)
+            audio_duration = duration
+
         cmd = [
             'ffmpeg', '-hide_banner',
             *(['-stream_loop', '-1', '-r', '25'] if is_image or loop_media else []),
@@ -2569,7 +2576,6 @@ class MediaProcessor:
 
         filter_complex_str = ';'.join(audio_filter)
 
-
         should_apply_shortest = not loop_audio and not preserve_length
 
         cmd.extend([
@@ -2579,9 +2585,10 @@ class MediaProcessor:
             '-map', '0:v:0' if not is_audio else None,
             '-map', '[a]',
             *(['-shortest'] if should_apply_shortest else []),
+            *(['-t', str(audio_duration)] if loop_media and audio_duration else []),
             '-y', output_file.as_posix()
         ])
-    
+
         success, error = await self._run_ffmpeg([x for x in cmd if x is not None])
         if success:
             self.media_cache[output_key] = str(output_file)
