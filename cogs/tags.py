@@ -32,7 +32,6 @@ from zoneinfo import ZoneInfo
 import dateparser
 from wand.image import Image as Img
 from wand.color import Color
-import traceback
 
 IMAGE_TYPES = ('image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif')
 VIDEO_TYPES = ('video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska', 'video/x-msvideo', 'video/x-ms-wmv')
@@ -781,6 +780,23 @@ class MediaProcessor:
         
         except Exception:
             return 0
+    
+    
+    async def _resolve_timestamp(self, input_key: str, time_val: Union[str, float]) -> str:
+        if not isinstance(time_val, str) or not time_val.endswith('%'):
+            return str(time_val)
+
+        if input_key not in self.media_cache:
+            return "0"
+
+        path = Path(self.media_cache[input_key])
+        _, _, duration, _ = await self._probe_media_info(path)
+
+        try:
+            pct = float(time_val.strip('%'))
+            return str(duration * (pct / 100.0))
+        except Exception:
+            return "0"
 
 
     
@@ -2036,8 +2052,8 @@ class MediaProcessor:
     
     async def _trim_media_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
-        start_time = kwargs['start_time']
-        end_time = kwargs['end_time']
+        start_time = await self._resolve_timestamp(kwargs['input_key'], kwargs['start_time'])
+        end_time = await self._resolve_timestamp(kwargs['input_key'], kwargs['end_time'])
         output_key = kwargs['output_key']
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
@@ -2883,16 +2899,15 @@ class MediaProcessor:
             return f"Dobetween error: {str(e)}"
     
     async def _dobetween_media_impl(self, **kwargs) -> str:
-        input_key   = kwargs['input_key']
-        start_time  = kwargs['start_time']
-        end_time    = kwargs['end_time']
-        output_key  = kwargs['output_key']
+        input_key = kwargs['input_key']
+        start_time = kwargs['start_time']
+        end_time = kwargs['end_time']
+        output_key = kwargs['output_key']
         segment_key = kwargs.get('segment_key', '_dobetween_segment')
-        sub_script  = kwargs.get('sub_script', '')
-
-        before_key  = f"{segment_key}_before"
-        after_key   = f"{segment_key}_after"
-        edited_key  = f"{segment_key}_edited"
+        sub_script = kwargs.get('sub_script', '')
+        before_key = f"{segment_key}_before"
+        after_key = f"{segment_key}_after"
+        edited_key = f"{segment_key}_edited"
 
 
         tasks = [
