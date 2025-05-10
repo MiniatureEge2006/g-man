@@ -2011,6 +2011,7 @@ class MediaProcessor:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
+    
     async def _rotate_media(self, **kwargs) -> str:
         try:
             return await self._rotate_media_impl(**kwargs)
