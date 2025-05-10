@@ -2719,7 +2719,7 @@ class MediaProcessor:
 
         filter_parts = [
                 f"[0:v]format=yuva420p,fade=t=in:st=0:d={duration}:alpha=1[fg];",
-                f"[1:v][fg]overlay=format=auto[v]"
+                f"[1:v][fg]overlay=format=auto,pad=width=ceil(iw/2)*2:height=ceil(ih/2)*2[v]"
             ]
             
         if has_audio:
@@ -2796,7 +2796,7 @@ class MediaProcessor:
 
         filter_complex_parts = [
             f"[0:v]format=yuva420p,fade=t=out:st={start_time}:d={duration}:alpha=1[fg];",
-            f"[1:v][fg]overlay=format=auto[v]"
+            f"[1:v][fg]overlay=format=auto,pad=width=ceil(iw/2)*2:height=ceil(ih/2)*2[v]"
         ]
         
 
