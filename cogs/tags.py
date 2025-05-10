@@ -2576,7 +2576,7 @@ class MediaProcessor:
 
         filter_complex_str = ';'.join(audio_filter)
 
-        should_apply_shortest = not loop_audio and not preserve_length
+        should_apply_shortest = not loop_audio and preserve_length
 
         cmd.extend([
             '-filter_complex', filter_complex_str,

@@ -165,6 +165,9 @@ class Media(commands.Cog):
                              force_video: bool = False,
                              loop_media: bool = False):
         await ctx.typing()
+        message_attachments = ctx.message.attachments
+        attachment = attachment or (message_attachments[0] if len(message_attachments) > 0 else None)
+        audio_attachment = audio_attachment or (message_attachments[1 if attachment is None else 0] if len(message_attachments) > (0 if attachment else 1) else None)
         input_key = f"media_{ctx.message.id}"
         input_parsed = await self.process_media_input(ctx, url, attachment)
         if input_parsed[2]:
@@ -213,6 +216,9 @@ class Media(commands.Cog):
                           preserve_length: bool = True,
                           loop_media: bool = False):
         await ctx.typing()
+        message_attachments = ctx.message.attachments
+        attachment = attachment or (message_attachments[0] if len(message_attachments) > 0 else None)
+        audio_attachment = audio_attachment or (message_attachments[1 if attachment is None else 0] if len(message_attachments) > (0 if attachment else 1) else None)
         input_key = f"video_{ctx.message.id}"
         input_parsed = await self.process_media_input(ctx, url, attachment)
         if input_parsed[2]:
@@ -538,6 +544,9 @@ class Media(commands.Cog):
                         x: str = "0",
                         y: str = "0"):
         await ctx.typing()
+        message_attachments = ctx.message.attachments
+        base_attachment = base_attachment or (message_attachments[0] if len(message_attachments) > 0 else None)
+        overlay_attachment = overlay_attachment or (message_attachments[1 if base_attachment is None else 0] if len(message_attachments) > (0 if base_attachment else 1) else None)
         base_key = f"base_{ctx.message.id}"
         base_parsed = await self.process_media_input(ctx, base_url, base_attachment)
         if base_parsed[2]:
