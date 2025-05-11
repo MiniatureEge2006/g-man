@@ -276,7 +276,7 @@ Always remember... you are a gatekeeper, not a guide."""
         try:
             response = await asyncio.to_thread(
                 ollama.chat,
-                model="sam860/qwen3:8b-Q4_K_M",
+                model="sam860/qwen3:4b-Q5_K_XL",
                 messages=messages
             )
             content = response.message.content
