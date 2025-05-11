@@ -36,11 +36,11 @@ RUN groupadd -g 1000 gcoder && useradd -r -u 1000 -g gcoder -m -d /home/gcoder g
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install numpy requests pillow yt-dlp bgutil-ytdlp-pot-provider
-RUN npm install -g typescript ts-node @types/node yarn
+RUN npm install -g typescript ts-node @types/node yarn mathjs
 USER gcoder
 RUN mkdir -p /home/gcoder && \
     cd /home/gcoder && \
-    git clone --single-branch --branch 0.8.2 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git && \
+    git clone --single-branch --branch 0.8.3 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git && \
     cd bgutil-ytdlp-pot-provider/server/ && \
     yarn install --frozen-lockfile && \
     npx tsc

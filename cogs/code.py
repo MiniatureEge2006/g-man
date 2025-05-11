@@ -4,7 +4,6 @@ import aiohttp
 from discord.ext import commands
 import time
 from io import BytesIO
-import os
 import asyncio
 
 class Code(commands.Cog):
@@ -18,7 +17,7 @@ class Code(commands.Cog):
     
     async def execute_code(self, language: str, code: str, files: list = None):
         await self.ensure_session()
-        url = f"http://{os.getenv('API_HOST', 'localhost:8000')}/{language}/execute"
+        url = f"http://localhost:8000/{language}/execute"
         data = aiohttp.FormData()
         data.add_field("code", code)
         
@@ -82,8 +81,8 @@ class Code(commands.Cog):
                 output = "Execution succeeded with no console output" if not status else "Execution failed with no output"
 
 
-            if len(output) > 1900:
-                output = output[:1900] + "\n... (output truncated)"
+            if len(output) > 2000:
+                output = output[:2000]
 
             embed = discord.Embed(
                 title=f"{language.capitalize()} Execution",
@@ -105,7 +104,7 @@ class Code(commands.Cog):
             if result.get('files'):
                 file_objs = []
                 for filename in result['files'][:10]:
-                    file_url = f"http://{os.getenv('API_HOST', 'localhost:8000')}/files/{result['execution_id']}/{filename}"
+                    file_url = f"http://localhost:8000/files/{result['execution_id']}/{filename}"
                     try:
                         async with self.session.get(file_url) as resp:
                             if resp.status == 200:
