@@ -48,8 +48,7 @@ class AI(commands.Cog):
                 ON CONFLICT (conversation_key)
                 DO UPDATE SET history = EXCLUDED.history, last_updated = NOW()
             """, json.dumps(key), json.dumps(history))
-        except Exception as e:
-            print(f"Error saving conversation: {e}")
+        except Exception:
             self.conversations[key] = history
     
 
@@ -71,7 +70,7 @@ class AI(commands.Cog):
         
         reference = (
             f"- {tag_name}: {doc.split('.')[0]}\n"
-            f"  *Example usage may be... permitted:* `{example_match.group(1) if example_match else 'classified'}`"
+            f"  `{example_match.group(1) if example_match else 'classified'}`"
         )
         
 
@@ -85,7 +84,7 @@ class AI(commands.Cog):
         if not found_tags:
             return ""
             
-        references = ["*clears throat*\nDetected... specialized capabilities:"]
+        references = []
         
         for tag_name in found_tags:
             ref = await self.get_single_tag_reference(tag_name)
@@ -95,7 +94,7 @@ class AI(commands.Cog):
         if len(references) == 1:
             return ""
             
-        return "\n".join(references) + "\n\n*straightens suit* These require... explicit authorization to utilize."
+        return "\n".join(references)
 
     async def create_system_prompt(self, ctx: commands.Context, content: str = "") -> str:
         custom_prompt = None
@@ -108,7 +107,7 @@ class AI(commands.Cog):
         if custom_prompt:
             base_prompt = custom_prompt
         else:
-            base_prompt = """You are G-Man. You speak in short, eerie phrases. Always maintain mystery and control.
+            base_prompt = """You are G-Man from the Half-Life series. You speak in short, eerie phrases. Always maintain mystery and control.
 
 ---
 ### Behavior Rules:
