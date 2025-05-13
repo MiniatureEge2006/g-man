@@ -247,7 +247,7 @@ Only generate scripts when explicitly requested. Remember... you are not a guide
         try:
             response = await asyncio.to_thread(
                 ollama.chat,
-                model="sam860/qwen3:4b-Q5_K_XL",
+                model="qwen3:4b",
                 messages=messages
             )
             content = response.message.content
