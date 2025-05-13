@@ -15,7 +15,6 @@ import traceback
 APP_USER = "gcoder"
 EXECUTION_ROOT = Path("/app/executions")
 FILE_RETENTION_SECONDS = 30 * 60
-MAX_FILE_SIZE = 10 * 1024 * 1024
 ALLOWED_LANGUAGES = ["bash", "python", "javascript", "typescript", "php", "ruby", "lua", "go", "rust", "c", "cpp", "csharp", "zig"]
 
 
@@ -50,10 +49,7 @@ def safe_delete(path: Path):
 
 async def validate_file(file: UploadFile):
     file.file.seek(0, os.SEEK_END)
-    size = file.file.tell()
     file.file.seek(0)
-    if size > MAX_FILE_SIZE:
-        raise HTTPException(400, detail=f"File {file.filename} exceeds maximum size of 10MB")
     
 
     if "../" in file.filename or "/" in file.filename:
@@ -83,12 +79,12 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
             stderr=asyncio.subprocess.PIPE
         )
         try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(input=input_data), timeout=30)
+            stdout, stderr = await asyncio.wait_for(proc.communicate(input=input_data), timeout=60)
             return stdout.decode('utf-8', errors='replace') + stderr.decode('utf-8', errors='replace'), proc.returncode
         except asyncio.TimeoutError:
             proc.kill()
             await proc.communicate()
-            return "Execution timed out after 30 seconds", 1
+            return "Code execution took longer than 60 seconds", 1
 
     try:
         output = ""
@@ -265,8 +261,8 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
 
     except Exception as e:
         safe_delete(work_dir)
-        print(f"Execution Error: {traceback.format_exc()}")
-        raise HTTPException(500, detail=f"Execution failed: {str(e)}")
+        print(f"Code execution Error: {traceback.format_exc()}")
+        raise HTTPException(500, detail=f"Code execution failed: {str(e)}")
 
 @app.post("/{language}/execute")
 async def execute_endpoint(

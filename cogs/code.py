@@ -78,7 +78,7 @@ class Code(commands.Cog):
             
 
             if not output:
-                output = "Execution succeeded with no console output" if not status else "Execution failed with no output"
+                output = "Code execution succeeded with no console output" if not status else "Code execution failed with no output"
 
 
             if len(output) > 2000:
@@ -125,7 +125,7 @@ class Code(commands.Cog):
 
         except Exception as e:
             error_embed = discord.Embed(
-                title="⚠️ Execution Error",
+                title="⚠️ Code execution Error",
                 description=f"```\n{str(e)[:2000]}\n```",
                 color=discord.Color.red()
             )
