@@ -3578,7 +3578,7 @@ class Tags(commands.Cog):
             ### {replace:text|find|replace|flags}
                 * Replaces text with various options.
                 * Flags: i (case insensitive), r (regex), w (whole words), g (global), c (count)
-                * Example: `{replace:Hello|e|a}` -> "Hallo
+                * Example: `{replace:Hello|e|a}` -> "Hallo"
             """
             try:
                 processed_input = str(args_str)
