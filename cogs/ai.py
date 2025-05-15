@@ -161,33 +161,27 @@ Only generate scripts when explicitly requested. Remember... you are not a guide
         await ctx.typing()
         await self.process_ai_response(ctx, prompt)
     
-    async def process_ai_response(self, ctx: commands.Context, prompt: str, no_think_mode: bool = False, show_thinking: bool = False):
+    async def process_ai_response(self, ctx: commands.Context, prompt: str):
         start_time = time.time()
         try:
             show_thinking = re.search(r'(^|\s)--think($|\s)', prompt) is not None
             if show_thinking:
                 prompt = re.sub(r'(^|\s)--think($|\s)', ' ', prompt).strip()
             conversation_key = self.get_conversation(ctx)
-            no_think_mode = "/no_think" in prompt
             
 
-            user_history = [] if no_think_mode else await self.get_conversation_history(conversation_key)
-
-            if no_think_mode:
-                prompt = prompt.replace("/no_think", "").strip()
+            user_history = await self.get_conversation_history(conversation_key)
             
             system_prompt = await self.create_system_prompt(ctx, prompt)
             messages = [{"role": "system", "content": system_prompt}]
-            
-            if no_think_mode:
-                messages.append({"role": "system", "content": "/no_think"})
+
             
             messages.append({"role": "user", "content": prompt})
             
-            if not no_think_mode and user_history:
+            if user_history:
                 messages[1:1] = user_history[-MAX_CONVERSATION_HISTORY_LENGTH:]
             
-            response = await self.get_ai_response(messages, no_think_mode, show_thinking)
+            response = await self.get_ai_response(messages, show_thinking)
             content = response.message.content
             
             if not content:
@@ -212,42 +206,39 @@ Only generate scripts when explicitly requested. Remember... you are not a guide
                         files=files[:10]
                     )
                 else:
-                    safe_content = discord.utils.escape_mentions(text)
-                    if len(safe_content) > 2000:
-                        embed = discord.Embed(title="G-AI Response", description=safe_content[:4096], color=discord.Color.blurple())
+                    if len(content) > 2000:
+                        embed = discord.Embed(title="G-AI Response", description=content[:4096], color=discord.Color.blurple())
                         embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
                         embed.set_footer(text=f"AI Response took {time.time() - start_time:.2f} seconds", icon_url="https://ollama.com/public/og.png")
-                        await ctx.reply(embed=embed)
+                        await ctx.reply(embed=embed, mention_author=False)
                     else:
-                        await ctx.reply(f"{safe_content}\n-# AI Response took {time.time() - start_time:.2f} seconds")
+                        await ctx.reply(f"{content}\n-# AI Response took {time.time() - start_time:.2f} seconds", mention_author=False)
             else:
-                safe_content = discord.utils.escape_mentions(content)
-                if len(safe_content) > 2000:
-                    embed = discord.Embed(title="G-AI Response", description=safe_content if len(safe_content) < 4096 else safe_content[:4096], color=discord.Color.blurple())
+                if len(content) > 2000:
+                    embed = discord.Embed(title="G-AI Response", description=content if len(content) < 4096 else content[:4096], color=discord.Color.blurple())
                     embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
                     embed.set_footer(text=f"AI Response took {time.time() - start_time:.2f} seconds", icon_url="https://ollama.com/public/og.png")
-                    await ctx.reply(embed=embed)
+                    await ctx.reply(embed=embed, mention_author=False)
                 else:
-                    await ctx.reply(f"{safe_content}\n-# AI Response took {time.time() - start_time:.2f} seconds")
+                    await ctx.reply(f"{content}\n-# AI Response took {time.time() - start_time:.2f} seconds", mention_author=False)
             
 
-            if not no_think_mode:
-                new_history = user_history[-MAX_CONVERSATION_HISTORY_LENGTH * 2:] if user_history else []
-                new_history.extend([
-                    {"role": "user", "content": prompt},
-                    {"role": "assistant", "content": content}
-                ])
-                await self.save_conversation_history(conversation_key, new_history)
+            new_history = user_history[-MAX_CONVERSATION_HISTORY_LENGTH * 2:] if user_history else []
+            new_history.extend([
+                {"role": "user", "content": prompt},
+                {"role": "assistant", "content": content}
+            ])
+            await self.save_conversation_history(conversation_key, new_history)
                 
         except Exception as e:
             await ctx.send(f"An error occurred: {e}")
 
 
-    async def get_ai_response(self, messages: list, no_think_mode: bool = False, show_thinking: bool = False):
+    async def get_ai_response(self, messages: list, show_thinking: bool = False):
         try:
             response = await asyncio.to_thread(
                 ollama.chat,
-                model="qwen3:4b",
+                model="cogito",
                 messages=messages
             )
             content = response.message.content
