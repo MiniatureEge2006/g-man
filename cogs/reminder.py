@@ -74,7 +74,7 @@ class Reminder(commands.Cog):
             return
         guild_id = ctx.guild.id if ctx.guild else None
         await self.add_reminder(target_user.id, guild_id, ctx.channel.id, reminder_text, reminder_time)
-        await ctx.reply(f"Okay, I'll remind you in <t:{int(reminder_time.timestamp())}:R> (<t:{int(reminder_time.timestamp())}:F>, {reminder_time.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)')}) about `{reminder_text}`." if user is ctx.author else f"Okay, I'll remind {target_user.mention} in <t:{int(reminder_time.timestamp())}:R> (<t:{int(reminder_time.timestamp())}:F>, {reminder_time.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)')}) about `{reminder_text}`.")
+        await ctx.reply(f"Okay, I'll remind you in <t:{int(reminder_time.timestamp())}:R> (<t:{int(reminder_time.timestamp())}:F>, {reminder_time.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)')}) about `{reminder_text}`." if user is ctx.author else f"Okay, I'll remind {target_user.mention} in <t:{int(reminder_time.timestamp())}:R> (<t:{int(reminder_time.timestamp())}:F>, {reminder_time.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)')}) about `{reminder_text}`.", mention_author=False)
     
     @commands.hybrid_command(name="reminders", description="View your reminders.")
     @app_commands.allowed_installs(guilds=True, users=True)
@@ -214,10 +214,10 @@ class Reminder(commands.Cog):
                 if user:
                     try:
                         if channel:
-                            await channel.send(f"{user.mention}, reminder from <t:{int(reminder_time.timestamp())}:R> (<t:{int(reminder_time.timestamp())}:F>, {reminder_time.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)')}): `{reminder['reminder']}`")
+                            await channel.send(f"{user.mention}, reminder from <t:{int(reminder_time.timestamp())}:R> (<t:{int(reminder_time.timestamp())}:F>, {reminder_time.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)')}): `{reminder['reminder']}`", allowed_mentions=discord.AllowedMentions(users=True))
                         else:
                             dm_channel = await user.create_dm()
-                            await dm_channel.send(f"{user.mention}, reminder from <t:{int(reminder_time.timestamp())}:R> (<t:{int(reminder_time.timestamp())}:F>, {reminder_time.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)')}): `{reminder['reminder']}`")
+                            await dm_channel.send(f"{user.mention}, reminder from <t:{int(reminder_time.timestamp())}:R> (<t:{int(reminder_time.timestamp())}:F>, {reminder_time.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)')}): `{reminder['reminder']}`", allowed_mentions=discord.AllowedMentions(users=True))
                     except (discord.Forbidden, AttributeError):
                         pass
                 delete_query = "DELETE FROM reminders WHERE reminder_id = $1;"
