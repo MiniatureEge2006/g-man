@@ -5348,7 +5348,9 @@ class Tags(commands.Cog):
                         "position": r.position,
                         "permissions": r.permissions.value,
                         "mentionable": r.mentionable
-                    } for r in ctx.guild.roles]
+                    } for r in ctx.guild.roles],
+                    "channels": [json.loads(await _json_channel(ctx, str(c))) for c in ctx.guild.channels],
+                    "members": [json.loads(await _json_user(ctx, str(u))) for u in ctx.guild.members]
                 }
                 
                 return json.dumps(guild_data)
@@ -5358,28 +5360,42 @@ class Tags(commands.Cog):
         @self.formatter.register('json.channel')
         async def _json_channel(ctx, channel_ref='', **kwargs):
             """
-            ### {json.channel}
-                * Returns the current channel's JSON object.
+            ### {json.channel:channel}
+                * Returns a server channel's JSON object. Defaults to current channel.
             """
             try:
-                channel_data = {
-                    "id": str(ctx.channel.id),
-                    "name": getattr(ctx.channel, 'name', 'DM'),
-                    "type": str(ctx.channel.type),
-                    "created_at": ctx.channel.created_at.isoformat() if hasattr(ctx.channel, 'created_at') else None,
-                    "position": getattr(ctx.channel, 'position', None),
-                    "topic": getattr(ctx.channel, 'topic', None),
-                    "nsfw": getattr(ctx.channel, 'nsfw', None),
-                    "bitrate": getattr(ctx.channel, 'bitrate', None),
-                    "user_limit": getattr(ctx.channel, 'user_limit', None),
-                    "slowmode_delay": getattr(ctx.channel, 'slowmode_delay', None),
-                    "category": {
-                        "id": str(ctx.channel.category.id),
-                        "name": ctx.channel.category.name
-                    } if getattr(ctx.channel, 'category', None) else None,
-                    "mention": ctx.channel.mention
-                }
+                channel = None
                 
+
+                if not channel_ref.strip():
+                    channel = ctx.channel
+                elif hasattr(channel_ref, 'id') and hasattr(channel_ref, 'type'):
+                    channel = channel_ref
+                elif isinstance(channel_ref, str):
+                    channel_id = channel_ref.strip('<>#')
+                    if channel_id.isdigit():
+                        channel = ctx.guild.get_channel(int(channel_id))
+                    else:
+                        channel = discord.utils.get(ctx.guild.channels, name=channel_id)
+
+
+                channel_data = {
+                    "id": str(channel.id),
+                    "name": getattr(channel, 'name', 'DM'),
+                    "type": str(channel.type),
+                    "created_at": channel.created_at.isoformat() if hasattr(channel, 'created_at') else None,
+                    "position": getattr(channel, 'position', None),
+                    "topic": getattr(channel, 'topic', None),
+                    "nsfw": getattr(channel, 'nsfw', None),
+                    "bitrate": getattr(channel, 'bitrate', None),
+                    "user_limit": getattr(channel, 'user_limit', None),
+                    "slowmode_delay": getattr(channel, 'slowmode_delay', None),
+                    "category": {
+                        "id": str(channel.category.id),
+                        "name": channel.category.name
+                    } if getattr(channel, 'category', None) else None,
+                    "mention": channel.mention
+                }
                 
                 return json.dumps(channel_data)
             except Exception as e:
