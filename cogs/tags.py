@@ -305,8 +305,8 @@ class MediaProcessor:
         self.temp_files = set()
         self._cleanup_task = None
         self._last_cleanup = None
-        self.cleanup_interval = 3600
-        self.file_max_age = 86400
+        self.cleanup_interval = 300
+        self.file_max_age = 300
         self.start_cleanup_task()
         self.session = None
         self.command_specs = {
@@ -572,7 +572,7 @@ class MediaProcessor:
                 await self._cleanup_old_files()
                 self._last_cleanup = datetime.now()
                 await asyncio.sleep(self.cleanup_interval)
-            except Exception as e:
+            except Exception:
                 await asyncio.sleep(60)
     async def _cleanup_old_files(self):
         now = datetime.now().timestamp()
@@ -591,7 +591,7 @@ class MediaProcessor:
                     os.unlink(path)
                     del self.media_cache[key]
                     cleaned_files += 1
-            except Exception as e:
+            except Exception:
                 pass
 
         
@@ -606,7 +606,7 @@ class MediaProcessor:
                     os.unlink(path)
                     self.temp_files.discard(path)
                     cleaned_files += 1
-            except Exception as e:
+            except Exception:
                 pass
 
         
@@ -621,9 +621,9 @@ class MediaProcessor:
                         elif item.is_dir():
                             shutil.rmtree(item)
                             cleaned_dirs += 1
-                except Exception as e:
+                except Exception:
                     pass
-        except Exception as e:
+        except Exception:
             pass
 
     
@@ -644,13 +644,13 @@ class MediaProcessor:
             try:
                 if file_path and os.path.exists(file_path):
                     os.unlink(file_path)
-            except Exception as e:
+            except Exception:
                 pass
         for file_path in self.temp_files:
             try:
                 if os.path.exists(file_path):
                     os.unlink(file_path)
-            except Exception as e:
+            except Exception:
                 pass
         
         try:
@@ -660,9 +660,9 @@ class MediaProcessor:
                         item.unlink()
                     elif item.is_dir():
                         shutil.rmtree(item)
-                except Exception as e:
+                except Exception:
                     pass
-        except Exception as e:
+        except Exception:
             pass
         
         self.media_cache.clear()
@@ -3240,22 +3240,36 @@ class Tags(commands.Cog):
             """
             try:
                 results = await self.processor.execute_media_script(script)
-                file_paths = [Path(p) for p in results if not p.startswith("Error") and p != "Processing complete"]
-                file_paths = [f for f in file_paths if f.exists() and f.is_file()]
 
-                if not file_paths:
-                    return "\n".join(results), [], None, []
+                if isinstance(results, list):
+                    if len(results) > 0 and results[0] == "Processing complete":
+                        return ("Processing complete.", [], None, [])
 
-                files = []
-                for path in file_paths:
-                    if path.stat().st_size <= ctx.guild.filesize_limit if ctx.guild else 10 * 1024 * 1024:
-                        files.append(discord.File(path))
 
-                return ("", [], None, files[:10])
+                    if any(r.startswith("Error:") for r in results):
+                        return ("\n".join([r for r in results if r.startswith("Error:")]), [], None, [])
+
+
+                    files = []
+                    for path in results:
+                        if os.path.isfile(path):
+                            try:
+                                with open(path, 'rb') as f:
+                                    data = BytesIO(f.read())
+                                filename = os.path.basename(path)
+                                files.append(discord.File(data, filename=filename))
+                                os.remove(path)
+                            except Exception:
+                                continue
+                    if files:
+                        return ("", [], None, files[:10])
+                    else:
+                        return ("No valid files could be loaded.", [], None, [])
+                else:
+                    return (str(results), [], None, [])
 
             except Exception as e:
-                await self.processor.cleanup()
-                return f"Script processing error: {str(e)}", [], None, []
+                return (f"[gmanscript error: {str(e)}]", [], None, [])
 
     
     def setup_formatters(self):
