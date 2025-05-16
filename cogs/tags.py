@@ -3168,7 +3168,7 @@ class Tags(commands.Cog):
             
                 output = result.get("output", "").replace("\r\n", "\n").strip()
                 if result.get("error") or "error" in output.lower():
-                    return f"[{language} error: {output or 'Execution failed with no output'}]"
+                    return f"[{language} error: {output or 'Code execution failed with no output'}]"
 
             
                 if result.get("files"):
@@ -3184,10 +3184,9 @@ class Tags(commands.Cog):
                             return f"[{language} error: Failed to fetch file {filename}: {str(e)}]"
 
                     if file_objs:
-                        await ctx.send(files=file_objs)
-                        return ""
+                        return ("", [], None, file_objs[:10])
 
-                return output or "Execution succeeded with no console output"
+                return output or "Code execution succeeded with no console output"
         except Exception as e:
             return f"[{language} exception: {str(e)}]"
 
