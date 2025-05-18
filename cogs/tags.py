@@ -5852,7 +5852,7 @@ class Tags(commands.Cog):
         elif custom_id.startswith("tag:"):
             await self.execute_tag(interaction, custom_id[4:])
         else:
-            await interaction.followup.send(f"Button pressed: {custom_id}", ephemeral=True)
+            pass
 
     async def handle_select(self, interaction: discord.Interaction, selected: str):
 
@@ -5861,7 +5861,7 @@ class Tags(commands.Cog):
         elif selected.startswith("tag:"):
             await self.execute_tag(interaction, selected[4:])
         else:
-            await interaction.followup.send(f"Selected: {selected}", ephemeral=True)
+            pass
 
 
 

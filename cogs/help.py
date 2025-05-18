@@ -71,14 +71,27 @@ class Help(commands.Cog):
             color=self.color
         )
 
-        for cmd in cog.get_commands():
-            if not cmd.hidden:
-                embed.add_field(
-                    name=f"`{cmd.name}`",
-                    value=cmd.description or "No description available.",
-                    inline=False
-                )
-        
+        def recursively_add_commands(cmds, level=0):
+            fields = []
+            for cmd in cmds:
+                if cmd.hidden:
+                    continue
+                indent = '  ' * level
+                name = f"{indent}- `{cmd.name}`"
+                value = cmd.description or "No description available."
+                fields.append((name, value))
+                if isinstance(cmd, commands.Group):
+                    fields.extend(recursively_add_commands(cmd.commands, level + 1))
+            return fields
+
+        all_fields = recursively_add_commands(cog.get_commands())
+
+        if all_fields:
+            for name, value in all_fields:
+                embed.add_field(name=name, value=value, inline=False)
+        else:
+            embed.add_field(name="Commands", value="No commands found.", inline=False)
+
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         return embed
     
@@ -96,6 +109,49 @@ class Help(commands.Cog):
             value=f"`{ctx.prefix}{cmd.qualified_name} {cmd.signature}`",
             inline=False
         )
+
+        if isinstance(cmd, commands.HybridCommand):
+            app_cmd: app_commands.Command = cmd.app_command
+
+            if app_cmd.parameters:
+                param_lines = []
+                for param in app_cmd.parameters:
+                    desc = param.description or "No description"
+                    required = "required" if param.required else "optional"
+                    param_type = param.type.name if hasattr(param.type, "name") else str(param.type)
+                    param_lines.append(f"**{param.name}** ({param_type}, {required}): {desc}")
+
+                embed.add_field(
+                    name="Slash Command Parameters",
+                    value="\n".join(param_lines),
+                    inline=False
+                )
+            else:
+                embed.add_field(
+                    name="Slash Command Parameters",
+                    value="This command has no parameters.",
+                    inline=False
+                )
+
+
+        if isinstance(cmd, commands.Group):
+            subcommands = [c for c in cmd.commands if not c.hidden]
+            if subcommands:
+                sub_list = "\n".join([
+                    f"`{sub.name}` - {sub.description or 'No description'}"
+                    for sub in subcommands
+                ])
+                embed.add_field(
+                    name="Subcommands",
+                    value=sub_list,
+                    inline=False
+                )
+            else:
+                embed.add_field(
+                    name="Subcommands",
+                    value="This group has no visible subcommands.",
+                    inline=False
+                )
 
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         return embed
