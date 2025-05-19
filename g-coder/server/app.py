@@ -2,7 +2,6 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTa
 from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 import os
-import uuid
 import shutil
 import asyncio
 import time
@@ -11,12 +10,9 @@ from typing import List
 from pathlib import Path
 import traceback
 
-
 APP_USER = "gcoder"
 EXECUTION_ROOT = Path("/app/executions")
-FILE_RETENTION_SECONDS = 30 * 60
 ALLOWED_LANGUAGES = ["bash", "python", "javascript", "typescript", "php", "ruby", "lua", "go", "rust", "c", "cpp", "csharp", "zig"]
-
 
 def setup_environment():
     EXECUTION_ROOT.mkdir(mode=0o700, exist_ok=True)
@@ -50,16 +46,15 @@ def safe_delete(path: Path):
 async def validate_file(file: UploadFile):
     file.file.seek(0, os.SEEK_END)
     file.file.seek(0)
-    
-
     if "../" in file.filename or "/" in file.filename:
         raise HTTPException(400, detail="Invalid filename")
 
 async def execute_code(language: str, code: str, files: List[UploadFile]):
-    execution_id = str(uuid.uuid4())
-    work_dir = EXECUTION_ROOT / execution_id
+    work_dir = EXECUTION_ROOT / "work"
+    if work_dir.exists():
+        safe_delete(work_dir)
     work_dir.mkdir(mode=0o700)
-    
+
     saved_files = []
     for file in files:
         await validate_file(file)
@@ -68,7 +63,7 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
             content = await file.read()
             f.write(content)
         saved_files.append(file.filename)
-    
+
     async def run_with_timeout(cmd, cwd=None, env=None, input_data=None):
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -90,16 +85,12 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
         output = ""
         return_code = 1
         if language == "bash":
-            output, return_code = await run_with_timeout(
-                ['bash', '-c', f"cd '{work_dir}' && {code}"])
-            
+            output, return_code = await run_with_timeout(['bash', '-c', f"cd '{work_dir}' && {code}"])
         elif language in ["javascript", "typescript"]:
             if language == "typescript":
                 script_path = work_dir / "script.ts"
                 with script_path.open('w') as f:
                     f.write(code)
-                
-
                 tsconfig = {
                     "compilerOptions": {
                         "target": "ES2020",
@@ -116,11 +107,8 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
                 }
                 with (work_dir / 'tsconfig.json').open('w') as f:
                     json.dump(tsconfig, f)
-
-
                 cmd = ['ts-node', '--files', '--transpile-only', str(script_path)]
                 output, return_code = await run_with_timeout(cmd, cwd=work_dir)
-
             else:
                 escaped_code = json.dumps(code)
                 wrapper = f"""
@@ -135,102 +123,68 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
                 }})();
                 """
                 output, return_code = await run_with_timeout(['node', '-e', wrapper], cwd=work_dir)
-
         elif language == "python":
-            output, return_code = await run_with_timeout(
-                ['python', '-c', code], cwd=work_dir)
-
+            output, return_code = await run_with_timeout(['python', '-c', code], cwd=work_dir)
         elif language == "php":
-            output, return_code = await run_with_timeout(
-                ['php', '-r', code], cwd=work_dir)
-
+            output, return_code = await run_with_timeout(['php', '-r', code], cwd=work_dir)
         elif language == "ruby":
-            output, return_code = await run_with_timeout(
-                ['ruby', '-e', code], cwd=work_dir)
-
+            output, return_code = await run_with_timeout(['ruby', '-e', code], cwd=work_dir)
         elif language == "lua":
-            output, return_code = await run_with_timeout(
-                ['lua', '-e', code], cwd=work_dir)
-
+            output, return_code = await run_with_timeout(['lua', '-e', code], cwd=work_dir)
         elif language == "go":
             go_file = work_dir / "main.go"
             with go_file.open('w') as f:
                 f.write(code)
-            output, return_code = await run_with_timeout(
-                ['go', 'run', str(go_file)], cwd=work_dir)
-
+            output, return_code = await run_with_timeout(['go', 'run', str(go_file)], cwd=work_dir)
         elif language == "rust":
             rust_file = work_dir / "main.rs"
             with rust_file.open('w') as f:
                 f.write(code)
-            
             compile_out, compile_code = await run_with_timeout(
                 ['rustc', str(rust_file), '-o', str(work_dir / 'main')], cwd=work_dir)
-            
             if compile_code != 0:
                 output = compile_out
                 return_code = compile_code
             else:
-                output, return_code = await run_with_timeout(
-                    [str(work_dir / 'main')], cwd=work_dir)
-
+                output, return_code = await run_with_timeout([str(work_dir / 'main')], cwd=work_dir)
         elif language == "c":
             c_file = work_dir / "main.c"
             with c_file.open('w') as f:
                 f.write(code)
-            
             compile_out, compile_code = await run_with_timeout(
                 ['gcc', str(c_file), '-o', str(work_dir / 'main')], cwd=work_dir)
-            
             if compile_code != 0:
                 output = compile_out
                 return_code = compile_code
             else:
-                output, return_code = await run_with_timeout(
-                    [str(work_dir / 'main')], cwd=work_dir)
-
+                output, return_code = await run_with_timeout([str(work_dir / 'main')], cwd=work_dir)
         elif language == "cpp":
             cpp_file = work_dir / "main.cpp"
             with cpp_file.open('w') as f:
                 f.write(code)
-            
             compile_out, compile_code = await run_with_timeout(
                 ['g++', str(cpp_file), '-o', str(work_dir / 'main')], cwd=work_dir)
-            
             if compile_code != 0:
                 output = compile_out
                 return_code = compile_code
             else:
-                output, return_code = await run_with_timeout(
-                    [str(work_dir / 'main')], cwd=work_dir)
-
+                output, return_code = await run_with_timeout([str(work_dir / 'main')], cwd=work_dir)
         elif language == "csharp":
             cs_file = work_dir / "Program.cs"
             with cs_file.open('w') as f:
                 f.write(code)
-            
-            compile_out, compile_code = await run_with_timeout(
-                ['mcs', str(cs_file)], cwd=work_dir)
-            
+            compile_out, compile_code = await run_with_timeout(['mcs', str(cs_file)], cwd=work_dir)
             if compile_code != 0:
                 output = compile_out
                 return_code = compile_code
             else:
-                output, return_code = await run_with_timeout(
-                    ['mono', str(work_dir / 'Program.exe')], cwd=work_dir)
-
+                output, return_code = await run_with_timeout(['mono', str(work_dir / 'Program.exe')], cwd=work_dir)
         elif language == "zig":
             zig_file = work_dir / "main.zig"
             with zig_file.open('w') as f:
                 f.write(code)
-            output, return_code = await run_with_timeout(
-                ['zig', 'run', str(zig_file)], cwd=work_dir)
+            output, return_code = await run_with_timeout(['zig', 'run', str(zig_file)], cwd=work_dir)
 
-
-        output_files = [
-            f for f in os.listdir(work_dir)
-            if f not in saved_files and (work_dir / f).is_file()
-        ]
         TEMP_FILES = {
             "zig": ["main.zig"],
             "go": ["main.go"],
@@ -246,16 +200,18 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
             "lua": [],
             "bash": []
         }
+
         excluded_files = TEMP_FILES.get(language, [])
-        final_files = [
-            f for f in output_files 
-            if f not in excluded_files 
-            and not (work_dir / f).is_dir()
+        output_files = [
+            f for f in os.listdir(work_dir)
+            if f not in saved_files and (work_dir / f).is_file()
         ]
+        final_files = [f for f in output_files if f not in excluded_files]
+
         return {
             "output": output.strip(),
             "files": final_files,
-            "execution_id": execution_id,
+            "execution_id": "work",
             "error": return_code != 0
         }
 
@@ -263,6 +219,7 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
         safe_delete(work_dir)
         print(f"Code execution Error: {traceback.format_exc()}")
         raise HTTPException(500, detail=f"Code execution failed: {str(e)}")
+
 
 @app.post("/{language}/execute")
 async def execute_endpoint(
@@ -274,26 +231,23 @@ async def execute_endpoint(
         raise HTTPException(400, detail="Unsupported language")
     return await execute_code(language, code, files)
 
-@app.get("/files/{execution_id}/{filename}")
+
+@app.get("/files/{filename}")
 async def get_file(
-    execution_id: str, 
-    filename: str, 
+    filename: str,
     background_tasks: BackgroundTasks
 ):
-    file_path = EXECUTION_ROOT / execution_id / filename
-    
+    file_path = EXECUTION_ROOT / "work" / filename
     if not file_path.exists():
         raise HTTPException(404, detail="File not found.")
 
     async def cleanup():
         await asyncio.sleep(10)
         safe_delete(file_path)
-        dir_path = file_path.parent
-        if dir_path.exists() and not any(dir_path.iterdir()):
-            safe_delete(dir_path)
 
     background_tasks.add_task(cleanup)
     return FileResponse(file_path)
+
 
 @app.get("/health")
 async def health_check():

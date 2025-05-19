@@ -3174,7 +3174,7 @@ class Tags(commands.Cog):
                 if result.get("files"):
                     file_objs = []
                     for filename in result["files"][:10]:
-                        file_url = f"http://localhost:8000/files/{result['execution_id']}/{filename}"
+                        file_url = f"http://localhost:8000/files/{filename}"
                         try:
                             async with self.processor.session.get(file_url) as file_resp:
                                 if file_resp.status == 200:
