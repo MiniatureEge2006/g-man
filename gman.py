@@ -202,6 +202,16 @@ async def on_ready():
 
 
 @bot.event
+async def on_message(message):
+    ctx = await bot.get_context(message)
+
+    if ctx.command is None:
+        return
+    
+    await bot.process_commands(message)
+
+
+@bot.event
 async def on_command(ctx: commands.Context):
     logger = logging.getLogger()
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -236,9 +246,6 @@ async def on_command_error(ctx: commands.Context, error):
     embed = discord.Embed(title=":warning: Command Error", color=discord.Color.red(), timestamp=discord.utils.utcnow())
     embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
     if isinstance(error, commands.CheckFailure):
-        return
-    if isinstance(error, commands.CommandNotFound):
-        logger.warning(f"Command not found: {ctx.message.content}")
         return
     if isinstance(error, commands.MissingRequiredArgument):
         logger.warning(f"Missing required argument for command {ctx.command.qualified_name}: {ctx.message.content} ({error.param.name} is required)")
