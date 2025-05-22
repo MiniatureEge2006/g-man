@@ -26,7 +26,7 @@ class Roblox(commands.Cog):
             embed = discord.Embed(title=f"Roblox User Info - {user_info.name}", color=0xFF0000, timestamp=discord.utils.utcnow())
             embed.add_field(name="ID", value=user_info.id, inline=True)
             embed.add_field(name="Display Name", value=user_info.display_name, inline=True)
-            if user_info.username_history(sort_order=SortOrder.Descending):
+            if user_info.username_history(sort_order=SortOrder.Descending) and not user_info.is_banned:
                 embed.add_field(name="Past Usernames", value=", ".join(await user_info.username_history(sort_order=SortOrder.Descending).flatten()), inline=False)
             embed.add_field(name="Banned?", value=user_info.is_banned, inline=True)
             if user_info.description:
