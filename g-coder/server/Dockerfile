@@ -30,15 +30,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -LO https://ziglang.org/download/0.11.0/zig-linux-x86_64-0.11.0.tar.xz \
-    && tar -xf zig-linux-x86_64-0.11.0.tar.xz \
-    && mv zig-linux-x86_64-0.11.0 /opt/zig \
+RUN curl -LO https://ziglang.org/download/0.14.0/zig-linux-x86_64-0.14.0.tar.xz \
+    && tar -xf zig-linux-x86_64-0.14.0.tar.xz \
+    && mv zig-linux-x86_64-0.14.0 /opt/zig \
     && ln -s /opt/zig/zig /usr/local/bin/zig
 RUN groupadd -g 1000 gcoder && useradd -r -u 1000 -g gcoder -m -d /home/gcoder gcoder
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install numpy requests pillow yt-dlp bgutil-ytdlp-pot-provider
-RUN pip install -U --pre "yt-dlp[default]"
 RUN npm install -g typescript ts-node @types/node yarn mathjs
 USER gcoder
 RUN mkdir -p /home/gcoder && \
