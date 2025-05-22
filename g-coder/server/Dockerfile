@@ -10,6 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     imagemagick \
     sox \
     nodejs \
+    openjdk-17-jdk-headless \
+    kotlin \
     npm \
     php \
     ruby-full \
@@ -36,11 +38,12 @@ RUN groupadd -g 1000 gcoder && useradd -r -u 1000 -g gcoder -m -d /home/gcoder g
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install numpy requests pillow yt-dlp bgutil-ytdlp-pot-provider
+RUN pip install -U --pre "yt-dlp[default]"
 RUN npm install -g typescript ts-node @types/node yarn mathjs
 USER gcoder
 RUN mkdir -p /home/gcoder && \
     cd /home/gcoder && \
-    git clone --single-branch --branch 0.8.3 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git && \
+    git clone --single-branch --branch 0.8.5 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git && \
     cd bgutil-ytdlp-pot-provider/server/ && \
     yarn install --frozen-lockfile && \
     npx tsc

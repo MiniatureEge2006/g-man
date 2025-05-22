@@ -68,7 +68,9 @@ class Code(commands.Cog):
             "c++": "cpp",
             "cs": "csharp",
             "c#": "csharp",
-            "zig": "zig"
+            "zig": "zig",
+            "java": "java",
+            "kt": "kotlin"
         }.get(language, language)
 
         try:
@@ -125,7 +127,7 @@ class Code(commands.Cog):
 
         except Exception as e:
             error_embed = discord.Embed(
-                title="⚠️ Code execution Error",
+                title="Code execution Error",
                 description=f"```\n{str(e)[:2000]}\n```",
                 color=discord.Color.red()
             )

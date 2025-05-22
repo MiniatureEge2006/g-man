@@ -4686,6 +4686,23 @@ class Tags(commands.Cog):
             """
             return await self.execute_language(ctx, 'zig', code, **kwargs)
         
+        @self.formatter.register('java')
+        async def _java(ctx, code, **kwargs):
+            """
+            ### {java:code}
+                * Execute Java code.
+            """
+            return await self.execute_language(ctx, 'java', code, **kwargs)
+        
+        @self.formatter.register('kotlin')
+        @self.formatter.register('kt')
+        async def _kotlin(ctx, code, **kwargs):
+            """
+            ### {kt:code}
+                * Execute Kotlin code.
+            """
+            return await self.execute_language(ctx, 'kotlin', code, **kwargs)
+        
         @self.formatter.register('user')
         async def _user(ctx, i, **kwargs):
             """

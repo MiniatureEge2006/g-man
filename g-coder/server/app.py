@@ -12,7 +12,7 @@ import traceback
 
 APP_USER = "gcoder"
 EXECUTION_ROOT = Path("/app/executions")
-ALLOWED_LANGUAGES = ["bash", "python", "javascript", "typescript", "php", "ruby", "lua", "go", "rust", "c", "cpp", "csharp", "zig"]
+ALLOWED_LANGUAGES = ["bash", "python", "javascript", "typescript", "php", "ruby", "lua", "go", "rust", "c", "cpp", "csharp", "zig", "java", "kotlin"]
 
 def setup_environment():
     EXECUTION_ROOT.mkdir(mode=0o700, exist_ok=True)
@@ -184,6 +184,30 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
             with zig_file.open('w') as f:
                 f.write(code)
             output, return_code = await run_with_timeout(['zig', 'run', str(zig_file)], cwd=work_dir)
+        elif language == "java":
+            java_class_name = "Main"
+            java_file = work_dir / f"{java_class_name}.java"
+            with java_file.open("w") as f:
+                f.write(code)
+            
+            compile_out, compile_code = await run_with_timeout(['javac', str(java_file)], cwd=work_dir)
+            if compile_code != 0:
+                output = compile_out
+                return_code = compile_code
+            else:
+                output, return_code = await run_with_timeout(['java', '-cp', str(work_dir), java_class_name], cwd=work_dir)
+        elif language == "kotlin":
+            kt_file = work_dir / "Main.kt"
+            with kt_file.open("w") as f:
+                f.write(code)
+            
+            compile_jar = work_dir / "main.jar"
+            compile_out, compile_code = await run_with_timeout(['kotlinc', str(kt_file), '-include-runtime', '-d', str(compile_jar)], cwd=work_dir)
+            if compile_code != 0:
+                output = compile_out
+                return_code = compile_code
+            else:
+                output, return_code = await run_with_timeout(['java', '-jar', str(compile_jar)], cwd=work_dir)
 
         TEMP_FILES = {
             "zig": ["main.zig"],
@@ -198,7 +222,9 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
             "php": [],
             "ruby": [],
             "lua": [],
-            "bash": []
+            "bash": [],
+            "java": ["Main.java", "Main.class"],
+            "kotlin": ["Main.kt", "main.jar"]
         }
 
         excluded_files = TEMP_FILES.get(language, [])
