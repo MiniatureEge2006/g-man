@@ -3479,7 +3479,7 @@ class Tags(commands.Cog):
                 delim, arr = val.split('|', 1)
                 return delim.join(json.loads(arr))
             except Exception as e:
-                return f"[Join error: {str(e)}]"
+                return f"[join error: {str(e)}]"
         
         @self.formatter.register('split')
         async def _split(ctx, val, **kwargs):
@@ -4525,17 +4525,13 @@ class Tags(commands.Cog):
                 * Sets a variable for the tag.
                 * Example: `{set:name|John}`
             """
-            tags_cog = ctx.bot.get_cog('Tags')
-            if not tags_cog:
-                return "[error: Tags cog not loaded]"
-            
             parts = val.split('|', 1)
             if len(parts) < 2:
                 return "[error: format should be {set:name|value}]"
             name, value = parts[0].strip(), parts[1].strip()
             
 
-            tags_cog._variables.setdefault(ctx.message.id, {})[name] = value
+            ctx.cog._variables.setdefault(ctx.message.id, {})[name] = value
             return ""
             
         @self.formatter.register('get')
@@ -4545,10 +4541,7 @@ class Tags(commands.Cog):
                 * Retrieves a previously set variable in the tag.
                 * Example: `Hello {get:name}!`
             """
-            tags_cog = ctx.bot.get_cog('Tags')
-            if not tags_cog:
-                return ""
-            variables = tags_cog._variables.get(ctx.message.id, {})
+            variables = ctx.cog._variables.get(ctx.message.id, {})
             return str(variables.get(name.strip(), ""))
             
         @self.formatter.register('math')
@@ -5031,10 +5024,7 @@ class Tags(commands.Cog):
             Builder Example: {embed:title=Hello color=blue}
             """
             try:
-                tags_cog = ctx.bot.get_cog('Tags')
-                if not tags_cog:
-                    return ("[Embed Error: Tags cog not loaded]", [], None, [])
-                processed_content, _, _, _ = await tags_cog.formatter.format(args_str, ctx, **kwargs)
+                processed_content, _, _, _ = await ctx.cog.formatter.format(args_str, ctx, **kwargs)
                 if processed_content.strip().startswith(('{', '[')):
                     try:
                         embed_data = json.loads(processed_content)
@@ -5106,7 +5096,7 @@ class Tags(commands.Cog):
         async def _button(ctx, args_str, **kwargs):
             """
             ### {button:[label] [style] [id/url] [emoji] [disabled]}
-            Flexible button builder with support for command and tag function execution. (JSON or builder syntax)
+            Flexible button builder with support for command and tag execution. (JSON or builder syntax)
             JSON Example: {button:{"label":"Click","style":"primary"}}
             Builder Example: {button:label=Click style=primary}
             """
@@ -5189,7 +5179,7 @@ class Tags(commands.Cog):
         async def _select(ctx, args_str, **kwargs):
             """
             ### {select:placeholder|min|max|option1_label|option1_value|option1_desc|...}
-            Create select menu with options. Supports command/tax execution.
+            Create select menu with options. Supports command/tag execution.
             
             JSON Example:
             {select:{
@@ -6350,8 +6340,6 @@ class Tags(commands.Cog):
         name="The tag name.",
         personal="Whether to look for a personal tag."
     )
-    @app_commands.allowed_installs(guilds=True, users=True)
-    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def info(self, ctx: commands.Context, *, name: str, personal: bool = False):
         await ctx.typing()
         name, content_personal = self.parse_personal_flag(name)
