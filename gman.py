@@ -619,84 +619,163 @@ async def allowlist(ctx: commands.Context):
 
 @bot.command(name="block", description="Blocks a user, channel, or role from using the bot.")
 @commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
-async def block(ctx: commands.Context, type: str, target: commands.UserConverter | commands.MemberConverter | commands.TextChannelConverter | commands.RoleConverter | commands.GuildConverter | int, *, reason="No reason provided"):
+async def block(ctx: commands.Context, type: str, target: str, *, reason = "No reason provided"):
     valid_types = ["global", "user", "channel", "role", "server"]
-    if target.id == ctx.author.id:
-        await ctx.send("You can't block yourself.")
-        return
-    if type not in ["global", "user", "channel", "role", "server"]:
-        await ctx.send(f"Invalid type. Valid types: {', '.join(valid_types)}")
-        return
-    if type in ["global", "server"] and str(ctx.author.id) not in bot_info.data['owners']:
-        await ctx.send(f"{type.capitalize()} blocks can only be set by bot owners.")
-        return
-    converter = commands.UserConverter() if type == "global" else commands.MemberConverter() if type == "user" else commands.TextChannelConverter() if type == "channel" else commands.RoleConverter() if type == "role" else commands.GuildConverter()
-    converted = await converter.convert(ctx, str(target))
-    converted_name = converted.name if converted else target
-    type_id = target.id if hasattr(target, "id") else target
-    async with bot.db.acquire() as conn:
-        if type == "server":
-            exists = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM global_blocked_servers WHERE guild_id = $1)", type_id)
-            if exists:
-                await ctx.send("This server is already globally blocked.")
-                return
-            await conn.execute("INSERT INTO global_blocked_servers (guild_id, reason) VALUES ($1, $2) ON CONFLICT (guild_id) DO UPDATE SET reason = $2", type_id, reason)
-            await ctx.send(f"Globally blocked server {converted_name}. Reason: `{reason}`")
-        elif type == "global":
-            exists = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM global_blocked_users WHERE discord_id = $1)", type_id)
-            if exists:
-                await ctx.send("This user is already globally blocked.")
-                return
-            await conn.execute("INSERT INTO global_blocked_users (discord_id, reason) VALUES ($1, $2) ON CONFLICT (discord_id) DO UPDATE SET reason = $2", type_id, reason)
-            await ctx.send(f"Globally blocked user {converted_name}. Reason: `{reason}`")
-        else:
-            exists = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM blocklist WHERE type = $1 AND entity_id = $2)", type, type_id)
-            if exists:
-                await ctx.send(f"{type.capitalize()} {converted_name} is already blocked.")
-                return
-            await conn.execute("INSERT INTO blocklist (type, entity_id, reason, added_by, added_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (type, entity_id) DO UPDATE SET reason = $3", type, type_id, reason, ctx.author.id, datetime.datetime.now())
-            await ctx.send(f"Blocked {type} {converted_name}. Reason: `{reason}`")
-
-@bot.command(name="unblock", description="Unblocks a user, channel, or role from using the bot.")
-@commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
-async def unblock(ctx: commands.Context, type: str, target: commands.UserConverter | commands.MemberConverter | commands.TextChannelConverter | commands.RoleConverter | commands.GuildConverter | int):
-    valid_types = ["global", "user", "channel", "role", "server"]
+    
     if type not in valid_types:
         await ctx.send(f"Invalid type. Valid types: {', '.join(valid_types)}")
         return
+    
+    if type in ["global", "server"] and str(ctx.author.id) not in bot_info.data['owners']:
+        await ctx.send(f"{type.capitalize()} blocks can only be set by bot owners.")
+        return
+
+    converted = None
+    converted_name = None
+    entity_id = None
+
+    try:
+        if type == "user":
+            conv = commands.MemberConverter()
+            converted = await conv.convert(ctx, target)
+            entity_id = converted.id
+            converted_name = str(converted)
+        elif type == "channel":
+            conv = commands.TextChannelConverter()
+            converted = await conv.convert(ctx, target)
+            entity_id = converted.id
+            converted_name = str(converted)
+        elif type == "role":
+            conv = commands.RoleConverter()
+            converted = await conv.convert(ctx, target)
+            entity_id = converted.id
+            converted_name = str(converted)
+        elif type == "global":
+            conv = commands.UserConverter()
+            converted = await conv.convert(ctx, target)
+            entity_id = converted.id
+            converted_name = str(converted)
+        elif type == "server":
+            conv = commands.GuildConverter()
+            converted = await conv.convert(ctx, target)
+            entity_id = converted.id
+            converted_name = str(converted)
+    except commands.BadArgument:
+        try:
+            entity_id = int(target)
+            converted_name = str(entity_id)
+        except ValueError:
+            await ctx.send("Could not resolve target. Please provide a valid ID, mention, or name.")
+            return
+
+    if type in ["global", "user"] and entity_id == ctx.author.id:
+        await ctx.send("You can't block yourself.")
+        return
+
+    async with bot.db.acquire() as conn:
+        if type == "server":
+            exists = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM global_blocked_servers WHERE guild_id = $1)", entity_id)
+            if exists:
+                await ctx.send(f"Server `{converted_name}` is already globally blocked.")
+                return
+            await conn.execute("INSERT INTO global_blocked_servers (guild_id, reason) VALUES ($1, $2) ON CONFLICT (guild_id) DO UPDATE SET reason = $2", entity_id, reason)
+            await ctx.send(f"Globally blocked server `{converted_name}`. Reason: `{reason}`")
+
+        elif type == "global":
+            exists = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM global_blocked_users WHERE discord_id = $1)", entity_id)
+            if exists:
+                await ctx.send(f"User `{converted_name}` is already globally blocked.")
+                return
+            await conn.execute("INSERT INTO global_blocked_users (discord_id, reason) VALUES ($1, $2) ON CONFLICT (discord_id) DO UPDATE SET reason = $2", entity_id, reason)
+            await ctx.send(f"Globally blocked user `{converted_name}`. Reason: `{reason}`")
+
+        else:
+            exists = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM blocklist WHERE type = $1 AND entity_id = $2)", type, entity_id)
+            if exists:
+                await ctx.send(f"{type.capitalize()} `{converted_name}` is already blocked.")
+                return
+            await conn.execute(
+                "INSERT INTO blocklist (type, entity_id, reason, added_by, added_at) "
+                "VALUES ($1, $2, $3, $4, $5) ON CONFLICT (type, entity_id) DO UPDATE SET reason = $3",
+                type, entity_id, reason, ctx.author.id, datetime.datetime.now()
+            )
+            await ctx.send(f"Blocked {type} `{converted_name}`. Reason: `{reason}`")
+
+@bot.command(name="unblock", description="Unblocks a user, channel, or role from using the bot.")
+@commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
+async def unblock(ctx: commands.Context, type: str, target: str):
+    valid_types = ["global", "user", "channel", "role", "server"]
+
+    if type not in valid_types:
+        await ctx.send(f"Invalid type. Valid types: {', '.join(valid_types)}")
+        return
+
     if type in ["global", "server"] and str(ctx.author.id) not in bot_info.data['owners']:
         await ctx.send(f"{type.capitalize()} blocks can only be removed by bot owners.")
         return
-    converter = commands.UserConverter() if type == "global" else commands.MemberConverter() if type == "user" else commands.TextChannelConverter() if type == "channel" else commands.RoleConverter() if type == "role" else commands.GuildConverter()
-    converted = await converter.convert(ctx, str(target))
-    converted_name = converted.name if converted else target
-    type_id = target.id if hasattr(target, "id") else target
+
+    converted_name = None
+    entity_id = None
+
+    try:
+        if type == "user":
+            conv = commands.MemberConverter()
+            converted = await conv.convert(ctx, target)
+            entity_id = converted.id
+            converted_name = str(converted)
+        elif type == "channel":
+            conv = commands.TextChannelConverter()
+            converted = await conv.convert(ctx, target)
+            entity_id = converted.id
+            converted_name = str(converted)
+        elif type == "role":
+            conv = commands.RoleConverter()
+            converted = await conv.convert(ctx, target)
+            entity_id = converted.id
+            converted_name = str(converted)
+        elif type == "global":
+            conv = commands.UserConverter()
+            converted = await conv.convert(ctx, target)
+            entity_id = converted.id
+            converted_name = str(converted)
+        elif type == "server":
+            conv = commands.GuildConverter()
+            converted = await conv.convert(ctx, target)
+            entity_id = converted.id
+            converted_name = str(converted)
+    except commands.BadArgument:
+        try:
+            entity_id = int(target)
+            converted_name = str(entity_id)
+        except ValueError:
+            await ctx.send("Could not resolve target. Please provide a valid ID, mention, or name.")
+            return
+
     async with bot.db.acquire() as conn:
         if type == "server":
-            result = await conn.execute("DELETE FROM global_blocked_servers WHERE guild_id = $1", type_id)
+            result = await conn.execute("DELETE FROM global_blocked_servers WHERE guild_id = $1", entity_id)
             if result == "DELETE 0":
-                await ctx.send("This server is not globally blocked.")
-                return
+                await ctx.send(f"Server `{converted_name}` is not globally blocked.")
             else:
-                await ctx.send(f"Unblocked server {converted_name}.")
+                await ctx.send(f"Unblocked server `{converted_name}`.")
+
         elif type == "global":
-            result = await conn.execute("DELETE FROM global_blocked_users WHERE discord_id = $1", type_id)
+            result = await conn.execute("DELETE FROM global_blocked_users WHERE discord_id = $1", entity_id)
             if result == "DELETE 0":
-                await ctx.send("This user is not globally blocked.")
-                return
+                await ctx.send(f"User `{converted_name}` is not globally blocked.")
             else:
-                await ctx.send(f"Unblocked user {converted_name}.")
+                await ctx.send(f"Unblocked user `{converted_name}`.")
+
         else:
-            result = await conn.execute("DELETE FROM blocklist WHERE type = $1 AND entity_id = $2", type, type_id)
+            result = await conn.execute("DELETE FROM blocklist WHERE type = $1 AND entity_id = $2", type, entity_id)
             if result == "DELETE 0":
-                await ctx.send(f"{type.capitalize()} {converted_name} is not blocked.")
-                return
-            else:    
-                await ctx.send(f"Unblocked {type} {converted_name}.")
+                await ctx.send(f"{type.capitalize()} `{converted_name}` is not blocked.")
+            else:
+                await ctx.send(f"Unblocked {type} `{converted_name}`.")
 
 @bot.command(name="allow", description="Allows a user, channel, or role to use the bot.")
 @commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
-async def allow(ctx: commands.Context, type: str, target: commands.MemberConverter | commands.TextChannelConverter | commands.RoleConverter, *, reason="No reason provided"):
+async def allow(ctx: commands.Context, type: str, target: commands.MemberConverter | commands.TextChannelConverter | commands.RoleConverter, *, reason = "No reason provided"):
     valid_types = ["user", "channel", "role"]
     if type not in valid_types:
         await ctx.send("Invalid type. Valid types: `user`, `channel`, or `role`.")
