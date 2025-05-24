@@ -97,7 +97,6 @@ class Audio(commands.Cog):
                     tracks.append(f"{track['name']} {track['artists'][0]['name']}")
                 return tracks
         except Exception as e:
-            print(f"Error processing Spotify URL: {e}")
             return None
 
     async def play_next(self, ctx: commands.Context):
@@ -183,7 +182,6 @@ class Audio(commands.Cog):
             result = await self.run_in_executor(sync_search)
             return result
         except Exception as e:
-            print(f"Error searching YouTube: {e}")
             return None
     
     async def extract_info(self, url: str):

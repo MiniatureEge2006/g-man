@@ -63,7 +63,7 @@ async def set_prefix(entity_id: int, prefix: str, is_guild: bool = True):
             return f"Prefix `{prefix}` is already set."
 
 
-extensions = ['cogs.audio', 'cogs.help', 'cogs.ping', 'cogs.caption', 'cogs.code', 'cogs.exif', 'cogs.ffmpeg', 'cogs.tutorial', 'cogs.imagemagick', 'cogs.ytdlp', 'cogs.info', 'cogs.ai', 'cogs.reminder', 'cogs.roblox', 'cogs.search', 'cogs.tags', 'cogs.media']
+extensions = ['cogs.audio', 'cogs.help', 'cogs.ping', 'cogs.caption', 'cogs.code', 'cogs.exif', 'cogs.ffmpeg', 'cogs.tutorial', 'cogs.imagemagick', 'cogs.ytdlp', 'cogs.info', 'cogs.ai', 'cogs.reminder', 'cogs.roblox', 'cogs.search', 'cogs.tags', 'cogs.media', 'cogs.moderation']
 bot = commands.Bot(command_prefix=get_prefix, case_insensitive=True, strip_after_prefix=True, status=discord.Status.online, activity=discord.Game(name=f"{bot_info.data['prefix']}help"), help_command=None, intents=discord.Intents.all(), allowed_mentions=discord.AllowedMentions(users=False, roles=False, everyone=False, replied_user=True))
 
 
