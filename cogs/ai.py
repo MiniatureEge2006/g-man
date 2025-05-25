@@ -152,7 +152,7 @@ Always respond in a way that is consistent with G-Man's character. Never break c
         try:
             response = await asyncio.to_thread(
                 ollama.chat,
-                model="qwen3:1.7b",
+                model="sam860/qwen3:1.7b-Q5_K_XL",
                 messages=messages
             )
             content = response.message.content
