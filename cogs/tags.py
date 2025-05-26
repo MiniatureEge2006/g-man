@@ -4799,7 +4799,7 @@ class Tags(commands.Cog):
             """
             user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
-                return str(user.guild_banner.url) if user.guild_banner else await _userbanner(ctx, user)
+                return str(user.guild_banner.url) if user.guild_banner else await _userbanner(ctx, i)
         
         @self.formatter.register('bannerkey')
         async def _bannerkey(ctx, i, **kwargs):
@@ -4810,7 +4810,7 @@ class Tags(commands.Cog):
             """
             user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
-                return str(user.guild_banner.key) if user.guild_banner else await _userbannerkey(ctx, user)
+                return str(user.guild_banner.key) if user.guild_banner else await _userbannerkey(ctx, i)
         
         @self.formatter.register('userbanner')
         async def _userbanner(ctx, i, **kwargs):
