@@ -206,10 +206,15 @@ class Info(commands.Cog):
                 except commands.BadArgument:
                     await ctx.send("Could not find user. Please use an user ID instead.")
                     return
-        try:
-            user = await self.bot.fetch_user(member.id)
-        except discord.NotFound:
-            user = member
+        if isinstance(member, discord.Member) and ctx.guild:
+            guild = ctx.guild
+            if guild:
+                try:
+                    member = guild.get_member(member.id)
+                except discord.NotFound:
+                    pass
+
+        user = await self.bot.fetch_user(member.id)
         embed = discord.Embed(
             title=f"User Info - {member.name}",
             color=getattr(member, "color", discord.Color.default()),
@@ -230,46 +235,84 @@ class Info(commands.Cog):
                 embed.add_field(name="Roles", value=", ".join(roles) if roles else "None", inline=False)
                 top_role = next((role for role in reversed(member.roles) if role != ctx.guild.default_role), None)
                 embed.add_field(name="Top Role", value=top_role.mention if top_role else "None", inline=True)
-            embed.add_field(name="Status", value=f"{member.status.name.capitalize()} (Desktop: {member.desktop_status.name.capitalize()} | Mobile: {member.mobile_status.name.capitalize()} | Web: {member.web_status.name.capitalize()})", inline=True)
             if member.voice:
                 embed.add_field(name="Voice Channel", value=f"{member.voice.channel.mention} | {member.voice.channel.name} ({member.voice.channel.id}) (Muted: {member.voice.self_mute} (Server Muted: {member.voice.mute}) | Deafened: {member.voice.self_deaf} (Server Deafened: {member.voice.deaf}) | Video: {member.voice.self_video} | Stream: {member.voice.self_stream})" if member.voice.channel else "None", inline=True)
-            if member.activity:
-                activity_attributes = {
-                    'name': 'Activity',
-                    'type': 'Activity Type',
-                    'details': 'Details',
-                    'state': 'State',
-                    'large_image_text': 'Large Image Text',
-                    'small_image_text': 'Small Image Text',
-                    'large_image_url': 'Large Image URL',
-                    'small_image_url': 'Small Image URL',
-                    'start': 'Start Time',
-                    'end': 'End Time',
-                }
-                for attribute, field_name in activity_attributes.items():
-                    if hasattr(member.activity, attribute):
-                        value = getattr(member.activity, attribute)
-                        if attribute == "type":
-                            value = value.name
-                        elif attribute in ["large_image_url", "small_image_url"]:
-                            value = f"[Link]({value})" if value else "None"
-                        elif attribute in ["start", "end"]:
-                            value = datetime.strftime(value, "%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)") if value else "Unknown"
-                        embed.add_field(name=field_name, value=value, inline=True)
-        banner = "None"
-        if hasattr(user, "banner") and user.banner:
-            banner = f"[Banner URL]({user.banner.url})"
-            if hasattr(user, "display_banner") and user.display_banner != user.banner:
-                banner += f", [Guild Banner URL]({user.display_banner.url})"
-            embed.set_image(url=user.display_banner.url if hasattr(user, "display_banner") else user.banner.url)
+            status_desktop = member.desktop_status.name.capitalize() if isinstance(member.desktop_status, discord.Status) else str(member.desktop_status).capitalize()
+            status_mobile = member.mobile_status.name.capitalize() if isinstance(member.mobile_status, discord.Status) else str(member.mobile_status).capitalize()
+            status_web = member.web_status.name.capitalize() if isinstance(member.web_status, discord.Status) else str(member.web_status).capitalize()
+
+            status_value = (
+                f"{member.status.name.capitalize()} "
+                f"(Desktop: {status_desktop} | "
+                f"Mobile: {status_mobile} | "
+                f"Web: {status_web})"
+            )
+            embed.add_field(name="Status", value=status_value, inline=False)
+
+
+            custom_status = None
+            if member.activities:
+                for activity in member.activities:
+                    if isinstance(activity, discord.CustomActivity):
+                        custom_status = f"{activity.emoji} {activity.name}" if activity.emoji else activity.name
+                        break
+            if custom_status:
+                embed.add_field(name="Custom Status", value=custom_status, inline=False)
+
+            if member.activities:
+                for i, activity in enumerate(member.activities):
+                    if isinstance(activity, discord.CustomActivity):
+                        continue
+                    activity_title = f"Activity {i+1}: {activity.name}"
+                    activity_details = []
+                    if hasattr(activity, "type") and activity.type != discord.ActivityType.custom:
+                        activity_details.append(f"Type: {activity.type.name.capitalize()}")
+                    if hasattr(activity, "buttons") and activity.buttons:
+                        activity_details.append(f"Buttons: `{', '.join(activity.buttons)}`")
+                    if hasattr(activity, "details") and activity.details:
+                        activity_details.append(f"Details: {activity.details}")
+                    if hasattr(activity, "state") and activity.state:
+                        activity_details.append(f"State: {activity.state}")
+                    if hasattr(activity, "start") and activity.start:
+                        start_time = datetime.strftime(activity.start, "%Y-%m-%d %H:%M:%S")
+                        activity_details.append(f"Started: {start_time}")
+                    if hasattr(activity, "end") and activity.end:
+                        end_time = datetime.strftime(activity.end, "%Y-%m-%d %H:%M:%S")
+                        activity_details.append(f"Ends: {end_time}")
+                    if hasattr(activity, "application_id") and activity.application_id:
+                        activity_details.append(f"App ID: {activity.application_id}")
+
+                    if activity_details:
+                        embed.add_field(
+                            name=activity_title,
+                            value="\n".join(activity_details),
+                            inline=False
+                        )
         if hasattr(user, "accent_color") and user.accent_color:
             embed.add_field(name="Banner Color", value=f"{user.accent_color} rgb{user.accent_color.to_rgb()}", inline=True)
-        avatar = "None"
+        avatar_urls = []
         if member.avatar:
-            avatar = f"[Avatar URL]({member.avatar.url})"
-            if hasattr(member, "display_avatar") and member.display_avatar != member.avatar:
-                avatar += f", [Guild Avatar URL]({member.display_avatar.url})"
-        embed.add_field(name="URLs", value=f"{avatar} | {banner}", inline=True)
+            avatar_urls.append(f"[Avatar URL]({member.avatar.url})")
+        if hasattr(member, "display_avatar") and member.display_avatar != member.avatar:
+            avatar_urls.append(f"[Guild Avatar URL]({member.display_avatar.url})")
+        avatar_str = " | ".join(avatar_urls) if avatar_urls else "None"
+
+
+        banner_str = "None"
+        banner_url = None
+        if hasattr(user, "banner") and user.banner:
+            banner_global_url = user.banner.url
+            banner_str = f"[Banner URL]({banner_global_url})"
+            banner_url = banner_global_url
+        if isinstance(member, discord.Member) and hasattr(member, "display_banner") and member.display_banner:
+            banner_guild_url = member.display_banner.url
+            if banner_guild_url != banner_global_url:
+                banner_str += f" | [Guild Banner URL]({banner_guild_url})"
+                banner_url = banner_guild_url
+
+        embed.add_field(name="URLs", value=f"**Avatar:** {avatar_str}\n**Banner:** {banner_str}", inline=False)
+        if banner_url:
+            embed.set_image(url=banner_url)
         embed.set_author(name=f"{member.name}#{member.discriminator}", icon_url=member.display_avatar.url, url=f"https://discord.com/users/{member.id}")
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)

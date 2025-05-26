@@ -4760,6 +4760,16 @@ class Tags(commands.Cog):
             user = await self.formatter.resolve_user(ctx, i)
             return str(user.display_avatar.url)
         
+        @self.formatter.register('avatarkey')
+        async def _avatarkey(ctx, i, **kwargs):
+            """
+            ### {avatarkey:mention/name/displayname/id}
+                * Returns avatar hash. (display avatar, defaults to normal if not available)
+                * Example: `{avatarkey:@MiniatureEge2006}` -> hash
+            """
+            user = await self.formatter.resolve_user(ctx, i)
+            return str(user.display_avatar.key)
+        
         @self.formatter.register('useravatar')
         async def _useravatar(ctx, i, **kwargs):
             """
@@ -4770,34 +4780,65 @@ class Tags(commands.Cog):
             user = await self.formatter.resolve_user(ctx, i)
             return str(user.avatar.url)
         
+        @self.formatter.register('useravatarkey')
+        async def _useravatarkey(ctx, i, **kwargs):
+            """
+            ### {useravatarkey:mention/name/displayname/id}
+                * Returns avatar hash. (user avatar)
+                * Example: `{useravatarkey:@MiniatureEge2006}` -> hash
+            """
+            user = await self.formatter.resolve_user(ctx, i)
+            return str(user.avatar.key)
+        
         @self.formatter.register('banner')
         async def _banner(ctx, i, **kwargs):
             """
             ### {banner:mention/name/displayname/id}
-                * Returns banner URL. (display banner)
+                * Returns guild banner URL, otherwise global banner if unavailable.
                 * Example: `{banner:@MiniatureEge2006}` -> URL
             """
             user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
-                user = await ctx.bot.fetch_user(user.id)
-                return str(user.banner.url) or f"{user.name} does not have a banner."
-            if not user.display_banner:
-                return f"{user.name} does not have a banner."
-            return str(user.display_banner.url)
+                return str(user.guild_banner.url) if user.guild_banner else await _userbanner(ctx, user)
+        
+        @self.formatter.register('bannerkey')
+        async def _bannerkey(ctx, i, **kwargs):
+            """
+            ### {bannerkey:mention/name/displayname/id}
+                * Returns guild banner hash, otherwise global banner if unavailable.
+                * Example: `{bannerkey:@MiniatureEge2006}` -> hash
+            """
+            user = await self.formatter.resolve_user(ctx, i)
+            if isinstance(user, discord.Member):
+                return str(user.guild_banner.key) if user.guild_banner else await _userbannerkey(ctx, user)
         
         @self.formatter.register('userbanner')
         async def _userbanner(ctx, i, **kwargs):
             """
             ### {userbanner:mention/name/displayname/id}
-                * Returns banner URL. (user banner)
+                * Returns global banner URL.
                 * Example: `{userbanner:@MiniatureEge2006}` -> URL
             """
             user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
                 user = await ctx.bot.fetch_user(user.id)
             if not user.banner:
-                return f"{user.name} does not have a banner."
+                return None
             return str(user.banner.url)
+        
+        @self.formatter.register('userbannerkey')
+        async def _userbannerkey(ctx, i, **kwargs):
+            """
+            ### {userbannerkey:mention/name/displayname/id}
+                * Returns global banner hash.
+                * Example: `{userbannerkey:@MiniatureEge2006}` -> hash
+            """
+            user = await self.formatter.resolve_user(ctx, i)
+            if isinstance(user, discord.Member):
+                user = await ctx.bot.fetch_user(user.id)
+            if not user.banner:
+                return None
+            return str(user.banner.key)
         
         @self.formatter.register('usercreatedate')
         async def _usercreatedate(ctx, i, **kwargs):
@@ -5238,6 +5279,74 @@ class Tags(commands.Cog):
                     user = ctx.author
                 else:
                     user = await self.formatter.resolve_user(ctx, user_ref)
+
+                user_data = {
+                    "id": str(user.id),
+                    "name": user.name,
+                    "display_name": getattr(user, "display_name", user.name),
+                    "discriminator": user.discriminator,
+                    "bot": user.bot,
+                    "created_at": user.created_at.isoformat(),
+                    "avatar": str(user.avatar.key),
+                    "avatar_url": str(user.avatar.url),
+                    "banner": await _userbannerkey(ctx, str(user.id)),
+                    "banner_url": await _userbanner(ctx, str(user.id)),
+                    "mention": user.mention
+                }
+
+                return json.dumps(user_data)
+            except Exception as e:
+                return f"[JSON User Error: {str(e)}]"
+        
+        @self.formatter.register('json.member')
+        async def _json_member(ctx, user_ref='', **kwargs):
+            """
+            ### {json.member:user}
+                * Returns a member's JSON object. Defaults to self.
+            """
+            try:
+                if not ctx.guild:
+                    return "[JSON Member Error: Not in a guild]"
+
+                if not user_ref.strip():
+                    member = ctx.author
+                else:
+                    member = await self.formatter.resolve_user(ctx, user_ref)
+
+                if not isinstance(member, discord.Member):
+                    return "[JSON Member Error: User is not a member of the guild]"
+
+                member_data = {
+                    "id": str(member.id),
+                    "name": member.name,
+                    "display_name": getattr(member, "display_name", member.name),
+                    "nick": member.nick,
+                    "joined_at": member.joined_at.isoformat() if member.joined_at else None,
+                    "avatar": str(member.guild_avatar.key) if member.guild_avatar else None,
+                    "avatar_url": str(member.guild_avatar.url) if member.guild_avatar else None,
+                    "banner": str(member.guild_banner.key) if member.guild_banner else None,
+                    "banner_url": str(member.guild_banner.url) if member.guild_banner else None,
+                    "roles": [{"id": str(r.id), "name": r.name} for r in member.roles],
+                    "top_role": {"id": str(member.top_role.id), "name": member.top_role.name},
+                    "guild_permissions": list(member.guild_permissions),
+                    "timed_out_until": member.timed_out_until.isoformat() if member.timed_out_until else None
+                }
+
+                return json.dumps(member_data)
+            except Exception as e:
+                return f"[JSON Member Error: {str(e)}]"
+        
+        @self.formatter.register('json.memberoruser')
+        async def _json_memberoruser(ctx, user_ref='', **kwargs):
+            """
+            ### {json.memberoruser:user}
+                * Returns an user or a member's JSON object. Defaults to self.
+            """
+            try:
+                if not user_ref.strip():
+                    user = ctx.author
+                else:
+                    user = await self.formatter.resolve_user(ctx, user_ref)
                 
                 user_data = {
                     "id": str(user.id),
@@ -5246,7 +5355,10 @@ class Tags(commands.Cog):
                     "discriminator": user.discriminator,
                     "bot": user.bot,
                     "created_at": user.created_at.isoformat(),
+                    "avatar": str(user.display_avatar.key),
                     "avatar_url": str(user.display_avatar.url),
+                    "banner": str(user.guild_banner.key) if getattr(user, "guild_banner", None) else (str((await ctx.bot.fetch_user(user.id)).banner.key) if (await ctx.bot.fetch_user(user.id)).banner else None),
+                    "banner_url": str(user.guild_banner.url) if getattr(user, "guild_banner", None) else (str((await ctx.bot.fetch_user(user.id)).banner.url) if (await ctx.bot.fetch_user(user.id)).banner else None),
                     "mention": user.mention
                 }
                 
@@ -5262,7 +5374,7 @@ class Tags(commands.Cog):
                 
                 return json.dumps(user_data)
             except Exception as e:
-                return f"[JSON User Error: {str(e)}]"
+                return f"[JSON MemberOrUser Error: {str(e)}]"
         
         @self.formatter.register('json.message')
         async def _json_message(ctx, message_ref='', **kwargs):
@@ -5300,6 +5412,7 @@ class Tags(commands.Cog):
                         "content_type": a.content_type
                     } for a in message.attachments],
                     "embeds": [e.to_dict() for e in message.embeds],
+                    "components": [c.to_dict() for c in message.components],
                     "mention_everyone": message.mention_everyone,
                     "mentions": [json.loads(await _json_user(ctx, str(u.id))) for u in message.mentions],
                     "reference": {
@@ -5370,7 +5483,7 @@ class Tags(commands.Cog):
                         "mentionable": r.mentionable
                     } for r in ctx.guild.roles],
                     "channels": [json.loads(await _json_channel(ctx, str(c))) for c in ctx.guild.channels],
-                    "members": [json.loads(await _json_user(ctx, str(u))) for u in ctx.guild.members]
+                    "members": [json.loads(await _json_member(ctx, str(u))) for u in ctx.guild.members]
                 }
                 
                 return json.dumps(guild_data)
