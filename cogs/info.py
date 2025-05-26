@@ -192,7 +192,7 @@ class Info(commands.Cog):
 
     @commands.hybrid_command(name="userinfo", aliases=["user", "member", "memberinfo"], description="Displays information about a user. Defaults to the author.")
     @app_commands.describe(member="Member or user to get information out of.")
-    @app_commands.allowed_installs(guilds=True, users=True)
+    @app_commands.allowed_installs(guilds=True, users=False)
     async def userinfo(self, ctx: commands.Context, *, member = None):
         await ctx.typing()
         member = member or ctx.author
