@@ -4754,7 +4754,7 @@ class Tags(commands.Cog):
         async def _avatar(ctx, i, **kwargs):
             """
             ### {avatar:mention/name/displayname/id}
-                * Returns avatar URL. (display avatar, defaults to normal if not available)
+                * Returns guild avatar URL, otherwise global if not available.
                 * Example: `{avatar:@MiniatureEge2006}` -> URL
             """
             user = await self.formatter.resolve_user(ctx, i)
@@ -4764,7 +4764,7 @@ class Tags(commands.Cog):
         async def _avatarkey(ctx, i, **kwargs):
             """
             ### {avatarkey:mention/name/displayname/id}
-                * Returns avatar hash. (display avatar, defaults to normal if not available)
+                * Returns guild avatar hash, otherwise global if not available.
                 * Example: `{avatarkey:@MiniatureEge2006}` -> hash
             """
             user = await self.formatter.resolve_user(ctx, i)
@@ -4774,21 +4774,21 @@ class Tags(commands.Cog):
         async def _useravatar(ctx, i, **kwargs):
             """
             ### {useravatar:mention/name/displayname/id}
-                * Returns avatar URL. (user avatar)
+                * Returns global avatar URL.
                 * Example: `{useravatar:@MiniatureEge2006}` -> URL
             """
             user = await self.formatter.resolve_user(ctx, i)
-            return str(user.avatar.url)
+            return str(user.avatar.url) if user.avatar else f"{user.name} does not have an avatar."
         
         @self.formatter.register('useravatarkey')
         async def _useravatarkey(ctx, i, **kwargs):
             """
             ### {useravatarkey:mention/name/displayname/id}
-                * Returns avatar hash. (user avatar)
+                * Returns global avatar hash.
                 * Example: `{useravatarkey:@MiniatureEge2006}` -> hash
             """
             user = await self.formatter.resolve_user(ctx, i)
-            return str(user.avatar.key)
+            return str(user.avatar.key) if user.avatar else f"{user.name} does not have an avatar."
         
         @self.formatter.register('banner')
         async def _banner(ctx, i, **kwargs):
@@ -4823,7 +4823,7 @@ class Tags(commands.Cog):
             if isinstance(user, discord.Member):
                 user = await ctx.bot.fetch_user(user.id)
             if not user.banner:
-                return None
+                return f"{user.name} does not have a banner."
             return str(user.banner.url)
         
         @self.formatter.register('userbannerkey')
@@ -4837,7 +4837,7 @@ class Tags(commands.Cog):
             if isinstance(user, discord.Member):
                 user = await ctx.bot.fetch_user(user.id)
             if not user.banner:
-                return None
+                return f"{user.name} does not have a banner."
             return str(user.banner.key)
         
         @self.formatter.register('usercreatedate')
@@ -5287,10 +5287,10 @@ class Tags(commands.Cog):
                     "discriminator": user.discriminator,
                     "bot": user.bot,
                     "created_at": user.created_at.isoformat(),
-                    "avatar": str(user.avatar.key),
-                    "avatar_url": str(user.avatar.url),
-                    "banner": await _userbannerkey(ctx, str(user.id)),
-                    "banner_url": await _userbanner(ctx, str(user.id)),
+                    "avatar": str(user.avatar.key) if user.avatar else str(user.display_avatar.key),
+                    "avatar_url": str(user.avatar.url) if user.avatar else str(user.display_avatar.url),
+                    "banner": (str((await ctx.bot.fetch_user(user.id)).banner.key) if (await ctx.bot.fetch_user(user.id)).banner else None),
+                    "banner_url": (str((await ctx.bot.fetch_user(user.id)).banner.url) if (await ctx.bot.fetch_user(user.id)).banner else None),
                     "mention": user.mention
                 }
 
