@@ -94,33 +94,29 @@ Always respond in a way that is consistent with G-Man's character. Never break c
         await ctx.typing()
         await self.process_ai_response(ctx, prompt)
     
-    async def process_ai_response(self, ctx: commands.Context, prompt: str, no_think_mode: bool = False, show_thinking: bool = False):
+    async def process_ai_response(self, ctx: commands.Context, prompt: str, think_mode: bool = False, show_thinking: bool = False):
         start_time = time.time()
         try:
-            show_thinking = re.search(r'(^|\s)--think($|\s)', prompt) is not None
-            if show_thinking:
+            think_mode = re.search(r'(^|\s)--think($|\s)', prompt) is not None
+            if think_mode:
                 prompt = re.sub(r'(^|\s)--think($|\s)', ' ', prompt).strip()
+            show_thinking = re.search(r'(^|\s)--show-thinking($|\s)', prompt) is not None
+            if show_thinking:
+                prompt = re.sub(r'(^|\s)--show-thinking($|\s)', ' ', prompt).strip()
             conversation_key = self.get_conversation(ctx)
-            no_think_mode = "/no_think" in prompt
             
 
-            user_history = [] if no_think_mode else await self.get_conversation_history(conversation_key)
-
-            if no_think_mode:
-                prompt = prompt.replace("/no_think", "").strip()
+            user_history = await self.get_conversation_history(conversation_key)
             
             system_prompt = await self.create_system_prompt(ctx, prompt)
             messages = [{"role": "system", "content": system_prompt}]
             
-            if no_think_mode:
-                messages.append({"role": "system", "content": "/no_think"})
-            
             messages.append({"role": "user", "content": prompt})
             
-            if not no_think_mode and user_history:
+            if user_history:
                 messages[1:1] = user_history[-MAX_CONVERSATION_HISTORY_LENGTH:]
             
-            response = await self.get_ai_response(messages, no_think_mode, show_thinking)
+            response = await self.get_ai_response(messages, think_mode, show_thinking)
             content = response.message.content
             
             if not content:
@@ -136,28 +132,30 @@ Always respond in a way that is consistent with G-Man's character. Never break c
                 await ctx.reply(f"{content}\n-# AI Response took {time.time() - start_time:.2f} seconds")
             
 
-            if not no_think_mode:
-                new_history = user_history[-MAX_CONVERSATION_HISTORY_LENGTH * 2:] if user_history else []
-                new_history.extend([
-                    {"role": "user", "content": prompt},
-                    {"role": "assistant", "content": content}
-                ])
-                await self.save_conversation_history(conversation_key, new_history)
+            new_history = user_history[-MAX_CONVERSATION_HISTORY_LENGTH * 2:] if user_history else []
+            new_history.extend([
+                {"role": "user", "content": prompt},
+                {"role": "assistant", "content": content}
+            ])
+            await self.save_conversation_history(conversation_key, new_history)
                 
         except Exception as e:
             await ctx.send(f"An error occurred: {e}")
 
 
-    async def get_ai_response(self, messages: list, no_think_mode: bool = False, show_thinking: bool = False):
+    async def get_ai_response(self, messages: list, think_mode: bool = False, show_thinking: bool = False):
         try:
             response = await asyncio.to_thread(
                 ollama.chat,
                 model=bot_info.data['ollama_model'],
-                messages=messages
+                messages=messages,
+                think=think_mode
             )
             content = response.message.content
             if not show_thinking:
-                content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+                content = content
+            elif show_thinking:
+                content = f"**Thinking...**\n{response.message.thinking}\n**...done thinking.**" + '\n' + content
             response.message.content = content
             return response
         except Exception as e:

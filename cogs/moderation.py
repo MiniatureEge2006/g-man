@@ -17,7 +17,7 @@ class Moderation(commands.Cog):
     @app_commands.allowed_installs(guilds=True, users=False)
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     @commands.has_permissions(ban_members=True)
-    async def ban(self, ctx: commands.Context, members: commands.Greedy[discord.User], delete_days: Optional[int] = 0, reason: str = "No reason provided."):
+    async def ban(self, ctx: commands.Context, members: commands.Greedy[discord.User], delete_days: Optional[int] = 0, *, reason: str = "No reason provided."):
         await ctx.typing()
         delete_seconds = delete_days * 86400
         audit_log_reason = f"Timestamp: {datetime.now(timezone.utc)}\nAdmin: {ctx.author}\nReason: {reason}"
@@ -94,7 +94,7 @@ class Moderation(commands.Cog):
     @app_commands.allowed_installs(guilds=True, users=False)
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     @commands.has_permissions(kick_members=True)
-    async def kick(self, ctx: commands.Context, members: commands.Greedy[discord.Member], reason: str = "No reason provided."):
+    async def kick(self, ctx: commands.Context, members: commands.Greedy[discord.Member], *, reason: str = "No reason provided."):
         await ctx.typing()
         audit_log_reason = f"Timestamp: {datetime.now(timezone.utc)}\nAdmin: {ctx.author}\nReason: {reason}"
 
