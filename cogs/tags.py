@@ -6,7 +6,8 @@ import re
 import bot_info
 import operator
 import asyncio
-from typing import Callable, Dict, Set, Union
+import ast
+from typing import Any, Callable, Dict, Set, Union
 import aiohttp
 import yt_dlp
 import os
@@ -1057,7 +1058,7 @@ class MediaProcessor:
             for i, (param, param_spec) in enumerate(spec_items):
                 if not remaining_args:
                     if param_spec.get('required', False):
-                        raise ValueError(param)
+                        raise ValueError(f"Missing required argument: `{param}`")
                     continue
 
                 if '=' in remaining_args[0] and not remaining_args[0].startswith(('http://', 'https://')):
@@ -1098,7 +1099,7 @@ class MediaProcessor:
             return parsed
 
         except Exception as e:
-            raise ValueError(f"Invalid arguments for {cmd}: {str(e)}")
+            raise ValueError(f"{cmd} command error: {e}")
 
     
     async def _run_ffmpeg(self, cmd: list) -> tuple:
@@ -1232,7 +1233,18 @@ class MediaProcessor:
                     parts = shlex.split(line)
                     cmd = parts[0].lower()
                     args = parts[1:]
-                    parsed = self._parse_command_args(cmd, args)
+
+                    if cmd not in self.gscript_commands:
+                        errors.append(f"[{line}]\n -> Unknown command: `{cmd}`")
+                        i += 1
+                        continue
+
+                    try:
+                        parsed = self._parse_command_args(cmd, args)
+                    except Exception as e:
+                        errors.append(f"[{line}]\n -> Argument error: {e}")
+                        i += 1
+                        continue
                     func = self.gscript_commands[cmd]
                     result = await func(**parsed)
                     if 'output_key' in parsed:
@@ -2986,7 +2998,7 @@ class TagFormatter:
                 result = await self._process_tag(chunk, ctx, **kwargs)
                 text, new_embeds, new_view, new_files = self._normalize_result(result)
                 
-                text_parts.append(text)
+                text_parts.append(str(text))
                 embeds.extend(new_embeds)
                 if new_view:
                     view = view or discord.ui.View(timeout=None)
@@ -3044,7 +3056,7 @@ class TagFormatter:
                 return (*result, [])
             return result
         else:
-            return (str(result), [], None, [])
+            return (result, [], None, [])
 
     def _split_chunks(self, content: str) -> list[str]:
         chunks = []
@@ -3245,8 +3257,9 @@ class Tags(commands.Cog):
                         return ("Processing complete.", [], None, [])
 
 
-                    if any(r.startswith("Error:") for r in results):
-                        return ("\n".join([r for r in results if r.startswith("Error:")]), [], None, [])
+                    errors = [r for r in results if isinstance(r, str) and not r.startswith("media://") and not os.path.isfile(r)]
+                    if errors:
+                        return ("\n".join(errors), [], None, [])
 
 
                     files = []
@@ -3999,7 +4012,11 @@ class Tags(commands.Cog):
                 * Example: `{type:{arg:0}}` -> "str"
                 * Example: `{type:[1,2,3]}` -> "list"
             """
-            return type(val).__name__
+            try:
+                evaluated_val = ast.literal_eval(val)
+            except:
+                evaluated_val = val
+            return type(evaluated_val).__name__
         
         @self.formatter.register('hash')
         async def _hash(ctx, val, **kwargs):
@@ -4194,6 +4211,14 @@ class Tags(commands.Cog):
                 return processed_text[::-1]
             except Exception:
                 return text
+        
+        def _coerce_common_type(a, b):
+            try:
+                if isinstance(a, (int, float)) or isinstance(b, (int, float)):
+                    return float(a), float(b)
+                return int(a), int(b)
+            except (ValueError, TypeError):
+                return str(a), str(b)
             
         @self.formatter.register('if')
         async def _if(ctx, args_str, **kwargs):
@@ -4219,21 +4244,25 @@ class Tags(commands.Cog):
                     else_raw = val
 
 
-            left  = str(left_raw)
-            right = str(right_raw)
+            left  = left_raw
+            right = right_raw
+            
+            coercible_ops = {"==", "!=", ">=", "<=", ">", "<"}
 
+            if op_raw in coercible_ops:
+                left, right = _coerce_common_type(left, right)
 
-            ops: dict[str, Callable[[str,str], bool]] = {
+            ops: dict[str, Callable[[Any, Any], bool]] = {
                 "==": operator.eq,
                 "!=": operator.ne,
                 ">=": operator.ge,
                 "<=": operator.le,
                 ">":  operator.gt,
                 "<":  operator.lt,
-                "*=": lambda a, b: b in a,
-                "^=": lambda a, b: a.startswith(b),
-                "$=": lambda a, b: a.endswith(b),
-                "~=": lambda a, b: re.search(b, a) is not None,
+                "*=": lambda a, b: str(b) in str(a),
+                "^=": lambda a, b: str(a).startswith(str(b)),
+                "$=": lambda a, b: str(a).endswith(str(b)),
+                "~=": lambda a, b: re.search(str(b), str(a)) is not None,
             }
 
             negate = False
@@ -4338,7 +4367,7 @@ class Tags(commands.Cog):
                 if min_val > max_val:
                     min_val, max_val = max_val, min_val
                 
-                return str(random.randint(min_val, max_val))
+                return random.randint(min_val, max_val)
             except Exception:
                 return "[range error: invalid input]"
         
