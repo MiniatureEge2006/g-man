@@ -3704,20 +3704,20 @@ class Tags(commands.Cog):
 
 
                 discord_formats = {
-                    "t": "%-I:%M %p",
-                    "T": "%-I:%M:%S %p",
-                    "d": "%m/%d/%Y",
-                    "D": "%B %d, %Y",
-                    "f": "%B %d, %Y at %-I:%M %p",
-                    "F": "%A, %B %d, %Y at %-I:%M %p",
+                    "t": "t",
+                    "T": "T",
+                    "d": "d",
+                    "D": "D",
+                    "f": "f",
+                    "F": "F",
                     "R": "R"
                 }
 
-                if format_code.upper() == "R":
+                if format_code == "R":
                     return f"<t:{int(now.timestamp())}:R>"
-                elif format_code.lower() in discord_formats:
-                    fmt = discord_formats[format_code.lower()]
-                    return f"<t:{int(now.timestamp())}:{format_code.lower()}>"
+                elif format_code in discord_formats:
+                    fmt = discord_formats[format_code]
+                    return f"<t:{int(now.timestamp())}:{fmt}>"
                 elif format_code.lower() == "unix":
                     return str(int(now.timestamp()))
                 elif format_code.lower() == "iso":
@@ -3917,7 +3917,7 @@ class Tags(commands.Cog):
         @self.formatter.register('parsetime')
         async def _parsetime(ctx, val, **kwargs):
             """
-            ### {parsetime:"time string"|timezone|format}
+            ### {parsetime:time string|timezone|format}
                 * Parse natural language timestamps to ISO, unix, or discord's formats.
                 * Example: `{parsetime:in 2 hours|UTC|ISO}`
             """
@@ -4807,7 +4807,7 @@ class Tags(commands.Cog):
                 * Example: `{useravatar:@MiniatureEge2006}` -> URL
             """
             user = await self.formatter.resolve_user(ctx, i)
-            return str(user.avatar.url) if user.avatar else f"{user.name} does not have an avatar."
+            return str(user.avatar.url) if user.avatar else None
         
         @self.formatter.register('useravatarkey')
         async def _useravatarkey(ctx, i, **kwargs):
@@ -4817,7 +4817,7 @@ class Tags(commands.Cog):
                 * Example: `{useravatarkey:@MiniatureEge2006}` -> hash
             """
             user = await self.formatter.resolve_user(ctx, i)
-            return str(user.avatar.key) if user.avatar else f"{user.name} does not have an avatar."
+            return str(user.avatar.key) if user.avatar else None
         
         @self.formatter.register('banner')
         async def _banner(ctx, i, **kwargs):
@@ -4852,7 +4852,7 @@ class Tags(commands.Cog):
             if isinstance(user, discord.Member):
                 user = await ctx.bot.fetch_user(user.id)
             if not user.banner:
-                return f"{user.name} does not have a banner."
+                return None
             return str(user.banner.url)
         
         @self.formatter.register('userbannerkey')
@@ -4866,7 +4866,7 @@ class Tags(commands.Cog):
             if isinstance(user, discord.Member):
                 user = await ctx.bot.fetch_user(user.id)
             if not user.banner:
-                return f"{user.name} does not have a banner."
+                return None
             return str(user.banner.key)
         
         @self.formatter.register('usercreatedate')
@@ -4877,7 +4877,7 @@ class Tags(commands.Cog):
                 * Example: `{usercreatedate:@MiniatureEge2006}` -> "2019-05-11 17:15:30 (May 11, 2019 at 05:15:30 PM)"
             """
             user = await self.formatter.resolve_user(ctx, i)
-            return user.created_at.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)') if user.created_at else "Creation date not available"
+            return user.created_at.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)') if user.created_at else None
         
         @self.formatter.register('userjoindate')
         async def _userjoindate(ctx, i, **kwargs):
@@ -4896,7 +4896,7 @@ class Tags(commands.Cog):
             else:
                 date_to_use = user.created_at
             
-            return date_to_use.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)') if date_to_use else "Date not available"
+            return date_to_use.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)') if date_to_use else None
         
         @self.formatter.register('userstatus')
         async def _userstatus(ctx, i, **kwargs):
@@ -4908,7 +4908,7 @@ class Tags(commands.Cog):
             user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
                 return str(user.status.value).capitalize()
-            return "User is not in a server."
+            return None
         
         @self.formatter.register('usercustomstatus')
         async def _usercustomstatus(ctx, i, **kwargs):
@@ -4919,7 +4919,7 @@ class Tags(commands.Cog):
             """
             user = await self.formatter.resolve_user(ctx, i)
             if not isinstance(user, discord.Member):
-                return "User not in this server."
+                return None
             
             activities = []
             for activity in user.activities:
@@ -4949,7 +4949,7 @@ class Tags(commands.Cog):
                     activities.append(f"Playing {activity.name}")
             
             if not activities:
-                return f"{user.name} has no activities at this time."
+                return None
             
             return " | ".join(activities)
         
@@ -4966,7 +4966,7 @@ class Tags(commands.Cog):
             elif isinstance(user, discord.User):
                 badges = user.public_flags
             else:
-                return "User not found."
+                return None
             badge_names = []
 
             if badges.staff:
@@ -5001,7 +5001,7 @@ class Tags(commands.Cog):
             if badge_names:
                 return ", ".join(badge_names)
             else:
-                return "No badges found."
+                return None
         
         @self.formatter.register('randuser')
         async def _randuser(ctx, user, **kwargs):
@@ -5013,7 +5013,7 @@ class Tags(commands.Cog):
             if ctx.guild:
                 random_user = random.choice(ctx.guild.members)
                 return random_user.name
-            return "This tag function can only be used in a server."
+            return None
         
         @self.formatter.register('randuserid')
         async def _randuserid(ctx, user, **kwargs):
@@ -5025,7 +5025,7 @@ class Tags(commands.Cog):
             if ctx.guild:
                 random_user = random.choice(ctx.guild.members)
                 return random_user.id
-            return "This tag function can only be used in a server."
+            return None
         
         @self.formatter.register('channel')
         async def _channel(ctx, i, **kwargs):
@@ -5053,7 +5053,7 @@ class Tags(commands.Cog):
             elif isinstance(ctx.channel, discord.TextChannel):
                 return ctx.channel.id
             else:
-                return ctx.channel.id if ctx.channel else "Channel ID not available."
+                return ctx.channel.id if ctx.channel else None
         
         @self.formatter.register('guild')
         @self.formatter.register('server')
@@ -5081,9 +5081,9 @@ class Tags(commands.Cog):
             if ctx.guild:
                 return ctx.guild.id
             elif isinstance(ctx.guild, discord.DMChannel):
-                return "This tag function can only be used in a server."
+                return None
             else:
-                return "Server ID not available."
+                return None
 
         @self.formatter.register('embed')
         async def _embed(ctx, args_str, **kwargs):
