@@ -3,6 +3,8 @@ import io
 import textwrap
 import bot_info
 import datetime
+import time
+import psutil
 import logging
 import colorlog
 import asyncpg
@@ -15,7 +17,7 @@ import traceback
 import random
 
 
-
+uptime_start = datetime.datetime.now(datetime.timezone.utc)
 
 # If any videos were not deleted while the bot was last up, remove them
 vid_files = [f for f in os.listdir('vids') if os.path.isfile(os.path.join('vids', f))]
@@ -63,7 +65,7 @@ async def set_prefix(entity_id: int, prefix: str, is_guild: bool = True):
             return f"Prefix `{prefix}` is already set."
 
 
-extensions = ['cogs.audio', 'cogs.help', 'cogs.ping', 'cogs.caption', 'cogs.code', 'cogs.exif', 'cogs.ffmpeg', 'cogs.tutorial', 'cogs.imagemagick', 'cogs.ytdlp', 'cogs.info', 'cogs.ai', 'cogs.reminder', 'cogs.roblox', 'cogs.search', 'cogs.tags', 'cogs.media', 'cogs.moderation']
+extensions = ['cogs.audio', 'cogs.help', 'cogs.caption', 'cogs.code', 'cogs.exif', 'cogs.ffmpeg', 'cogs.tutorial', 'cogs.imagemagick', 'cogs.ytdlp', 'cogs.info', 'cogs.ai', 'cogs.reminder', 'cogs.roblox', 'cogs.search', 'cogs.tags', 'cogs.media', 'cogs.moderation']
 bot = commands.Bot(command_prefix=get_prefix, case_insensitive=True, strip_after_prefix=True, status=discord.Status.online, activity=discord.Game(name=f"{bot_info.data['prefix']}help"), help_command=None, intents=discord.Intents.all(), allowed_mentions=discord.AllowedMentions(users=False, roles=False, everyone=False, replied_user=True))
 
 
@@ -298,6 +300,30 @@ async def on_guild_unavailable(guild):
 async def on_guild_available(guild):
     logger = logging.getLogger()
     logger.info(f"Guild available: {guild.name} (ID: {guild.id})")
+
+
+@bot.hybrid_command(name="ping", description="Check the bot's latency.")
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+async def ping(ctx: commands.Context):
+    ws_latency = round(bot.latency * 1000)
+    start_time = time.perf_counter()
+    message = await ctx.send("Pinging...")
+    end_time = time.perf_counter()
+    api_response_time = round((end_time - start_time) * 1000)
+    current_time = datetime.datetime.now(datetime.timezone.utc)
+    uptime = current_time - uptime_start
+    days = uptime.days
+    hours, remainder = divmod(uptime.seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    cpu_usage = psutil.cpu_percent()
+    memory_info = psutil.virtual_memory()
+    memory_usage = round(memory_info.used / (1024 ** 2))
+    memory_total = round(memory_info.total / (1024 ** 2))
+
+    content = f"Pong!\nGateway: {ws_latency}ms\nAPI: {api_response_time}ms\nUptime: {days}d {hours}h {minutes}m {seconds}s\nCPU Usage: {cpu_usage}%\nMemory Usage: {memory_usage} MB / {memory_total} MB"
+
+    await message.edit(content=content)
 
 
 @bot.command(name="sync", description="Sync slash commands.")
