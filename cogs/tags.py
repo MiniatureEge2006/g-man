@@ -7,7 +7,7 @@ import bot_info
 import operator
 import asyncio
 import ast
-from typing import Any, Callable, Dict, Set, Union
+from typing import Any, Callable, Dict, List, Set, Union
 import aiohttp
 import yt_dlp
 import os
@@ -6106,6 +6106,54 @@ class Tags(commands.Cog):
             personal = True
             content = content.replace("--personal", "").strip()
         return content, personal
+    
+    @app_commands.autocomplete()
+    async def tag_name_autocomplete(
+        self,
+        interaction: discord.Interaction,
+        current: str
+    ) -> List[app_commands.Choice[str]]:
+        cog = interaction.client.get_cog("Tags")
+        if not cog:
+            return []
+            
+        async with cog.pool.acquire() as conn:
+            if interaction.namespace.personal:
+                query = """
+                    SELECT name AS tag_name, NULL AS alias FROM tags
+                    WHERE user_id = $1 AND name ILIKE $2
+                    
+                    UNION ALL
+                    
+                    SELECT alias, tag_name FROM tag_aliases
+                    WHERE user_id = $1 AND alias ILIKE $2
+                    """
+                rows = await conn.fetch(query, interaction.user.id, f"%{current}%")
+            else:
+                if not interaction.guild:
+                    return []
+                query = """
+                    SELECT name AS tag_name, NULL AS alias FROM tags 
+                    WHERE guild_id = $1 AND name ILIKE $2
+
+                    UNION ALL
+
+                    SELECT alias, tag_name FROM tag_aliases
+                    WHERE guild_id = $1 AND alias ILIKE $2
+                    """
+                rows = await conn.fetch(query, interaction.guild.id, f"%{current}%")
+            
+        choices = []
+        for row in rows:
+            tag_name = row["tag_name"]
+            alias = row["alias"]
+            if alias is None:
+                display = tag_name
+            else:
+                display = f"{alias} ({tag_name})"
+            choices.append(app_commands.Choice(name=display, value=alias or tag_name))
+            
+        return choices[:25]
 
     
     @commands.hybrid_group(name="tag", description="Tag management commands.", invoke_without_command=True, with_app_command=True, aliases=["t"])
@@ -6244,6 +6292,14 @@ class Tags(commands.Cog):
                 except discord.HTTPException as e:
                     await ctx.send(f"Failed to send tag: {e}")
     
+    @show.autocomplete("name")
+    async def autocomplete_tag_show_name(
+        self,
+        interaction: discord.Interaction,
+        current: str
+    ):
+        return await self.tag_name_autocomplete(interaction, current)
+    
     @tag.command(name="create", description="Create a tag.", with_app_command=True, aliases=["add"])
     @app_commands.describe(
         name="The tag name.", 
@@ -6337,6 +6393,14 @@ class Tags(commands.Cog):
 
             await ctx.send(f"No editable tag named `{name}` found.")
     
+    @edit.autocomplete("name")
+    async def autocomplete_tag_edit_name(
+        self,
+        interaction: discord.Interaction,
+        current: str
+    ):
+        return await self.tag_name_autocomplete(interaction, current)
+    
     @tag.command(name="rename", description="Rename a tag.", with_app_command=True)
     @app_commands.describe(
         old_name="The current tag name.",
@@ -6408,6 +6472,14 @@ class Tags(commands.Cog):
 
         await ctx.send(f"Renamed tag from `{old_name}` to `{new_name}`")
     
+    @rename.autocomplete("old_name")
+    async def autocomplete_tag_rename_name(
+        self,
+        interaction: discord.Interaction,
+        current: str
+    ):
+        return await self.tag_name_autocomplete(interaction, current)
+    
     @tag.command(name="delete", description="Delete a tag.", with_app_command=True, aliases=["remove", "rm", "del"])
     @app_commands.describe(
         name="The tag name.",
@@ -6451,6 +6523,14 @@ class Tags(commands.Cog):
 
             await ctx.send(f"No deletable tag `{name}` found.")
     
+    @delete.autocomplete("name")
+    async def autocomplete_tag_delete_name(
+        self,
+        interaction: discord.Interaction,
+        current: str
+    ):
+        return await self.tag_name_autocomplete(interaction, current)
+    
     @tag.command(name="list", description="List available tags.", with_app_command=True, aliases=["ls"])
     async def list(self, ctx: commands.Context, personal: bool = False):
         await ctx.typing()
@@ -6474,7 +6554,7 @@ class Tags(commands.Cog):
                 return await ctx.send(f"No {'personal' if personal else 'server'} tags found.")
             
             embed = discord.Embed(title=title, color=discord.Color.blue())
-            embed.description = "\n".join(f"• {tag['name']}" for tag in tags)
+            embed.description = "\n".join(f"- {tag['name']}" for tag in tags)
             await ctx.send(embed=embed)
     
     @tag.command(name="info", description="Get information about a tag.", with_app_command=True)
@@ -6510,6 +6590,14 @@ class Tags(commands.Cog):
             
             await ctx.send(embed=embed)
     
+    @info.autocomplete("name")
+    async def autocomplete_tag_info_name(
+        self,
+        interaction: discord.Interaction,
+        current: str
+    ):
+        return await self.tag_name_autocomplete(interaction, current)
+    
     @tag.command(name="raw", description="Get the raw content of a tag.", with_app_command=True)
     @app_commands.describe(
         name="The tag name.",
@@ -6532,6 +6620,14 @@ class Tags(commands.Cog):
                 return await ctx.send(f"Tag `{name}` not found.")
             
             await ctx.send(f"```\n{tag['content']}```")
+    
+    @raw.autocomplete("name")
+    async def autocomplete_tag_raw_name(
+        self,
+        interaction: discord.Interaction,
+        current: str
+    ):
+        return await self.tag_name_autocomplete(interaction, current)
     
     @tag.command(name="transfer", description="Transfer ownership of a personal tag.", with_app_command=True, aliases=["gift"])
     @app_commands.describe(name="The tag name.", new_owner="The user to transfer to.")
@@ -6687,7 +6783,7 @@ class Tags(commands.Cog):
                     return await ctx.send(f"No {scope_type} tag aliases found.")
                 
                 embed = discord.Embed(title=title, color=discord.Color.blue())
-                embed.description = "\n".join(f"• `{a['alias']}` -> `{a['tag_name']}`" for a in aliases)
+                embed.description = "\n".join(f"- `{a['alias']}` -> `{a['tag_name']}`" for a in aliases)
                 await ctx.send(embed=embed)
                 
             except Exception as e:
