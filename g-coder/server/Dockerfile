@@ -42,7 +42,7 @@ RUN npm install -g typescript ts-node @types/node yarn mathjs
 USER gcoder
 RUN mkdir -p /home/gcoder && \
     cd /home/gcoder && \
-    git clone --single-branch --branch 0.8.5 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git && \
+    git clone --single-branch --branch 1.1.0 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git && \
     cd bgutil-ytdlp-pot-provider/server/ && \
     yarn install --frozen-lockfile && \
     npx tsc
@@ -53,8 +53,10 @@ COPY . /app
 
 
 RUN mkdir -p /app/executions && chown gcoder:gcoder /app/executions && chmod 775 /app/executions/
-
-
+USER root
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+USER gcoder
 EXPOSE 8000
 
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/entrypoint.sh"]
