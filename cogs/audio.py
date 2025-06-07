@@ -242,7 +242,7 @@ class Audio(commands.Cog):
             if query:
                 youtube_url = await self.search_youtube(query[0])
                 if youtube_url:
-                    url = youtube_url
+                    url = youtube_url['url']
                 else:
                     await ctx.send("Could not find any YouTube video for this Spotify track.")
                     return
@@ -553,7 +553,7 @@ class Audio(commands.Cog):
             if query:
                 youtube_url = await self.search_youtube(query[0])
                 if youtube_url:
-                    url = youtube_url
+                    url = youtube_url['url']
                 else:
                     await ctx.send("Could not find any YouTube video for this Spotify track.")
                     return
@@ -828,6 +828,18 @@ class Audio(commands.Cog):
     async def get_title(self, url):
         if url in self.metadata_cache:
             return self.metadata_cache.get(url, {}).get('title', 'Unknown Title')
+        
+        try:
+            def sync_extract():
+                with yt_dlp.YoutubeDL({'extract_flat': True}) as ydl:
+                    return ydl.extract_info(url, download=False)
+            
+            info = await self.run_in_executor(sync_extract)
+            title = info.get('title', 'Unknown Title')
+            self.metadata_cache[url] = info
+            return title
+        except Exception:
+            return url
 
     @commands.hybrid_command(name="queue", description="Display the current queue.")
     @app_commands.allowed_installs(guilds=True, users=False)
