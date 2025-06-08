@@ -80,9 +80,16 @@ class Audio(commands.Cog):
         else:
             await ctx.send("You are not connected to a voice channel.")
             return False
+    
+    def clean_spotify_url(self, url: str) -> str:
+        parsed = urlparse(url)
+        path_parts = [part for part in parsed.path.split('/') if not part.startswith('intl-')]
+        base_path = '/'.join(path_parts)
+        return f"{parsed.scheme}://{parsed.netloc}{base_path}"
 
     async def process_spotify_url(self, url: str) -> list:
         try:
+            url = self.clean_spotify_url(url)
             if 'track' in url:
                 track = await self.run_in_executor(spotify.track, url)
                 return [f"{track['name']} {track['artists'][0]['name']}"]
@@ -840,7 +847,11 @@ class Audio(commands.Cog):
         
         try:
             def sync_extract():
-                with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True, 'extract_flat': True}) as ydl:
+                opts = {
+                    **YDL_OPTIONS,
+                    'extract_flat': True
+                }
+                with yt_dlp.YoutubeDL(opts) as ydl:
                     return ydl.extract_info(url, download=False)
             
             info = await self.run_in_executor(sync_extract)
