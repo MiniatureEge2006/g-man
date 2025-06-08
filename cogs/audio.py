@@ -371,10 +371,14 @@ class Audio(commands.Cog):
             return result['url']
 
     async def play_stream_from_position(self, ctx: commands.Context, url: str, filters, position: float):
-        def sync_extract_info():
-            with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-                return ydl.extract_info(url, download=False)
-        info = await self.run_in_executor(sync_extract_info)
+        current_data = self.currently_playing.get(ctx.guild.id)
+        if not current_data or 'info' not in current_data:
+            def sync_extract_info():
+                with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+                    return ydl.extract_info(url, download=False)
+            info = await self.run_in_executor(sync_extract_info)
+        else:
+            info = current_data['info']
         stream_url = self.get_valid_stream_url(info)
         before_options = f"-ss {position}"
         ffmpeg_options = {
@@ -395,10 +399,14 @@ class Audio(commands.Cog):
         }
 
     async def play_audio_from_position(self, ctx: commands.Context, url: str, filters, position: float):
-        def sync_extract_info():
-            with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-                return ydl.extract_info(url, download=True)
-        info = await self.run_in_executor(sync_extract_info)
+        current_data = self.currently_playing.get(ctx.guild.id)
+        if not current_data or 'info' not in current_data:
+            def sync_extract_info():
+                with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+                    return ydl.extract_info(url, download=True)
+            info = await self.run_in_executor(sync_extract_info)
+        else:
+            info = current_data['info']
         file_path = yt_dlp.YoutubeDL(YDL_OPTIONS).prepare_filename(info)
         before_options = f"-ss {position}"
         ffmpeg_options = {
@@ -596,7 +604,7 @@ class Audio(commands.Cog):
         embed = discord.Embed(
             title=f"Streaming - {info['title']}",
             description=f"URL: {info['webpage_url']}",
-            color=discord.Color.green(),
+            color=discord.Color.blurple(),
             timestamp=discord.utils.utcnow()
         )
         raw_date = info.get('upload_date')
@@ -650,7 +658,8 @@ class Audio(commands.Cog):
         current_data['start_time'] = datetime.now()
         url = current_data['url']
         filters = current_data['filters']
-        if url.startswith("http"):
+        is_stream = current_data.get('is_stream', False)
+        if is_stream:
             await self.play_stream_from_position(ctx, url, filters, new_pos)
         else:
             await self.play_audio_from_position(ctx, url, filters, new_pos)
@@ -765,7 +774,7 @@ class Audio(commands.Cog):
                 embed = discord.Embed(
                     title=f"Currently {'Playing' if not is_stream else 'Streaming'} - {info['title'] if info['title'] else 'Unknown'}",
                     description=f"URL: {info['webpage_url'] if info['webpage_url'] else 'Unknown'}",
-                    color=discord.Color.og_blurple() if not is_stream else discord.Color.green(),
+                    color=discord.Color.og_blurple() if not is_stream else discord.Color.blurple(),
                     timestamp=discord.utils.utcnow()
                 )
                 raw_date = info.get('upload_date')
@@ -831,7 +840,7 @@ class Audio(commands.Cog):
         
         try:
             def sync_extract():
-                with yt_dlp.YoutubeDL({'extract_flat': True}) as ydl:
+                with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True, 'extract_flat': True}) as ydl:
                     return ydl.extract_info(url, download=False)
             
             info = await self.run_in_executor(sync_extract)
@@ -869,13 +878,7 @@ class Audio(commands.Cog):
                     return False
                 return True
             async def on_timeout(self):
-                if not self.disabled:
-                    for item in self.children:
-                        item.disabled = True
-                    try:
-                        await self.message.edit(view=self)
-                    except discord.NotFound:
-                        pass
+                await self.message.edit(view=None)
             def create_embed(self):
                 start_idx = self.current_page * ITEMS_PER_PAGE
                 end_idx = min((self.current_page + 1) * ITEMS_PER_PAGE, len(self.queue))
