@@ -11,26 +11,31 @@ from pathlib import Path
 import traceback
 
 APP_USER = "gcoder"
-EXECUTION_ROOT = Path("/app/executions")
+EXECUTION_DIR = Path("/home/gcoder/executions")
+INPUT_DIR = EXECUTION_DIR / "input"
+OUTPUT_DIR = EXECUTION_DIR / "output"
 ALLOWED_LANGUAGES = ["bash", "python", "javascript", "typescript", "php", "ruby", "lua", "go", "rust", "c", "cpp", "csharp", "zig", "java", "kotlin"]
 
-def setup_environment():
-    EXECUTION_ROOT.mkdir(mode=0o700, exist_ok=True)
+def ensure_dirs():
+    EXECUTION_DIR.mkdir(mode=0o700, exist_ok=True)
+    INPUT_DIR.mkdir(mode=0o700, exist_ok=True)
+    OUTPUT_DIR.mkdir(mode=0o700, exist_ok=True)
+    
     if os.getuid() == 0:
-        os.chown(EXECUTION_ROOT, 1000, 1000)
+        os.chown(EXECUTION_DIR, 1000, 1000)
+        os.chown(INPUT_DIR, 1000, 1000)
+        os.chown(OUTPUT_DIR, 1000, 1000)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    setup_environment()
-    for dir_name in os.listdir(EXECUTION_ROOT):
-        dir_path = EXECUTION_ROOT / dir_name
-        if dir_path.is_dir():
-            safe_delete(dir_path)
+    ensure_dirs()
     yield
 
 app = FastAPI(lifespan=lifespan)
 
 def safe_delete(path: Path):
+    if path in [INPUT_DIR, OUTPUT_DIR]:
+        return False
     for _ in range(3):
         try:
             if path.exists():
@@ -50,10 +55,13 @@ async def validate_file(file: UploadFile):
         raise HTTPException(400, detail="Invalid filename")
 
 async def execute_code(language: str, code: str, files: List[UploadFile]):
-    work_dir = EXECUTION_ROOT / "work"
-    if work_dir.exists():
-        safe_delete(work_dir)
-    work_dir.mkdir(mode=0o700)
+    ensure_dirs()
+    work_dir = EXECUTION_DIR
+    for item in work_dir.iterdir():
+        if item.name not in ['input', 'output'] and item.is_dir():
+            safe_delete(item)
+        elif item.name not in ['input', 'output'] and item.is_file():
+            item.unlink(missing_ok=True)
 
     saved_files = []
     for file in files:
@@ -85,7 +93,7 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
         output = ""
         return_code = 1
         if language == "bash":
-            output, return_code = await run_with_timeout(['bash', '-c', f"cd '{work_dir}' && {code}"])
+            output, return_code = await run_with_timeout(['bash', '-c', code])
         elif language in ["javascript", "typescript"]:
             if language == "typescript":
                 script_path = work_dir / "script.ts"
@@ -209,35 +217,12 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
             else:
                 output, return_code = await run_with_timeout(['java', '-jar', str(compile_jar)], cwd=work_dir)
 
-        TEMP_FILES = {
-            "zig": ["main.zig"],
-            "go": ["main.go"],
-            "rust": ["main.rs", "main"],
-            "c": ["main.c", "main"],
-            "cpp": ["main.cpp", "main"],
-            "csharp": ["Program.cs", "Program.exe"],
-            "typescript": ["tsconfig.json", "script.ts"],
-            "javascript": [],
-            "python": ["__pycache__"],
-            "php": [],
-            "ruby": [],
-            "lua": [],
-            "bash": [],
-            "java": ["Main.java", "Main.class"],
-            "kotlin": ["Main.kt", "main.jar"]
-        }
-
-        excluded_files = TEMP_FILES.get(language, [])
-        output_files = [
-            f for f in os.listdir(work_dir)
-            if f not in saved_files and (work_dir / f).is_file()
-        ]
-        final_files = [f for f in output_files if f not in excluded_files]
+        ensure_dirs()
+        final_files = [f for f in os.listdir(OUTPUT_DIR) if f not in saved_files and (OUTPUT_DIR / f).is_file()]
 
         return {
             "output": output.strip(),
             "files": final_files,
-            "execution_id": "work",
             "error": return_code != 0
         }
 
@@ -245,6 +230,8 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
         safe_delete(work_dir)
         print(f"Code execution Error: {traceback.format_exc()}")
         raise HTTPException(500, detail=f"Code execution failed: {str(e)}")
+    finally:
+        ensure_dirs()
 
 
 @app.post("/{language}/execute")
@@ -263,7 +250,8 @@ async def get_file(
     filename: str,
     background_tasks: BackgroundTasks
 ):
-    file_path = EXECUTION_ROOT / "work" / filename
+    ensure_dirs()
+    file_path = OUTPUT_DIR / filename
     if not file_path.exists():
         raise HTTPException(404, detail="File not found.")
 
@@ -277,10 +265,13 @@ async def get_file(
 
 @app.get("/health")
 async def health_check():
+    ensure_dirs()
     return {
         "status": "healthy",
         "user": APP_USER,
         "uid": os.getuid(),
-        "execution_root": str(EXECUTION_ROOT),
-        "is_empty": len(list(EXECUTION_ROOT.iterdir())) == 0
+        "execution_dir": str(EXECUTION_DIR),
+        "input_dir_exists": INPUT_DIR.exists(),
+        "output_dir_exists": OUTPUT_DIR.exists(),
+        "is_empty": len(list(EXECUTION_DIR.iterdir())) == 0
     }

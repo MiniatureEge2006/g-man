@@ -9,7 +9,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./executions:/app/executions
+      - ./executions:/home/gcoder/executions
     environment:
       - FILE_RETENTION_MINUTES=30
     healthcheck:

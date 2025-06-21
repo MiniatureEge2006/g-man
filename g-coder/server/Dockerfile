@@ -41,20 +41,24 @@ RUN pip install numpy requests pillow bgutil-ytdlp-pot-provider
 RUN pip install --pre -U "yt-dlp[default]"
 RUN npm install -g typescript ts-node @types/node yarn mathjs
 USER gcoder
-RUN mkdir -p /home/gcoder && \
+RUN mkdir -p /home/gcoder/executions && \
+    mkdir -p /home/gcoder/executions/input && \
+    mkdir -p /home/gcoder/executions/output && \
+    chmod 775 /home/gcoder/executions && \
     cd /home/gcoder && \
     git clone --single-branch --branch 1.1.0 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git && \
     cd bgutil-ytdlp-pot-provider/server/ && \
     yarn install --frozen-lockfile && \
     npx tsc
 
-WORKDIR /app
-
-COPY . /app
-
-
-RUN mkdir -p /app/executions && chown gcoder:gcoder /app/executions && chmod 775 /app/executions/
 USER root
+RUN mkdir -p /app && \
+    chown -R root:root /app && \
+    chmod -R 555 /app && \
+    chmod -R 555 /home/gcoder/bgutil-ytdlp-pot-provider
+COPY --chown=gcoder:gcoder . /app
+
+
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 USER gcoder
