@@ -62,7 +62,7 @@ class Ytdlp(commands.Cog):
                 urls = [url] if url.startswith(('ytsearch', 'ytsearch:')) else url.split()
                 ytsearch_match = re.match(r'^ytsearch(\d+):', url)
                 is_multiple_videos = len(urls) > 1 or (ytsearch_match and int(ytsearch_match.group(1)) > 1)
-                max_size = self.get_max_file_size(ctx.guild.premium_subscription_count if ctx.guild else 0)
+                max_size = ctx.filesize_limit
                 start_time = time.time()
                 results = {
                     'success': [],
@@ -556,14 +556,6 @@ class Ytdlp(commands.Cog):
             i += 1
         return parsed_opts
     
-
-    def get_max_file_size(self, boost_count: int) -> int:
-        if boost_count >= 14:
-            return 100 * 1024 * 1024 # 100 MB
-        elif boost_count >= 7:
-            return 50 * 1024 * 1024 # 50 MB
-        else:
-            return 10 * 1024 * 1024 # 10 MB
     
     def human_readable_size(self, size: int) -> str:
         for unit in ["B", "KiB", "MiB", "GiB", "TiB"]:

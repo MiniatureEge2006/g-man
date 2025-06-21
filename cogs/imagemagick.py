@@ -53,8 +53,7 @@ class ImageMagick(commands.Cog):
                 await ctx.send(f"ImageMagick failed: ```{error_message}```")
                 return
             file_size = os.path.getsize(output_file)
-            boost_count = ctx.guild.premium_subscription_count if ctx.guild else 0
-            max_size = self.get_max_file_size(boost_count)
+            max_size = ctx.filesize_limit
             if file_size > max_size:
                 raise commands.CommandError(f"File is too large to send. (Size: {file_size} bytes/{self.human_readable_size(file_size)}, Max Size: {max_size} bytes/{self.human_readable_size(max_size)})")
             if os.path.exists(output_file):
@@ -101,14 +100,6 @@ class ImageMagick(commands.Cog):
         parsed_url = urlparse(url)
         filename = Path(parsed_url.path).name
         return filename
-    
-    def get_max_file_size(self, boost_count: int) -> int:
-        if boost_count >= 14:
-            return 100 * 1024 * 1024 # 100 MB
-        elif boost_count >= 7:
-            return 50 * 1024 * 1024 # 50 MB
-        else:
-            return 10 * 1024 * 1024 # 10 MB
     
     def human_readable_size(self, size: int) -> str:
         for unit in ["B", "KiB", "MiB", "GiB", "TiB"]:
