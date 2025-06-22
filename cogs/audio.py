@@ -36,6 +36,7 @@ class Audio(commands.Cog):
         self.original_queues = {}
         self.metadata_cache = {}
         self.executor = ThreadPoolExecutor(max_workers=4)
+        self.paused_times = {}
 
     def get_queue(self, guild_id):
         if guild_id not in self.queues:
@@ -767,7 +768,7 @@ class Audio(commands.Cog):
     @app_commands.allowed_installs(guilds=True, users=False)
     async def nowplaying(self, ctx: commands.Context):
         await ctx.typing()
-        if ctx.voice_client and ctx.voice_client.is_playing():
+        if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
             current = self.currently_playing.get(ctx.guild.id)
             if current:
                 info = current['info']
@@ -775,13 +776,22 @@ class Audio(commands.Cog):
                 is_stream = current['is_stream']
                 start_time = current.get('start_time', datetime.now())
                 elapsed = (datetime.now() - start_time).total_seconds()
+                if ctx.guild.id in self.paused_times:
+                    pause_duration = (datetime.now() - self.paused_times[ctx.guild.id]).total_seconds()
+                    elapsed -= pause_duration
                 current_pos = elapsed + current.get('position', 0)
                 duration = info.get('duration', 0)
                 formatted_position = f"{self.format_time(current_pos)} / {self.format_time(duration)}"
+                if ctx.voice_client.is_paused():
+                    status = "Paused"
+                    color = discord.Color.dark_grey()
+                else:
+                    status = "Playing" if not is_stream else "Streaming"
+                    color = discord.Color.og_blurple() if not is_stream else discord.Color.blurple()
                 embed = discord.Embed(
-                    title=f"Currently {'Playing' if not is_stream else 'Streaming'} - {info['title'] if info['title'] else 'Unknown'}",
+                    title=f"Currently {status} - {info['title'] if info['title'] else 'Unknown'}",
                     description=f"URL: {info['webpage_url'] if info['webpage_url'] else 'Unknown'}",
-                    color=discord.Color.og_blurple() if not is_stream else discord.Color.blurple(),
+                    color=color,
                     timestamp=discord.utils.utcnow()
                 )
                 raw_date = info.get('upload_date')
@@ -1012,6 +1022,7 @@ class Audio(commands.Cog):
     async def pause(self, ctx: commands.Context):
         await ctx.typing()
         if ctx.voice_client and ctx.voice_client.is_playing() and ctx.author.voice and ctx.author.voice.channel == ctx.voice_client.channel:
+            self.paused_times[ctx.guild.id] = datetime.now()
             ctx.voice_client.pause()
             await ctx.send("Paused playback.")
         elif ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
@@ -1024,6 +1035,12 @@ class Audio(commands.Cog):
     async def resume(self, ctx: commands.Context):
         await ctx.typing()
         if ctx.voice_client and ctx.voice_client.is_paused() and ctx.author.voice and ctx.author.voice.channel == ctx.voice_client.channel:
+            if ctx.guild.id in self.paused_times:
+                pause_duration = datetime.now() - self.paused_times[ctx.guild.id]
+                current = self.currently_playing.get(ctx.guild.id)
+                if current:
+                    current['start_time'] += pause_duration
+                del self.paused_times[ctx.guild.id]
             ctx.voice_client.resume()
             await ctx.send("Resumed playback.")
         elif ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
