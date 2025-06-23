@@ -330,7 +330,7 @@ class Info(commands.Cog):
             color=discord.Color.blue(),
             timestamp=discord.utils.utcnow()
         )
-        embed.set_thumbnail(url=guild.icon.url if guild.icon else "")
+        embed.set_thumbnail(url=guild.icon.url if guild.icon else None)
         embed.add_field(name="ID", value=guild.id, inline=True)
         embed.add_field(name="Owner", value=guild.owner.mention if guild.owner else "Unknown", inline=True)
         embed.add_field(name="Owner ID", value=guild.owner_id, inline=True)
@@ -365,15 +365,15 @@ class Info(commands.Cog):
         embed.add_field(name="ID", value=channel.id, inline=True)
         embed.add_field(name="Name", value=channel.name, inline=True)
         embed.add_field(name="Type", value=str(channel.type).capitalize(), inline=True)
-        embed.add_field(name="Category", value=channel.category.name if channel.category else "None", inline=True)
+        embed.add_field(name="Category", value=channel.category.name if channel.category else None, inline=True)
         embed.add_field(name="Topic", value=channel.topic if channel.topic else "No topic", inline=False)
-        embed.add_field(name="Slowmode Delay", value=f"{channel.slowmode_delay} seconds" if channel.slowmode_delay else "None", inline=True)
+        embed.add_field(name="Slowmode Delay", value=f"{channel.slowmode_delay} seconds" if channel.slowmode_delay else None, inline=True)
         embed.add_field(name="NSFW?", value=channel.is_nsfw(), inline=True)
         embed.add_field(name="Permissions Synced?", value=channel.permissions_synced, inline=True)
         embed.add_field(name="Position", value=f"{channel.position}/{len(channel.guild.channels)}", inline=True)
         embed.add_field(name="Members", value=len(channel.members), inline=False)
         embed.add_field(name="Last Message ID", value=channel.last_message_id, inline=True)
-        embed.add_field(name="Last Message Timestamp", value=channel.last_message.created_at.strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)") if channel.last_message else "None", inline=True)
+        embed.add_field(name="Last Message Timestamp", value=channel.last_message.created_at.strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)") if channel.last_message else None, inline=True)
         embed.add_field(name="Created At", value=channel.created_at.strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)"), inline=True)
         embed.set_author(name=channel.name, icon_url=channel.guild.icon.url if channel.guild.icon else None, url=f"https://discord.com/channels/{channel.guild.id}/{channel.id}")
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
@@ -401,12 +401,12 @@ class Info(commands.Cog):
         embed.add_field(name="User Limit", value=channel.user_limit or "Unlimited", inline=True)
         embed.add_field(name="Region", value=channel.rtc_region, inline=True)
         embed.add_field(name="NSFW?", value=channel.is_nsfw(), inline=True)
-        embed.add_field(name="Connected Members", value=", ".join([member.mention for member in channel.members]) or "None", inline=False)
+        embed.add_field(name="Connected Members", value=", ".join([member.mention for member in channel.members]) or None, inline=False)
         embed.add_field(name="Created At", value=channel.created_at.strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)"), inline=True)
         embed.add_field(name="Permissions Synced?", value=channel.permissions_synced, inline=True)
         embed.add_field(name="Position", value=f"{channel.position}/{len(channel.guild.channels)}", inline=True)
-        embed.add_field(name="Last Message ID", value=channel.last_message_id if channel.last_message else "None", inline=True)
-        embed.add_field(name="Last Message Timestamp", value=channel.last_message.created_at.strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)") if channel.last_message else "None", inline=True)
+        embed.add_field(name="Last Message ID", value=channel.last_message_id if channel.last_message else None, inline=True)
+        embed.add_field(name="Last Message Timestamp", value=channel.last_message.created_at.strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)") if channel.last_message else None, inline=True)
         embed.set_author(name=channel.name, icon_url=channel.members[0].display_avatar.url if channel.members else channel.guild.icon.url, url=f"https://discord.com/users/{channel.members[0].id}" if channel.members else f"https://discord.com/channels/{channel.guild.id}/{channel.id}")
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
@@ -441,13 +441,27 @@ class Info(commands.Cog):
         embed.add_field(name="ID", value=message.id, inline=True)
         embed.add_field(name="Author", value=message.author.mention, inline=True)
         embed.add_field(name="Channel", value=message.channel.mention, inline=True)
-        embed.add_field(name="Content", value=message.content or "None", inline=False)
+        embed.add_field(name="Content", value=message.content or None, inline=False)
         embed.add_field(name="Created At", value=message.created_at.strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)"), inline=True)
-        embed.add_field(name="Edited At", value=message.edited_at.strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)") if message.edited_at else "None", inline=True)
-        embed.add_field(name="Attachments", value=", ".join([attachment.url for attachment in message.attachments]) or "None", inline=False)
-        embed.add_field(name="Embeds", value=", ".join([embed.title for embed in message.embeds]) or "None", inline=False)
-        embed.add_field(name="Reactions", value=", ".join([reaction.emoji for reaction in message.reactions]) or "None", inline=False)
-        embed.add_field(name="Mentions", value=", ".join([mention.mention for mention in message.mentions]) or "None", inline=False)
+        embed.add_field(name="Edited At", value=message.edited_at.strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)") if message.edited_at else None, inline=True)
+        embed.add_field(name="Attachments", value=", ".join([attachment.url for attachment in message.attachments]) or None, inline=False)
+        embed_titles = []
+        for e in message.embeds:
+            if e.title:
+                embed_titles.append(e.title)
+            elif e.description:
+                embed_titles.append(f"(Description: {e.description[:50]}...)")
+            elif e.url:
+                embed_titles.append(f"(URL: {e.url})")
+            elif hasattr(e, 'video') and e.video:
+                embed_titles.append("(Video Embed)")
+            elif hasattr(e, 'image') and e.image:
+                embed_titles.append("(Image Embed)")
+            else:
+                embed_titles.append("(Embed with no title)")
+        embed.add_field(name="Embeds", value=", ".join(embed_titles) or None, inline=False)
+        embed.add_field(name="Reactions", value=", ".join([reaction.emoji for reaction in message.reactions]) or None, inline=False)
+        embed.add_field(name="Mentions", value=", ".join([mention.mention for mention in message.mentions]) or None, inline=False)
         embed.set_author(name=f"{message.author.name}#{message.author.discriminator}", icon_url=message.author.display_avatar.url, url=f"https://discord.com/channels/{message.guild.id}/{message.channel.id}/{message.id}")
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
@@ -481,7 +495,7 @@ class Info(commands.Cog):
         )
 
         embed.add_field(name="ID", value=sticker.id, inline=True)  
-        embed.add_field(name="Guild", value=sticker.guild.name if sticker.guild else "None", inline=True)
+        embed.add_field(name="Guild", value=sticker.guild.name if sticker.guild else None, inline=True)
         if sticker.description:
             embed.add_field(name="Description", value=sticker.description, inline=False)
         embed.add_field(name="Created At", value=sticker.created_at.strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)"), inline=True)
@@ -500,7 +514,7 @@ class Info(commands.Cog):
             color=discord.Color.dark_purple(),
             timestamp=discord.utils.utcnow()
         )
-        embed.add_field(name="Guild", value=invite.guild.name if invite.guild else "None", inline=True)
+        embed.add_field(name="Guild", value=invite.guild.name, inline=True)
         embed.add_field(name="Channel", value=invite.channel.name, inline=True)
         embed.add_field(name="Uses", value=f"{invite.uses}/{invite.max_uses}" if invite.max_uses else invite.uses, inline=True)
         embed.add_field(name="Inviter", value=invite.inviter.mention if invite.inviter else "Unknown", inline=True)
@@ -525,7 +539,7 @@ class Info(commands.Cog):
             color=discord.Color.red(),
             timestamp=discord.utils.utcnow()
         )
-        embed.add_field(name="Permissions", value=", ".join(permissions) or "None", inline=False)
+        embed.add_field(name="Permissions", value=", ".join(permissions) or None, inline=False)
         embed.set_author(name=f"{member.name}#{member.discriminator}", icon_url=member.display_avatar.url, url=f"https://discord.com/users/{member.id}")
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
@@ -567,7 +581,7 @@ class Info(commands.Cog):
             color=discord.Color.dark_red(),
             timestamp=discord.utils.utcnow()
         )
-        embed.add_field(name="Reason", value=ban_entry.reason or "None", inline=False)
+        embed.add_field(name="Reason", value=ban_entry.reason or None, inline=False)
         embed.set_author(name=f"{user.name}#{user.discriminator}", icon_url=user.avatar.url, url=f"https://discord.com/users/{user.id}")
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
