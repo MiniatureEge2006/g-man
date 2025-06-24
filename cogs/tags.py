@@ -39,6 +39,78 @@ VIDEO_TYPES = ('video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska',
 AUDIO_TYPES = ('audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/ogg', 'audio/opus', 'audio/flac', 'audio/x-matroska', 'audio/x-ms-wma')
 
 
+class TagPaginator(discord.ui.View):
+    def __init__(self, pages: List[discord.Embed], interaction: discord.Interaction):
+        super().__init__(timeout=60)
+        self.pages = pages
+        self.current_page = 0
+        self.interaction = interaction
+
+    async def update_message(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(embed=self.pages[self.current_page], view=self)
+
+    @discord.ui.button(label="⏮️", style=discord.ButtonStyle.blurple)
+    async def first_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page = 0
+        await self.update_message(interaction)
+
+    @discord.ui.button(label="⬅️", style=discord.ButtonStyle.blurple)
+    async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page > 0:
+            self.current_page -= 1
+            await self.update_message(interaction)
+
+    @discord.ui.button(label="➡️", style=discord.ButtonStyle.blurple)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page < len(self.pages) - 1:
+            self.current_page += 1
+            await self.update_message(interaction)
+
+    @discord.ui.button(label="⏭️", style=discord.ButtonStyle.blurple)
+    async def last_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page = len(self.pages) - 1
+        await self.update_message(interaction)
+
+    @discord.ui.button(label="🔢", style=discord.ButtonStyle.green)
+    async def jump_to_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = JumpToPageModal(paginator_view=self)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="🗑️", style=discord.ButtonStyle.red)
+    async def delete_message(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.message.delete()
+        self.stop()
+
+    @discord.ui.button(label="⏹️", style=discord.ButtonStyle.gray)
+    async def hide_components(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.message.edit(view=None)
+        self.stop()
+
+
+class JumpToPageModal(discord.ui.Modal, title="Jump to Page"):
+    def __init__(self, paginator_view: TagPaginator):
+        super().__init__()
+        self.paginator_view = paginator_view
+
+    page = discord.ui.TextInput(
+        label="Page Number",
+        placeholder="Enter the page number...",
+        required=True,
+        min_length=1,
+        max_length=5
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            page_number = int(self.page.value) - 1
+            if 0 <= page_number < len(self.paginator_view.pages):
+                self.paginator_view.current_page = page_number
+                await self.paginator_view.update_message(interaction)
+            else:
+                await interaction.response.send_message("Invalid page number.", ephemeral=True)
+        except ValueError:
+            await interaction.response.send_message("Please enter a valid number.", ephemeral=True)
+
 
 class DiscordGenerator:
     @staticmethod
@@ -6219,8 +6291,7 @@ class Tags(commands.Cog):
                         content=text[:2000] if text else None,
                         embeds=embeds[:10],
                         view=view if view and view.children else None,
-                        files=files[:10],
-                        allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=False, replied_user=True)
+                        files=files[:10]
                     )
                 except discord.HTTPException as e:
                     await ctx.send(f"Failed to send tag: {e}")
@@ -6286,8 +6357,7 @@ class Tags(commands.Cog):
                         content=text[:2000] if text else None,
                         embeds=embeds[:10],
                         view=view if view and view.children else None,
-                        files=files[:10],
-                        allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=False, replied_user=True)
+                        files=files[:10]
                     )
                 except discord.HTTPException as e:
                     await ctx.send(f"Failed to send tag: {e}")
@@ -6480,12 +6550,12 @@ class Tags(commands.Cog):
     ):
         return await self.tag_name_autocomplete(interaction, current)
     
-    @tag.command(name="delete", description="Delete a tag.", with_app_command=True, aliases=["remove", "rm", "del"])
+    @tag.command(name="remove", description="Remove a tag.", with_app_command=True, aliases=["rm", "delete", "del"])
     @app_commands.describe(
         name="The tag name.",
         personal="Whether this is a personal tag."
     )
-    async def delete(self, ctx: commands.Context, *, name: str, personal: bool = False):
+    async def remove(self, ctx: commands.Context, *, name: str, personal: bool = False):
         await ctx.typing()
         name, content_personal = self.parse_personal_flag(name)
         personal = personal or content_personal
@@ -6498,10 +6568,10 @@ class Tags(commands.Cog):
                     name, ctx.author.id
                 )
                 if deleted != "DELETE 0":
-                    return await ctx.send(f"Deleted personal tag `{name}`")
+                    return await ctx.send(f"Removed personal tag `{name}`")
             else:
                 if not ctx.guild:
-                    return await ctx.send("Server tags can only be deleted in servers.")
+                    return await ctx.send("Server tags can only be removed in servers.")
                 
 
                 deleted = await conn.execute(
@@ -6510,7 +6580,7 @@ class Tags(commands.Cog):
                     name, ctx.guild.id, ctx.author.id
                 )
                 if deleted != "DELETE 0":
-                    return await ctx.send(f"Deleted server tag `{name}`")
+                    return await ctx.send(f"Removed server tag `{name}`")
 
 
                 if ctx.author.guild_permissions.manage_messages:
@@ -6519,12 +6589,12 @@ class Tags(commands.Cog):
                         name, ctx.guild.id
                     )
                     if deleted != "DELETE 0":
-                        return await ctx.send(f"Forcefully deleted server tag `{name}`")
+                        return await ctx.send(f"Forcefully removed server tag `{name}`")
 
-            await ctx.send(f"No deletable tag `{name}` found.")
+            await ctx.send(f"No removeable tag `{name}` found.")
     
-    @delete.autocomplete("name")
-    async def autocomplete_tag_delete_name(
+    @remove.autocomplete("name")
+    async def autocomplete_tag_remove_name(
         self,
         interaction: discord.Interaction,
         current: str
@@ -6532,30 +6602,51 @@ class Tags(commands.Cog):
         return await self.tag_name_autocomplete(interaction, current)
     
     @tag.command(name="list", description="List available tags.", with_app_command=True, aliases=["ls"])
-    async def list(self, ctx: commands.Context, personal: bool = False):
+    @app_commands.describe(user="Filter tags by this user.", personal="Only show your personal tags.")
+    async def list(self, ctx: commands.Context, user: discord.User = None, personal: bool = False):
         await ctx.typing()
         async with self.pool.acquire() as conn:
+            target_user = user or ctx.author
             if personal:
+                if target_user.id != ctx.author.id:
+                    return await ctx.send("You can only view your own personal tags.")
                 tags = await conn.fetch(
                     "SELECT name FROM tags WHERE user_id = $1 ORDER BY name",
-                    ctx.author.id
+                    target_user.id
                 )
                 title = "Your personal tags"
             else:
                 if not ctx.guild:
                     return await ctx.send("Server tags can only be listed in servers.")
-                tags = await conn.fetch(
-                    "SELECT name FROM tags WHERE guild_id = $1 ORDER BY name",
-                    ctx.guild.id
-                )
-                title = f"Server tags in {ctx.guild.name}"
+                if user is None:
+                    tags = await conn.fetch(
+                        "SELECT name FROM tags WHERE guild_id IS NOT DISTINCT FROM $1 ORDER BY name",
+                        ctx.guild.id
+                    )
+                else:
+                    tags = await conn.fetch(
+                        "SELECT name FROM tags WHERE guild_id IS NOT DISTINCT FROM $1 AND author_id IS NOT DISTINCT FROM $2 ORDER BY name",
+                        ctx.guild.id, target_user.id
+                    )
+                if user:
+                    title = f"Tags created by {target_user} in {ctx.guild.name}"
+                else:
+                    title = f"Server tags in {ctx.guild.name}"
 
             if not tags:
                 return await ctx.send(f"No {'personal' if personal else 'server'} tags found.")
             
-            embed = discord.Embed(title=title, color=discord.Color.blue())
-            embed.description = "\n".join(f"- {tag['name']}" for tag in tags)
-            await ctx.send(embed=embed)
+            per_page = 10
+            pages = []
+            for i in range(0, len(tags), per_page):
+                embed = discord.Embed(title=title, color=discord.Color.blue())
+                for idx, tag in enumerate(tags[i:i+per_page], start=i + 1):
+                    embed.add_field(name=f"{idx}.", value=tag['name'], inline=False)
+                embed.set_footer(text=f"Page {i//per_page + 1} of {(len(tags)-1)//per_page + 1}")
+                pages.append(embed)
+            
+            view = TagPaginator(pages, ctx.interaction)
+            await ctx.send(embed=pages[0], view=view)
     
     @tag.command(name="info", description="Get information about a tag.", with_app_command=True)
     @app_commands.describe(
@@ -6586,7 +6677,7 @@ class Tags(commands.Cog):
             embed.add_field(name="Created", value=tag['created_at'].strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)"), inline=True)
             author = self.bot.get_user(tag['author_id'])
             if author:
-                embed.set_author(name=f"Created by {author}", icon_url=author.display_avatar.url, url=f"https://discord.com/users/{author.id}")
+                embed.set_author(name=f"Owned by {author}", icon_url=author.display_avatar.url, url=f"https://discord.com/users/{author.id}")
             
             await ctx.send(embed=embed)
     
@@ -6629,22 +6720,159 @@ class Tags(commands.Cog):
     ):
         return await self.tag_name_autocomplete(interaction, current)
     
-    @tag.command(name="transfer", description="Transfer ownership of a personal tag.", with_app_command=True, aliases=["gift"])
-    @app_commands.describe(name="The tag name.", new_owner="The user to transfer to.")
-    async def transfer(self, ctx: commands.Context, name: str, new_owner: discord.User):
+    @tag.command(name="transfer", description="Transfer ownership of a tag (server or personal).", with_app_command=True, aliases=["gift"])
+    @app_commands.describe(name="The tag name.", new_owner="The user to transfer to.", personal="Whether this is a personal tag.")
+    async def transfer(self, ctx: commands.Context, name: str, new_owner: discord.User, personal: bool = False):
         await ctx.typing()
         name = name.lower()
-        async with self.pool.acquire() as conn:
-            updated = await conn.execute(
-                """UPDATE tags SET user_id = $1
-                WHERE name = $2 AND user_id = $3""",
-                new_owner.id, name, ctx.author.id
-            )
+        name, flag_from_name = self.parse_personal_flag(name)
+        personal = personal or flag_from_name
 
-            if updated == "UPDATED 0":
-                await ctx.send(f"No personal tag `{name}` found that you own.")
+        async with self.pool.acquire() as conn:
+            tag = await conn.fetchrow("""
+                SELECT user_id, guild_id, author_id FROM tags
+                WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id IS NOT DISTINCT FROM $4))
+            """, name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None)
+
+            if not tag:
+                return await ctx.send(f"No {'personal' if personal else 'server'} tag named `{name}` found that you own.")
+
+            if not personal:
+                if not ctx.guild:
+                    return await ctx.send("Server tags can only be transferred in servers.")
+                if ctx.author.id != tag['author_id']:
+                    return await ctx.send("You don't have permission to transfer this server tag.")
+
+            if personal:
+                result = await conn.execute("""
+                        UPDATE tags SET user_id = $1
+                        WHERE name = $2 AND user_id = $3
+                    """, new_owner.id, name, ctx.author.id)
             else:
-                await ctx.send(f"Transferred tag `{name}` to {new_owner.name}")
+                result = await conn.execute("""
+                        UPDATE tags SET author_id = $1
+                        WHERE name = $2 AND guild_id = $3
+                    """, new_owner.id, name, ctx.guild.id)
+            
+            if result == "UPDATE 0":
+                return await ctx.send("Failed to transfer tag; no matching tag found.")
+            
+            await conn.execute("UPDATE tag_aliases SET user_id = $1 WHERE tag_name = $2 AND guild_id = $3", new_owner.id, name, ctx.guild.id)
+
+            await ctx.send(f"Transferred {'personal' if personal else 'server'} tag `{name}` to {new_owner.mention}")
+    
+    @tag.command(name="search", description="Search for tags by name or content.", with_app_command=True)
+    @app_commands.describe(query="The search term.", personal="Whether to search only your personal tags.")
+    async def search(self, ctx: commands.Context, *, query: str, personal: bool = False):
+        await ctx.typing()
+        query, flag_from_query = self.parse_personal_flag(query)
+        personal = personal or flag_from_query
+        async with self.pool.acquire() as conn:
+            if personal:
+                rows = await conn.fetch("""
+                    SELECT name, content FROM tags 
+                    WHERE user_id = $1 AND (name ILIKE '%' || $2 || '%' OR content ILIKE '%' || $2 || '%')""",
+                    ctx.author.id, query)
+            else:
+                if not ctx.guild:
+                    return await ctx.send("Server tags can only be searched in servers.")
+                rows = await conn.fetch("""
+                    SELECT name, content FROM tags 
+                    WHERE guild_id = $1 AND (name ILIKE '%' || $2 || '%' OR content ILIKE '%' || $2 || '%')""",
+                    ctx.guild.id, query)
+
+            if not rows:
+                return await ctx.send("No tags found matching your query.")
+
+            per_page = 5
+            pages = []
+            for i in range(0, len(rows), per_page):
+                embed = discord.Embed(title=f"Tag Search Results {'(Personal)' if personal else ''}", color=discord.Color.orange())
+                for row in rows[i:i+per_page]:
+                    embed.add_field(name=row['name'], value=row['content'][:100], inline=False)
+                embed.set_footer(text=f"Page {i//per_page + 1} of {(len(rows)-1)//per_page + 1}")
+                pages.append(embed)
+
+            view = TagPaginator(pages, ctx.interaction)
+            await ctx.send(embed=pages[0], view=view)
+    
+    @tag.command(name="random", description="Show a random tag.", with_app_command=True)
+    @app_commands.describe(args="Arguments and flags. (e.g. --personal, --user @User, --hide-name)", personal="Whether to fetch from personal tags.")
+    async def random(self, ctx: commands.Context, *, args: str = "", personal: bool = False):
+        await ctx.typing()
+        hide_name = False
+        user_str = None
+        user = None
+        parts = args.split()
+        rest = []
+
+        i = 0
+        while i < len(parts):
+            part = parts[i].lower()
+            if part == "--hide-name":
+                hide_name = True
+            elif part == "--user" and i + 1 < len(parts):
+                i += 1
+                user_str = parts[i]
+            else:
+                rest.append(parts[i])
+            i += 1
+        new_args = ' '.join(rest)
+        if user_str:
+            try:
+                user = await commands.UserConverter().convert(ctx, user_str)
+            except commands.BadArgument:
+                pass
+        target_user = user or ctx.author
+        new_args, flag_from_args = self.parse_personal_flag(new_args)
+        personal = personal or flag_from_args
+        async with self.pool.acquire() as conn:
+            if personal:
+                if target_user.id != ctx.author.id:
+                    return await ctx.send("You can only use your own personal tags for random selection.")
+                rows = await conn.fetch("SELECT name FROM tags WHERE user_id = $1", target_user.id)
+            else:
+                if not ctx.guild:
+                    return await ctx.send("Cannot fetch server tags outside a server.")
+                if user is None:
+                    rows = await conn.fetch("SELECT name FROM tags WHERE guild_id IS NOT DISTINCT FROM $1", ctx.guild.id)
+                else:
+                    rows = await conn.fetch("SELECT name from tags WHERE guild_id IS NOT DISTINCT FROM $1 AND author_id IS NOT DISTINCT FROM $2", ctx.guild.id, target_user.id)
+
+            if not rows:
+                return await ctx.send("No tags found.")
+
+            tag_name = random.choice(rows)['name']
+            tag = await conn.fetchrow("""
+                SELECT content FROM tags
+                WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id IS NOT DISTINCT FROM $4))
+            """, tag_name, personal, target_user.id, ctx.guild.id if ctx.guild else None)
+
+            if not tag:
+                return await ctx.send("Failed to fetch tag content.")
+            
+            await conn.execute("""
+                UPDATE tags SET uses = uses + 1
+                WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id IS NOT DISTINCT FROM $4))
+            """, tag_name, personal, target_user.id, ctx.guild.id if ctx.guild else None)
+
+            text, embeds, view, files = await self.formatter.format(tag['content'], ctx, args=new_args)
+            if not hide_name:
+                header = f"Showing tag: `{tag_name}`\n\n"
+                if text:
+                    text = header + text
+                else:
+                    text = header
+
+            try:
+                await ctx.send(
+                    content=text[:2000],
+                    embeds=embeds[:10],
+                    view=view,
+                    files=files[:10]
+                )
+            except discord.HTTPException as e:
+                await ctx.send(f"Failed to send tag: {e}")
     
     @tag.group(name="alias", description="Manage tag aliases.", with_app_command=True)
     async def alias(self, ctx: commands.Context):
@@ -6659,62 +6887,45 @@ class Tags(commands.Cog):
     )
     async def alias_add(self, ctx: commands.Context, tag_name: str, alias: str, personal: bool = False):
         await ctx.typing()
-        
-
         tag_name = tag_name.lower().strip()
         alias = alias.lower().strip()
-        
         if len(alias) > 50:
             return await ctx.send("Aliases must be 50 characters or less.")
-        
-        if not ctx.guild and not personal:
-            return await ctx.send("Server tags can only be managed in servers.")
 
         async with self.pool.acquire() as conn:
-            async with conn.transaction():
-                try:
-                    guild_id = None if personal else ctx.guild.id
-                    user_id = ctx.author.id if personal else None
+            if personal:
+                tag = await conn.fetchrow("""
+                    SELECT user_id FROM tags WHERE name = $1 AND user_id = $2
+                """, tag_name, ctx.author.id)
+            else:
+                if not ctx.guild:
+                    return await ctx.send("Server tags can only be managed in servers.")
+                tag = await conn.fetchrow("""
+                    SELECT user_id FROM tags WHERE name = $1 AND guild_id = $2
+                """, tag_name, ctx.guild.id)
 
+            if not tag:
+                return await ctx.send(f"No such {'personal' if personal else 'server'} tag exists.")
 
-                    tag_exists = await conn.fetchval(
-                        """SELECT 1 FROM tags 
-                        WHERE name = $1 
-                        AND (guild_id IS NOT DISTINCT FROM $2) 
-                        AND (user_id IS NOT DISTINCT FROM $3)""",
-                        tag_name, guild_id, user_id
-                    )
-                    if not tag_exists:
-                        scope_type = "personal" if personal else "server"
-                        return await ctx.send(f"No {scope_type} tag named `{tag_name}` found.")
+            tag_author_id = tag['user_id']
 
+            if ctx.author.id != tag_author_id:
+                return await ctx.send("You can only add aliases to tags you own.")
 
-                    alias_exists = await conn.fetchval(
-                        """SELECT 1 FROM (
-                            SELECT name FROM tags 
-                            WHERE (guild_id IS NOT DISTINCT FROM $1) AND (user_id IS NOT DISTINCT FROM $2)
-                            UNION
-                            SELECT alias FROM tag_aliases 
-                            WHERE (guild_id IS NOT DISTINCT FROM $1) AND (user_id IS NOT DISTINCT FROM $2)
-                        ) AS names WHERE lower(name) = $3""",
-                        guild_id, user_id, alias
-                    )
-                    if alias_exists:
-                        return await ctx.send(f"A tag or alias named `{alias}` already exists in this scope.")
-
-
-                    await conn.execute(
-                        """INSERT INTO tag_aliases (alias, tag_name, guild_id, user_id)
-                        VALUES ($1, $2, $3, $4)""",
-                        alias, tag_name, guild_id, user_id
-                    )
-                    
-                    await ctx.send(f"Added alias `{alias}` for tag `{tag_name}`")
-                    
-                except asyncpg.UniqueViolationError:
-                    await ctx.send("This alias already exists for another tag.")
-                except Exception as e:
-                    await ctx.send(f"An error occurred: {str(e)}")
+            try:
+                if personal:
+                    await conn.execute("""
+                        INSERT INTO tag_aliases (alias, tag_name, user_id)
+                        VALUES ($1, $2, $3)
+                    """, alias, tag_name, ctx.author.id)
+                else:
+                    await conn.execute("""
+                        INSERT INTO tag_aliases (alias, tag_name, guild_id)
+                        VALUES ($1, $2, $3)
+                    """, alias, tag_name, ctx.guild.id)
+                await ctx.send(f"Added alias `{alias}` for tag `{tag_name}`")
+            except asyncpg.UniqueViolationError:
+                await ctx.send("This alias already exists for another tag.")
 
     @alias.command(name="remove", description="Remove a tag alias.", aliases=["delete", "rm", "del"])
     @app_commands.describe(
@@ -6724,34 +6935,48 @@ class Tags(commands.Cog):
     async def alias_remove(self, ctx: commands.Context, alias: str, personal: bool = False):
         await ctx.typing()
         alias = alias.lower().strip()
-        
-        if not ctx.guild and not personal:
-            return await ctx.send("Server tags can only be managed in servers.")
 
         async with self.pool.acquire() as conn:
-            async with conn.transaction():
-                try:
-                    if personal:
-                        deleted = await conn.execute(
-                            """DELETE FROM tag_aliases 
-                            WHERE alias = $1 AND user_id = $2""",
-                            alias, ctx.author.id
-                        )
-                    else:
-                        deleted = await conn.execute(
-                            """DELETE FROM tag_aliases 
-                            WHERE alias = $1 AND guild_id = $2""",
-                            alias, ctx.guild.id
-                        )
-                    
-                    if deleted == "DELETE 0":
-                        scope_type = "personal" if personal else "server"
-                        await ctx.send(f"No {scope_type} alias named `{alias}` found.")
-                    else:
-                        await ctx.send(f"Removed alias `{alias}`")
-                        
-                except Exception as e:
-                    await ctx.send(f"An error occurred: {str(e)}")
+            if personal:
+                row = await conn.fetchrow("""
+                    SELECT tag_name FROM tag_aliases WHERE alias = $1 AND user_id = $2
+                """, alias, ctx.author.id)
+                if not row:
+                    return await ctx.send("No personal alias found with that name.")
+                tag_name = row['tag_name']
+                tag = await conn.fetchrow("""
+                    SELECT user_id FROM tags WHERE name = $1 AND user_id = $2
+                """, tag_name, ctx.author.id)
+            else:
+                if not ctx.guild:
+                    return await ctx.send("Server tags can only be managed in servers.")
+                row = await conn.fetchrow("""
+                    SELECT tag_name FROM tag_aliases WHERE alias = $1 AND guild_id = $2
+                """, alias, ctx.guild.id)
+                if not row:
+                    return await ctx.send("No server alias found with that name.")
+                tag_name = row['tag_name']
+                tag = await conn.fetchrow("""
+                    SELECT user_id FROM tags WHERE name = $1 AND guild_id = $2
+                """, tag_name, ctx.guild.id)
+
+            if not tag:
+                return await ctx.send("Tag no longer exists.")
+
+            tag_author_id = tag['user_id']
+            if ctx.author.id != tag_author_id:
+                return await ctx.send("You can only remove aliases from tags you own.")
+
+            if personal:
+                await conn.execute("""
+                    DELETE FROM tag_aliases WHERE alias = $1 AND user_id = $2
+                """, alias, ctx.author.id)
+            else:
+                await conn.execute("""
+                    DELETE FROM tag_aliases WHERE alias = $1 AND guild_id = $2
+                """, alias, ctx.guild.id)
+
+            await ctx.send(f"Removed alias `{alias}`")
 
     @alias.command(name="list", description="List tag aliases.", aliases=["ls"])
     @app_commands.describe(personal="Whether to list personal tag aliases")
@@ -6782,9 +7007,18 @@ class Tags(commands.Cog):
                     scope_type = "personal" if personal else "server"
                     return await ctx.send(f"No {scope_type} tag aliases found.")
                 
-                embed = discord.Embed(title=title, color=discord.Color.blue())
-                embed.description = "\n".join(f"- `{a['alias']}` -> `{a['tag_name']}`" for a in aliases)
-                await ctx.send(embed=embed)
+                per_page = 10
+                pages = []
+                for i in range(0, len(aliases), per_page):
+                    embed = discord.Embed(title=f"{title}", color=discord.Color.blue())
+                    current_aliases = aliases[i:i+per_page]
+                    description = "\n".join(f"- `{a['alias']}` -> `{a['tag_name']}`" for a in current_aliases)
+                    embed.description = description
+                    embed.set_footer(text=f"Page {i//per_page + 1} of {(len(aliases)-1)//per_page + 1}")
+                    pages.append(embed)
+
+                view = TagPaginator(pages, ctx.interaction)
+                await ctx.send(embed=pages[0], view=view)
                 
             except Exception as e:
                 await ctx.send(f"An error occurred: {str(e)}")

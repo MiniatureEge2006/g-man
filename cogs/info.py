@@ -7,6 +7,7 @@ from datetime import datetime
 from webcolors import hex_to_name, name_to_hex
 from PIL import Image, ImageDraw
 import io
+import asyncio
 import re
 import random
 from math import fmod
@@ -555,9 +556,9 @@ class Info(commands.Cog):
             timestamp=discord.utils.utcnow()
         )
         role_color = role.color.to_rgb()
-        role_color_image = Image.new("RGB", (512, 512), role_color)
+        role_color_image = await asyncio.to_thread(Image.new, "RGB", (512, 512), role_color)
         buffer = io.BytesIO()
-        role_color_image.save(buffer, "PNG")
+        await asyncio.to_thread(role_color_image.save, buffer, "PNG")
         buffer.seek(0)
         embed.add_field(name="ID", value=role.id, inline=True)
         embed.add_field(name="Name", value=role.name, inline=True)
@@ -751,9 +752,9 @@ class Info(commands.Cog):
             except ValueError:
                 closest_name = "Unknown"
             
-            img = Image.new("RGBA", (100, 100), (int(r), int(g), int(b), int(a * 255)))
+            img = await asyncio.to_thread(Image.new, "RGBA", (100, 100), (int(r), int(g), int(b), int(a * 255)))
             buffer = io.BytesIO()
-            img.save(buffer, "PNG")
+            await asyncio.to_thread(img.save, buffer, "PNG")
             buffer.seek(0)
 
             embed = discord.Embed(
@@ -789,9 +790,9 @@ class Info(commands.Cog):
                 if len(colors) > 10:
                     await ctx.send("You can only create a gradient with up to 10 colors.")
                     return
-            gradient = self.generate_gradient_image(colors, positions)
+            gradient = await asyncio.to_thread(self.generate_gradient_image, colors, positions)
             buffer = io.BytesIO()
-            gradient.save(buffer, "PNG")
+            await asyncio.to_thread(gradient.save, buffer, "PNG")
             buffer.seek(0)
 
             embed = discord.Embed(
