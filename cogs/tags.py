@@ -4,10 +4,9 @@ from discord import app_commands
 import asyncpg
 import re
 import bot_info
-import operator
 import asyncio
 import ast
-from typing import Any, Callable, Dict, List, Set, Union
+from typing import Callable, Dict, List, Set, Union
 import aiohttp
 import yt_dlp
 import os
@@ -4283,75 +4282,124 @@ class Tags(commands.Cog):
                 return processed_text[::-1]
             except Exception:
                 return text
-        
-        def _coerce_common_type(a, b):
-            try:
-                if isinstance(a, (int, float)) or isinstance(b, (int, float)):
-                    return float(a), float(b)
-                return int(a), int(b)
-            except (ValueError, TypeError):
-                return str(a), str(b)
             
         @self.formatter.register('if')
         async def _if(ctx, args_str, **kwargs):
             """
-            ### {if:left|operator|right|then|value|else|value}
-                * Conditional statement with comparison operators.
+            ### {if:left|operator|right|then:value[|elif:left|operator|right|then:value|...]|else:value}
+                * Flexible if conditions.
+                * elif and else are optional, and will be None by default.
+                * You can have any amount of elif statements.
                 * Operators: ==, !=, >=, <=, >, <, *= (contains), ^= (starts with), $= (ends with), ~= (regex match)
-                * Prefix the 4 special operators with `!` to reverse them. (!*=)
-                * Example: `{if:{arg:0}|==|hello|then|World|else|Goodbye}`
+                * Prefixing any operators with `!` reverses them. (!*=)
+                * Example: `{if:some|==|thing|then:yes|else:no}`
             """
-            raw = self.parse_args(args_str)
-            if len(raw) < 5:
-                return "[error: insufficient arguments for if]"
+            resolved_str, _, _, _ = await self.formatter.format(args_str, ctx, **kwargs)
+            tokens = []
+            for part in resolved_str.split('|'):
+                if ':' in part:
+                    key = part.split(':')[0].lower()
+                    if key in ('then', 'else', 'elif'):
+                        key_val = part.split(':', 1)
+                        tokens.append(key_val[0].strip())
+                        tokens.append(key_val[1].strip())
+                    else:
+                        tokens.append(part.strip())
+                else:
+                    tokens.append(part.strip())
 
-            left_raw, op_raw, right_raw, *rest = raw
+            if len(tokens) < 4:
+                return "[error: missing required arguments]"
+
+            i = 0
+            conditions = []
+            else_value = None
 
 
-            then_raw = else_raw = ""
-            for key, val in zip(rest[::2], rest[1::2]):
-                if key.lower() == "then":
-                    then_raw = val
-                elif key.lower() == "else":
-                    else_raw = val
+            left = tokens[i]
+            op = tokens[i + 1]
+            right = tokens[i + 2]
+            i += 3
+
+            if i >= len(tokens) or tokens[i].lower() != 'then':
+                return f"[error: missing 'then' after condition at position {i}]"
+            i += 1
+            if i >= len(tokens):
+                return "[error: missing value after 'then']"
+            then_val = tokens[i]
+            i += 1
+            conditions.append((left, op, right, then_val))
 
 
-            left  = left_raw
-            right = right_raw
-            
-            coercible_ops = {"==", "!=", ">=", "<=", ">", "<"}
+            while i < len(tokens):
+                if tokens[i].lower() == 'elif':
+                    i += 1
+                    if i + 3 >= len(tokens):
+                        return "[error: incomplete elif block]"
+                    elif_left = tokens[i]
+                    elif_op = tokens[i+1]
+                    elif_right = tokens[i+2]
+                    i += 3
+                    if i >= len(tokens) or tokens[i].lower() != 'then':
+                        return "[error: missing 'then' after elif]"
+                    i += 1
+                    if i >= len(tokens):
+                        return "[error: missing value after elif 'then']"
+                    elif_then = tokens[i]
+                    i += 1
+                    conditions.append((elif_left, elif_op, elif_right, elif_then))
+                elif tokens[i].lower() == 'else':
+                    i += 1
+                    else_value = '|'.join(tokens[i:])
+                    break
+                else:
+                    break
 
-            if op_raw in coercible_ops:
-                left, right = _coerce_common_type(left, right)
 
-            ops: dict[str, Callable[[Any, Any], bool]] = {
-                "==": operator.eq,
-                "!=": operator.ne,
-                ">=": operator.ge,
-                "<=": operator.le,
-                ">":  operator.gt,
-                "<":  operator.lt,
-                "*=": lambda a, b: str(b) in str(a),
-                "^=": lambda a, b: str(a).startswith(str(b)),
-                "$=": lambda a, b: str(a).endswith(str(b)),
-                "~=": lambda a, b: re.search(str(b), str(a)) is not None,
+            ops = {
+                '==': lambda a, b: str(a) == str(b),
+                '!=': lambda a, b: str(a) != str(b),
+                '>': lambda a, b: float(a) > float(b),
+                '<': lambda a, b: float(a) < float(b),
+                '>=': lambda a, b: float(a) >= float(b),
+                '<=': lambda a, b: float(a) <= float(b),
+                '*=': lambda a, b: str(b) in str(a),
+                '^=': lambda a, b: str(a).startswith(str(b)),
+                '$=': lambda a, b: str(a).endswith(str(b)),
+                '~=': lambda a, b: re.search(str(b), str(a)) is not None,
             }
 
-            negate = False
-            if op_raw.startswith("!") and op_raw not in ops:
-                negate = True
-                op_raw = op_raw[1:]
 
-            func = ops.get(op_raw)
-            if func is None:
-                return f"[error: unknown operator '{op_raw}']"
+            for cond in conditions:
+                l, o, r, t = cond
+                negate = False
 
-            result = func(left, right)
-            if negate:
-                result = not result
+                if o.startswith('!') and o[1:] in ops:
+                    negate = True
+                    o = o[1:]
 
-            chosen_raw = then_raw if result else else_raw
-            return chosen_raw
+                func = ops.get(o)
+                if not func:
+                    return f"[error: unknown operator '{o}']"
+
+                try:
+                    result = func(l, r)
+                except Exception as e:
+                    return f"[error: failed to evaluate condition - {str(e)}]"
+
+                if negate:
+                    result = not result
+
+                if result:
+                    text, _, _, _ = await self.formatter.format(t, ctx, **kwargs)
+                    return text.strip()
+
+
+            if else_value is not None:
+                text, _, _, _ = await self.formatter.format(else_value, ctx, **kwargs)
+                return text.strip()
+
+            return None
         
         @self.formatter.register('and')
         async def _and(ctx, args_str, **kwargs):
