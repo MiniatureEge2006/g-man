@@ -1488,98 +1488,150 @@ class MediaProcessor:
             return f"Concat error: {str(e)}"
     
     async def _concat_media_impl(self, **kwargs) -> str:
-        input_keys = kwargs['input_keys']
+        input_keys = kwargs.get('input_keys')
         output_key = kwargs['output_key']
-        
-        if not input_keys:
+
+        if not input_keys or not isinstance(input_keys, list):
             return "Error: No input files specified"
         
-
         missing = [k for k in input_keys if k not in self.media_cache]
         if missing:
             return f"Missing input keys: {', '.join(missing)}"
-
-        input_paths = [Path(self.media_cache[k]) for k in input_keys]
-        output_file = self._get_temp_path('mp4')
-
-
-        input_info = []
-        for path in input_paths:
-            probe_cmd = [
-                'ffprobe', '-v', 'error',
-                '-show_entries', 'format=duration',
-                '-show_entries', 'stream=codec_type',
-                '-of', 'json',
-                str(path)
-            ]
-            
-            success, output = await self._run_ffprobe(probe_cmd)
-            if not success:
-                return f"Probe failed for {path.name}: {output}"
-
-            try:
-                data = json.loads(output)
-                duration = float(data['format']['duration'])
-                has_video = any(s['codec_type'] == 'video' for s in data.get('streams', []))
-                has_audio = any(s['codec_type'] == 'audio' for s in data.get('streams', []))
-                input_info.append((path, duration, has_video, has_audio))
-            except Exception as e:
-                return f"Invalid probe data for {path.name}: {str(e)}"
-
-
-        video_filters = []
-        audio_filters = []
-        video_streams = []
-        audio_streams = []
-
-        for i, (path, duration, has_video, has_audio) in enumerate(input_info):
-            if has_video:
-                video_filters.append(
-                    f"[{i}:v]scale=1280:720:force_original_aspect_ratio=decrease,"
-                    f"pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1[v{i}];"
-                )
-            else:
-                video_filters.append(
-                    f"color=size=1280x720:color=black:rate=30[d{i}];"
-                    f"[d{i}]trim=duration={duration}[v{i}];"
-                )
-            video_streams.append(f"[v{i}]")
-
-
-            if has_audio:
-                audio_filters.append(f"[{i}:a]aformat=sample_rates=44100:channel_layouts=stereo[a{i}];")
-            else:
-                audio_filters.append(f"aevalsrc=0:d={duration}[a{i}];")
-            audio_streams.append(f"[a{i}]")
-
-
-        filter_complex = (
-            ''.join(video_filters) +
-            ''.join(audio_filters) +
-            f"{''.join(video_streams)}concat=n={len(video_streams)}:v=1:a=0[outv];" +
-            f"{''.join(audio_streams)}concat=n={len(audio_streams)}:v=0:a=1[outa]"
-        )
-
-
-        input_args = []
-        for p in input_paths:
-            input_args.extend(['-i', str(p)])
-
-
-        cmd = [
-            'ffmpeg', '-y', '-hide_banner',
-            *input_args,
-            '-filter_complex', filter_complex,
-            '-map', '[outv]',
-            '-map', '[outa]',
-            '-c:v', 'libx264', '-preset', 'fast', '-crf', '20',
-            '-c:a', 'aac', '-b:a', '192k',
-            '-movflags', '+faststart',
-            str(output_file)
-        ]
-
-        success, error = await self._run_ffmpeg(cmd)
         
+        input_paths = [Path(self.media_cache[k]) for k in input_keys]
+
+        is_video = lambda p: p.suffix.lower() in ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv')
+        is_audio = lambda p: p.suffix.lower() in ('.mp3', '.wav', '.ogg', '.opus', '.flac', '.m4a', '.wma', '.mka')
+        is_image = lambda p: p.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp', '.gif')
+
+        media_info = []
+        all_gifs = True
+
+        for path in input_paths:
+            suffix = path.suffix.lower()
+            if is_video(path):
+                w, h, dur, has_audio = await self._probe_media_info(path)
+                media_info.append({
+                    'type': 'video',
+                    'path': path,
+                    'width': w,
+                    'height': h,
+                    'duration': dur,
+                    'has_audio': has_audio
+                })
+                all_gifs = False
+            elif is_audio(path):
+                info = await self._probe_media_info(path)
+                duration = float(info[2]) if info[2] else 3.0
+                media_info.append({
+                    'type': 'audio',
+                    'path': path,
+                    'duration': duration
+                })
+                all_gifs = False
+            elif is_image(path):
+                if suffix == '.gif':
+                    _, _, dur, _ = await self._probe_media_info(path)
+                    duration = float(dur) if dur else 0.5
+                else:
+                    duration = 0.5
+                media_info.append({
+                    'type': 'image',
+                    'path': path,
+                    'duration': duration
+                })
+                if suffix != '.gif':
+                    all_gifs = False
+            else:
+                return f"Error: Unsupported file type '{suffix}'"
+
+        output_format = (
+            '.gif' if all(i['type'] == 'image' and i['path'].suffix.lower() == '.gif' for i in media_info) else
+            '.mp3' if all(i['type'] == 'audio' for i in media_info) else
+            '.mp4'
+        )
+        output_file = self._get_temp_path(output_format[1:])
+
+        ffmpeg_cmd = ['ffmpeg', '-hide_banner']
+        filter_complex = []
+        map_args = []
+
+        v_streams = []
+        a_streams = []
+        current_time = 0.0
+
+        target_width, target_height = 512, 512
+        for info in media_info:
+            if info['type'] in ('video', 'image'):
+                if info['type'] == 'video':
+                    target_width, target_height = info['width'], info['height']
+                break
+
+        scale_filter = f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2"
+
+        for idx, info in enumerate(media_info):
+            path = info['path']
+            media_type = info['type']
+            duration = info['duration']
+            suffix = path.suffix.lower()
+
+            if media_type == 'image':
+                ffmpeg_cmd += ['-t', str(duration), '-i', str(path)]
+                if suffix == '.gif' and all_gifs:
+                    filter_complex.append(f"[{idx}:v]setpts=PTS-STARTPTS,fps=10[v{idx}]")
+                else:
+                    filter_complex.append(f"[{idx}:v]{scale_filter},format=rgb24,fps=15[v{idx}]")
+                v_streams.append(f"[v{idx}]")
+                current_time += duration
+
+            elif media_type == 'video':
+                ffmpeg_cmd += ['-i', str(path)]
+                if all_gifs:
+                    filter_complex.append(f"[{idx}:v]setpts=PTS-STARTPTS,fps=10[v{idx}]")
+                else:
+                    filter_complex.append(f"[{idx}:v]{scale_filter}[v{idx}]")
+                v_streams.append(f"[v{idx}]")
+                if info['has_audio']:
+                    a_streams.append(f"[{idx}:a]")
+                current_time += info['duration']
+
+            elif media_type == 'audio':
+                ffmpeg_cmd += ['-i', str(path)]
+                filter_complex.append(f"[{idx}:a]asetpts=PTS+{current_time}/TB[a{idx}]")
+                a_streams.append(f"[a{idx}]")
+                current_time += duration
+
+        if not v_streams and any(i['type'] in ('image', 'video') for i in media_info):
+            ffmpeg_cmd += ['-f', 'lavfi', '-i', f'color=c=black:s={target_width}x{target_height}:d={current_time}']
+            filter_complex.append(f"[{len(input_paths)}:v]format=rgb24,fps=15[v0]")
+            v_streams.append('[v0]')
+
+        if all_gifs and v_streams:
+            total_duration = sum(info['duration'] for info in media_info)
+            v_concat = ''.join(v_streams) + f'concat=n={len(v_streams)}:v=1:a=0[v]'
+            filter_complex.append(v_concat)
+            filter_complex.append(f"[v]trim=duration={total_duration},setpts=PTS-STARTPTS[vg]")
+            map_args += ['-map', '[vg]', '-c:v', 'gif', '-final_delay', '500']
+
+        elif v_streams:
+            v_concat = ''.join(v_streams) + f'concat=n={len(v_streams)}:v=1:a=0[v]'
+            filter_complex.append(v_concat)
+            map_args += ['-map', '[v]', '-pix_fmt', 'yuv420p']
+
+        if a_streams:
+            a_concat = ''.join(a_streams) + f'concat=n={len(a_streams)}:v=0:a=1[a]'
+            filter_complex.append(a_concat)
+            map_args += ['-map', '[a]', '-b:a', '192k']
+        elif v_streams:
+            map_args += ['-shortest']
+
+        if filter_complex:
+            ffmpeg_cmd += ['-filter_complex', ';'.join(filter_complex)]
+
+        map_args += ['-fps_mode', 'vfr', '-async', '1']
+        ffmpeg_cmd += map_args + ['-y', output_file.as_posix()]
+
+        success, error = await self._run_ffmpeg(ffmpeg_cmd)
         if success:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file}"
