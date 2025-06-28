@@ -37,7 +37,7 @@ RUN curl -LO https://ziglang.org/download/0.14.0/zig-linux-x86_64-0.14.0.tar.xz 
 RUN groupadd -g 1000 gcoder && useradd -r -u 1000 -g gcoder -m -d /home/gcoder gcoder
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install numpy requests pillow bgutil-ytdlp-pot-provider
+RUN pip install numpy requests pillow bgutil-ytdlp-pot-provider typed-ffmpeg
 RUN pip install --pre -U "yt-dlp[default]"
 RUN npm install -g typescript ts-node @types/node yarn mathjs
 USER gcoder
