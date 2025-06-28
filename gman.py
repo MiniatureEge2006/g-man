@@ -66,7 +66,7 @@ async def set_prefix(entity_id: int, prefix: str, is_guild: bool = True):
 
 
 extensions = ['cogs.audio', 'cogs.help', 'cogs.caption', 'cogs.code', 'cogs.exif', 'cogs.ffmpeg', 'cogs.tutorial', 'cogs.imagemagick', 'cogs.ytdlp', 'cogs.info', 'cogs.ai', 'cogs.reminder', 'cogs.roblox', 'cogs.search', 'cogs.tags', 'cogs.media', 'cogs.moderation']
-bot = commands.Bot(command_prefix=get_prefix, case_insensitive=True, strip_after_prefix=True, status=discord.Status.online, activity=discord.Game(name=f"{bot_info.data['prefix']}help"), help_command=None, intents=discord.Intents.all(), allowed_mentions=discord.AllowedMentions(users=False, roles=False, everyone=False, replied_user=True))
+bot = commands.AutoShardedBot(command_prefix=get_prefix, case_insensitive=True, strip_after_prefix=True, status=discord.Status.online, activity=discord.Game(name=f"{bot_info.data['prefix']}help"), help_command=None, intents=discord.Intents.all(), allowed_mentions=discord.AllowedMentions(users=False, roles=False, everyone=False, replied_user=True))
 
 
 def setup_logger():
@@ -219,18 +219,18 @@ async def on_command(ctx: commands.Context):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     user = f"{ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
     guild = f"{ctx.guild.name} (ID: {ctx.guild.id})" if ctx.guild else "DMs"
-    channel = f"{ctx.channel.name} (ID: {ctx.channel.id})" if ctx.guild else f"DMs with {ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
+    channel = f"#{ctx.channel.name} (ID: {ctx.channel.id})" if ctx.guild else f"DMs with {ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
     command_name = ctx.command.qualified_name
     command_content = ctx.message.content if not ctx.interaction else "".join(f"/{ctx.interaction.command.qualified_name} " + " ".join(f"{k}:{v}" for k, v in ctx.interaction.namespace.__dict__.items() if v is not None))
     log_message = (
-        f"\n--- Command Log ---\n"
+        f"\n--- {'Slash ' if ctx.interaction else ''}Command Log ---\n"
         f"Timestamp: {timestamp}\n"
         f"User: {user}\n"
         f"Guild: {guild}\n"
         f"Channel: {channel}\n"
         f"Command: {command_name}\n"
         f"Command Content: {command_content}\n"
-        f"--- End Command Log ---"
+        f"--- End {'Slash ' if ctx.interaction else ''}Command Log ---"
     )
     logger.info(log_message)
 
@@ -241,11 +241,20 @@ async def on_command_error(ctx: commands.Context, error):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     user = f"{ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
     guild = f"{ctx.guild.name} (ID: {ctx.guild.id})" if ctx.guild else "DMs"
-    channel = f"{ctx.channel.name} (ID: {ctx.channel.id})" if ctx.guild else f"DMs with {ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
+    channel = f"#{ctx.channel.name} (ID: {ctx.channel.id})" if ctx.guild else f"DMs with {ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
     command_name = ctx.command.qualified_name if ctx.command else "Unknown"
     command_content = ctx.message.content if not ctx.interaction else "".join(f"/{ctx.interaction.command.qualified_name} " + " ".join(f"{k}:{v}" for k, v in ctx.interaction.namespace.__dict__.items() if v is not None))
-    logger.error(f"\n--- Command Error Log ---\nTimestamp: {timestamp}\nUser: {user}\nGuild: {guild}\nChannel: {channel}\nCommand: {command_name}\nCommand Content: {command_content}\nError: {error}\n--- End Command Error Log ---")
-    embed = discord.Embed(title=":warning: Command Error", color=discord.Color.red(), timestamp=discord.utils.utcnow())
+    logger.error(
+        f"\n--- {'Slash ' if ctx.interaction else ''}Command Error Log ---\n"
+        f"Timestamp: {timestamp}\n"
+        f"User: {user}\n"
+        f"Guild: {guild}\n"
+        f"Channel: {channel}\n"
+        f"Command: {command_name}\n"
+        f"Command Content: {command_content}\n"
+        f"--- End {'Slash ' if ctx.interaction else ''}Command Error Log ---"
+    )
+    embed = discord.Embed(title=":warning: Command Error" if not ctx.interaction else ":warning: Slash Command Error", color=discord.Color.red(), timestamp=discord.utils.utcnow())
     embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
     if isinstance(error, commands.CheckFailure):
         return
@@ -275,10 +284,19 @@ async def on_command_completion(ctx: commands.Context):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     user = f"{ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
     guild = f"{ctx.guild.name} (ID: {ctx.guild.id})" if ctx.guild else "DMs"
-    channel = f"{ctx.channel.name} (ID: {ctx.channel.id})" if ctx.guild else f"DMs with {ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
+    channel = f"#{ctx.channel.name} (ID: {ctx.channel.id})" if ctx.guild else f"DMs with {ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
     command_name = ctx.command.qualified_name
     command_content = ctx.message.content if not ctx.interaction else "".join(f"/{ctx.interaction.command.qualified_name} " + " ".join(f"{k}:{v}" for k, v in ctx.interaction.namespace.__dict__.items() if v is not None))
-    logger.info(f"\n--- Command Success ---\nTimestamp: {timestamp}\nUser: {user}\nGuild: {guild}\nChannel: {channel}\nCommand: {command_name}\nCommand Content: {command_content}\n--- End Command Success ---")
+    logger.info(
+        f"\n--- {'Slash ' if ctx.interaction else ''}Command Success Log ---\n"
+        f"Timestamp: {timestamp}\n"
+        f"User: {user}\n"
+        f"Guild: {guild}\n"
+        f"Channel: {channel}\n"
+        f"Command: {command_name}\n"
+        f"Command Content: {command_content}\n"
+        f"--- End {'Slash ' if ctx.interaction else ''}Command Success Log ---"
+    )
 
 @bot.event
 async def on_guild_join(guild):
