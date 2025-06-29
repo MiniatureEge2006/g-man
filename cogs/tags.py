@@ -5192,7 +5192,7 @@ class Tags(commands.Cog):
             """
             ### {randuserid}
                 * Returns a random user ID from the current server.
-                * Example: `{randuser}`
+                * Example: `{randuserid}`
             """
             if ctx.guild:
                 random_user = random.choice(ctx.guild.members)
