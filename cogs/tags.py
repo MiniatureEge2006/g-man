@@ -113,102 +113,51 @@ class JumpToPageModal(discord.ui.Modal, title="Jump to Page"):
 
 class DiscordGenerator:
     @staticmethod
-    def create_embed(source: Union[str, dict], **kwargs) -> Union[dict, discord.Embed]:
-        if isinstance(source, str):
-            try:
-                data = json.loads(source)
-                if kwargs:
-                    data.update(kwargs)
-                source = data
-            except json.JSONDecodeError:
-                params = DiscordGenerator._parse_kwargs(source)
-                params.update(kwargs)
-                return DiscordGenerator._build_embed(**params)
-        
-        if isinstance(source, dict):
-            if kwargs:
-                source.update(kwargs)
-            return DiscordGenerator._build_embed(**source)
-
-        raise ValueError("Invaild embed source")
-    
-    @staticmethod
     def _build_embed(**kwargs) -> discord.Embed:
+        color = kwargs.get('color')
+        if isinstance(color, str):
+            try:
+                color = int(color.strip('#'), 16)
+            except ValueError:
+                color = None
         embed = discord.Embed(
             title=kwargs.get('title'),
             description=kwargs.get('description'),
-            color=DiscordGenerator.parse_color(kwargs.get('color'))
+            color=color
         )
+        
 
-        if any(k in kwargs for k in ['author', 'author_name']):
-            embed.set_author(
-                name=kwargs.get('author_name', kwargs.get('author')),
-                url=kwargs.get('author_url'),
-                icon_url=kwargs.get('author_icon')
-            )
-        
-        if any(k in kwargs for k in ['footer', 'footer_text']):
-            embed.set_footer(
-                text=kwargs.get('footer_text', kwargs.get('footer')),
-                icon_url=kwargs.get('footer_icon')
-            )
-        
-        if 'thumbnail' in kwargs:
-            embed.set_thumbnail(url=kwargs['thumbnail'])
-        if 'image' in kwargs:
-            embed.set_image(url=kwargs['image'])
-        
-        for i in range(1, 10):
-            if f'field{i}_name' in kwargs:
+        if 'fields' in kwargs:
+            for field in kwargs['fields']:
                 embed.add_field(
-                    name=kwargs[f'field{i}_name'],
-                    value=kwargs.get(f'field{i}_value', ''),
-                    inline=kwargs.get(f'field{i}_inline', 'false').lower() == 'true'
+                    name=field.get('name', ''),
+                    value=field.get('value', ''),
+                    inline=field.get('inline', True)
                 )
-        
-        return embed
-    
-    @staticmethod
-    def create_view(source: Union[str, list, dict], **kwargs) -> Union[dict, discord.ui.View]:
-        if isinstance(source, discord.ui.View):
-            return source
-            
-        if isinstance(source, str):
+        if 'author' in kwargs:
+            embed.set_author(
+                name=kwargs['author'].get('name'),
+                icon_url=kwargs['author'].get('icon_url'),
+                url=kwargs['author'].get('url')
+            )
+        if 'footer' in kwargs:
+            embed.set_footer(
+                text=kwargs['footer'].get('text'),
+                icon_url=kwargs['footer'].get('icon_url')
+            )
+        if 'timestamp' in kwargs:
             try:
-                data = json.loads(source)
-                return DiscordGenerator._build_view(data)
-            except json.JSONDecodeError:
+                timestamp = kwargs['timestamp']
+                if isinstance(timestamp, str):
+                    timestamp = datetime.fromisoformat(timestamp)
+                embed.timestamp = timestamp
+            except Exception:
                 pass
-        
-        if isinstance(source, (list, tuple)):
-            return DiscordGenerator._build_view({"components": source})
-        
-        if isinstance(source, dict):
-            return DiscordGenerator._build_view(source)
-        
-        raise ValueError("Invalid view source")
-    
-    @staticmethod
-    def _build_view(data: dict) -> discord.ui.View:
-        view = discord.ui.View(timeout=None)
-        
-        for row in data.get('components', []):
-            action_row = []
-            
-            for component in row.get('components', []):
-                if component['type'] == 2:
-                    action_row.append(
-                        DiscordGenerator.create_button(component)
-                    )
-                elif component['type'] == 3:
-                    action_row.append(
-                        DiscordGenerator.create_select(component)
-                    )
-            
-            if action_row:
-                view.add_item(*action_row)
-        
-        return view
+        if 'thumbnail' in kwargs:
+            embed.set_thumbnail(url=kwargs['thumbnail'].get('url'))
+        if 'image' in kwargs:
+            embed.set_image(url=kwargs['image'].get('url'))
+        return embed
     
     @staticmethod
     def create_select(source: Union[str, dict], **kwargs) -> discord.ui.Select:
@@ -216,91 +165,51 @@ class DiscordGenerator:
             try:
                 data = json.loads(source)
             except json.JSONDecodeError:
-                data = DiscordGenerator._parse_select_args(source)
+                raise ValueError("Invalid JSON for select")
         else:
-            data = source.copy() if isinstance(source, dict) else {}
-
-
+            data = source.copy()
         data.update(kwargs)
-
-
+        
         options = []
-        if 'options' in data:
-            if isinstance(data['options'], list):
-                for opt in data['options']:
-                    if isinstance(opt, dict):
-                        options.append(discord.SelectOption(
-                            label=str(opt.get('label', 'Option')),
-                            value=str(opt.get('value', opt.get('label', 'option'))),
-                            description=opt.get('description'),
-                            emoji=opt.get('emoji'),
-                            default=opt.get('default', False)
-                        ))
-        else:
-            i = 1
-            while f'option{i}_label' in data:
-                options.append(discord.SelectOption(
-                    label=str(data[f'option{i}_label']),
-                    value=str(data.get(f'option{i}_value', data[f'option{i}_label'])),
-                    description=data.get(f'option{i}_desc'),
-                    emoji=data.get(f'option{i}_emoji'),
-                    default=data.get(f'option{i}_default', False)
-                ))
-                i += 1
-
-
-        if not options:
-            options.append(discord.SelectOption(label='Default', value='default'))
-
-
+        for opt in data.get('options', []):
+            options.append(discord.SelectOption(
+                label=opt['label'],
+                value=opt.get('value', opt['label']),
+                description=opt.get('description'),
+                emoji=opt.get('emoji'),
+                default=opt.get('default', False)
+            ))
+        
         return discord.ui.Select(
-            placeholder=str(data.get('placeholder', 'Select...')),
-            min_values=int(data.get('min_values', 1)),
-            max_values=int(data.get('max_values', 1)),
+            custom_id=data.get('custom_id'),
+            placeholder=data.get('placeholder'),
+            min_values=data.get('min', 1),
+            max_values=data.get('max', 1),
             options=options,
-            custom_id=data.get('custom_id', f"select_{random.randint(1000,9999)}"),
             disabled=data.get('disabled', False)
         )
 
-    @staticmethod
-    def _parse_select_args(args_str: str) -> dict:
-        params = {}
-        for pair in shlex.split(args_str):
-            if '=' in pair:
-                key, value = pair.split('=', 1)
-                params[key.strip().lower()] = value.strip()
-        return params
-
 
     @staticmethod
-    def create_button(data: dict) -> discord.ui.Button:
-        if isinstance(data, discord.ui.Button):
-            return data
-            
-
-        custom_id = data.get('custom_id') or data.get('id')
-        if not custom_id and not data.get('url'):
-            custom_id = f"btn_{random.randint(1000,9999)}"
+    def create_button(source: Union[str, dict], **kwargs) -> discord.ui.Button:
+        if isinstance(source, str):
+            try:
+                data = json.loads(source)
+            except json.JSONDecodeError:
+                raise ValueError("Invalid JSON for button")
+        else:
+            data = source.copy()
+        data.update(kwargs)
         
         return discord.ui.Button(
+            label=data.get('label'),
             style=DiscordGenerator.parse_button_style(data.get('style', 'primary')),
-            label=str(data.get('label', 'Button')),
-            emoji=data.get('emoji'),
-            custom_id=custom_id,
+            custom_id=data.get('custom_id'),
             url=data.get('url'),
-            disabled=data.get('disabled', False)
+            disabled=data.get('disabled', False),
+            emoji=data.get('emoji')
         )
     
-    
-    @staticmethod
-    def parse_color(color):
-        if color is None:
-            return discord.Color.random()
-        if isinstance(color, discord.Color):
-            return color
-        if isinstance(color, int):
-            return discord.Color(color)
-        return discord.Color.from_str(color)
     
     @staticmethod
     def parse_button_style(style):
@@ -312,60 +221,6 @@ class DiscordGenerator:
             'link': discord.ButtonStyle.link
         }
         return styles.get(style.lower(), discord.ButtonStyle.primary)
-    
-    @staticmethod
-    def _parse_kwargs(args_str: str, defaults: dict = None) -> dict:
-        if isinstance(args_str, (dict, list, tuple)):
-            return args_str
-            
-        args = []
-        kwargs = {}
-        current = []
-        in_quote = False
-        quote_char = None
-        escaped = False
-
-        for char in args_str:
-            if escaped:
-                current.append(char)
-                escaped = False
-            elif char == '\\':
-                escaped = True
-            elif char in ('"', "'"):
-                if in_quote and char == quote_char:
-                    in_quote = False
-                    quote_char = None
-                else:
-                    in_quote = True
-                    quote_char = char
-            elif char == ' ' and not in_quote:
-                if current:
-                    token = ''.join(current)
-                    if '=' in token and not token.startswith(('http://', 'https://')):
-                        key, val = token.split('=', 1)
-                        kwargs[key.strip()] = val.strip()
-                    else:
-                        args.append(token.strip())
-                    current = []
-            else:
-                current.append(char)
-
-        if current:
-            token = ''.join(current)
-            if '=' in token and not token.startswith(('http://', 'https://')):
-                key, val = token.split('=', 1)
-                kwargs[key.strip()] = val.strip()
-            else:
-                args.append(token.strip())
-
-        if defaults:
-            for i, (name, default) in enumerate(defaults.items()):
-                if i < len(args):
-                    kwargs[name] = args[i]
-                elif name not in kwargs:
-                    kwargs[name] = default
-
-        return kwargs
 
 
 class MediaProcessor:
@@ -5260,36 +5115,25 @@ class Tags(commands.Cog):
         @self.formatter.register('embed')
         async def _embed(ctx, args_str, **kwargs):
             """
-            ### {embed:[title] [description] [color] [field=value...]}
-            Flexible embed builder. (accepts both JSON and builder syntax)
-            JSON Example: {embed:{"title":"Hello"}}
-            Builder Example: {embed:title=Hello color=blue}
+            ### {embed:JSON}
+            Builds an embed from JSON data.
+            Example: `{embed:{"title":"Hello"}}`
             """
             try:
                 processed_content, _, _, _ = await ctx.cog.formatter.format(args_str, ctx, **kwargs)
-                if processed_content.strip().startswith(('{', '[')):
-                    try:
-                        embed_data = json.loads(processed_content)
-                        embed = DiscordGenerator.create_embed(embed_data)
-                        return ("", [embed], None, [])
-                    except json.JSONDecodeError:
-                        pass
-                params = DiscordGenerator._parse_kwargs(processed_content)
-                embed = DiscordGenerator.create_embed(params)
+                embed_data = json.loads(processed_content)
+                resolved_data = await resolve_json_tags(ctx, embed_data)
+                embed = DiscordGenerator._build_embed(**resolved_data)
                 return ("", [embed], None, [])
-            except Exception as e:
-                return (f"[Embed Error: {str(e)}]", [], None, [])
+            except json.JSONDecodeError as e:
+                return (f"[embed error: {str(e)}]", [], None, [])
         
         async def parse_component_input(ctx, input_str: str):
             try:
-                if input_str.strip().startswith(('{', '[')):
-                    data = json.loads(input_str)
-                    return await resolve_json_tags(ctx, data)
+                data = json.loads(input_str.strip())
+                return await resolve_json_tags(ctx, data)
             except json.JSONDecodeError:
-                pass
-            
-
-            return await parse_builder_syntax(ctx, input_str)
+                raise ValueError("Component input must be valid JSON")
 
         async def resolve_json_tags(ctx, data):
             if isinstance(data, dict):
@@ -5300,47 +5144,13 @@ class Tags(commands.Cog):
                 processed, _, _, _ = await ctx.cog.formatter.format(data, ctx)
                 return processed
             return data
-
-        async def parse_builder_syntax(ctx, input_str: str):
-            params = {}
-            current_key = None
-            buffer = []
-            in_quotes = False
-            escape = False
-            
-            for char in input_str + ' ':
-                if escape:
-                    buffer.append(char)
-                    escape = False
-                elif char == '\\':
-                    escape = True
-                elif char == '"':
-                    in_quotes = not in_quotes
-                elif char == '=' and not in_quotes and not current_key:
-                    current_key = ''.join(buffer).strip()
-                    buffer = []
-                elif char in (' ', '\n') and not in_quotes:
-                    if buffer:
-                        value = ''.join(buffer).strip()
-                        if current_key:
-                            processed, _, _, _ = await ctx.cog.formatter.format(value, ctx)
-                            params[current_key.lower()] = processed
-                            current_key = None
-                        else:
-                            params.setdefault('_args', []).append(value)
-                        buffer = []
-                else:
-                    buffer.append(char)
-            
-            return params
             
         @self.formatter.register('button')
         async def _button(ctx, args_str, **kwargs):
             """
-            ### {button:[label] [style] [id/url] [emoji] [disabled]}
-            Flexible button builder with support for command and tag execution. (JSON or builder syntax)
-            JSON Example: {button:{"label":"Click","style":"primary"}}
-            Builder Example: {button:label=Click style=primary}
+            ### {button:JSON}
+            Builds a button component from JSON data.
+            Example: `{button:{"label":"Click","style":"primary"}}`
             """
             try:
                 params = await parse_component_input(ctx, args_str)
@@ -5363,111 +5173,27 @@ class Tags(commands.Cog):
                 return ("", [], discord.ui.View().add_item(button), [])
             
             except Exception as e:
-                return (f"[Button Error: {str(e)}]", [], None, [])
-    
-
-        @self.formatter.register('view')
-        async def _view(ctx, args_str, **kwargs):
-            """
-            ### {view:row1|row2|...}
-            Create Discord View from components.
-            Accepts both JSON and builder syntax.
-            
-            JSON Example:
-            {view:[
-            {"type":1,"components":[{"type":2,"label":"Button","style":1}]},
-            {"type":1,"components":[{"type":3,"placeholder":"Select..."}]}
-            ]}
-            
-            Builder Example:
-            {view:{row:{button:Submit primary submit_btn}|{button:Cancel danger cancel_btn}}|{row:{select:placeholder=Choose... min=1 option1=A option2=B}}}
-            """
-            try:
-                components = []
-                
-
-                params = await parse_component_input(ctx, args_str)
-                
-
-                if isinstance(params, list):
-                    for component in params:
-                        processed = await parse_component_input(ctx, json.dumps(component))
-                        components.append(processed)
-
-                else:
-                    components = [params]
-
-
-                view = discord.ui.View(timeout=None)
-                for component in components:
-                    if component.get('type') == 1:
-                        action_row = []
-                        for item in component.get('components', []):
-                            if item.get('type') == 2:
-                                btn = DiscordGenerator.create_button(item)
-                                action_row.append(btn)
-                            elif item.get('type') == 3:
-                                sel = DiscordGenerator.create_select(item)
-                                action_row.append(sel)
-                        if action_row:
-                            view.add_item(*action_row)
-                
-                return ("", [], view, [])
-            
-            except Exception as e:
-                return (f"[View Error: {str(e)}]", [], None, [])
+                return (f"[button error: {str(e)}]", [], None, [])
         
         @self.formatter.register('select')
         async def _select(ctx, args_str, **kwargs):
             """
-            ### {select:placeholder|min|max|option1_label|option1_value|option1_desc|...}
-            Create select menu with options. Supports command/tag execution.
+            ### {select:JSON}
+            Builds a select menu component from JSON data.
             
-            JSON Example:
-            {select:{
-            "placeholder": "Choose",
-            "min": 1,
-            "options": [
-                {"label":"A","value":"a"},
-                {"label":"B","value":"b"}
-            ]
-            }}
-            
-            Builder Example:
-            {select:
-            placeholder=Select Role
-            min=1 max=1
-            option1_label=Admin option1_value=role_admin
-            option2_label=Member option2_value=role_member
-            }
+            Example:
+            `{select:{"placeholder": "Choose","min": 1,"options": [{"label":"A","value":"a"},{"label":"B","value":"b"}]}}`
             """
             try:
-                params = await parse_component_input(ctx, args_str)
-                
+                data = await parse_component_input(ctx, args_str)
 
-                if 'options' not in params:
-                    options = []
-                    i = 1
-                    while f'option{i}_label' in params:
-                        option = {
-                            'label': params[f'option{i}_label'],
-                            'value': params.get(f'option{i}_value', params[f'option{i}_label']),
-                            'description': params.get(f'option{i}_desc'),
-                            'emoji': params.get(f'option{i}_emoji'),
-                            'default': params.get(f'option{i}_default', 'false').lower() == 'true'
-                        }
-                        options.append(option)
-                        i += 1
-                    params['options'] = options
-                
+                select = DiscordGenerator.create_select(data)
 
-                select = DiscordGenerator.create_select(params)
-                view = discord.ui.View(timeout=None)
-                view.add_item(select)
+                view = discord.ui.View().add_item(select)
                 return ("", [], view, [])
             
             except Exception as e:
-                return (f"[Select Error: {str(e)}]", [], None, [])
+                return (f"[select error: {str(e)}]", [], None, [])
         
         @self.formatter.register('json.user')
         async def _json_user(ctx, user_ref='', **kwargs):
@@ -5927,8 +5653,8 @@ class Tags(commands.Cog):
         async def _attach(ctx, args_str, **kwargs):
             """
             ### {attach:optional_url}
-                * Attaches media to the message from URL or message attachment
-                * Works with any media type (images, videos, audio, etc.)
+                * Attaches media to the message from URL or message attachment.
+                * Works with any media type. (images, videos, audio, etc.)
                 * Examples:
                     - `{attach:https://example.com/image.png}`
                     - `{attach}` (with file attached)
@@ -5956,7 +5682,7 @@ class Tags(commands.Cog):
                                 return (f"[attach error: HTTP {resp.status}]", [], None, [])
                             
                             content_type = resp.headers.get('Content-Type', '')
-                            filename = unquote(urlparse(url).path.split('/'))[-1] or "attachment"
+                            filename = os.path.basename(urlparse(url).path)
                             
 
                             ext = self._get_extension(content_type, filename)
@@ -5975,7 +5701,14 @@ class Tags(commands.Cog):
         
         async def _get_media_url(ctx, url_arg: str, media_types: tuple):
             if url_arg:
-                return url_arg
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url_arg) as resp:
+                        if resp.status != 200:
+                            return None
+                        
+                        content_type = resp.headers.get('Content-Type', '')
+                        if content_type in media_types:
+                            return url_arg
                 
 
             if ctx.message.attachments:
@@ -5983,19 +5716,19 @@ class Tags(commands.Cog):
                     if media_types is None or attachment.content_type in media_types:
                         return attachment.url
                         
-            return "No valid media found"
+            return None
 
         @self.formatter.register('image')
         async def _image(ctx, url: str = None, **kwargs):
             """
             ### {image:url}
-                * Returns the provided image URL or first image attachment URL
+                * Returns the provided image URL or first image attachment URL.
                 * Supported types: PNG, JPG, JPEG, WEBP, GIF
-                * Returns "No valid media found" if no match
+                * Returns None if no match.
                 * Examples:
                     - `{image:https://example.com/img.png}` -> "https://example.com/img.png"
                     - `{image}` (with image attachment) -> attachment URL
-                    - `{image}` (no attachment) -> "No valid media found"
+                    - `{image}` (no attachment) -> None
             """
             return await _get_media_url(ctx, url, media_types=IMAGE_TYPES)
 
@@ -6003,9 +5736,9 @@ class Tags(commands.Cog):
         async def _video(ctx, url: str = None, **kwargs):
             """
             ### {video:url}
-                * Returns the provided video URL or first video attachment URL
+                * Returns the provided video URL or first video attachment URL.
                 * Supported types: MP4, WEBM, MOV, MKV, AVI, WMV
-                * Returns "No valid media found" if no match
+                * Returns None if no match.
                 * Examples:
                     - `{video:https://example.com/vid.mp4}` -> "https://example.com/vid.mp4"
                     - `{video}` (with video attachment) -> attachment URL
@@ -6016,8 +5749,8 @@ class Tags(commands.Cog):
         async def _iv(ctx, url: str = None, **kwargs):
             """
             ### {iv:url}
-                * Returns the provided image/video URL or first matching attachment URL
-                * Returns "No valid media found" if no match
+                * Returns the provided image/video URL or first matching attachment URL.
+                * Returns None if no match.
                 * Examples:
                     - `{iv:https://example.com/media.gif}` -> URL
                     - `{iv}` (with image/video attachment) -> attachment URL
@@ -6028,9 +5761,9 @@ class Tags(commands.Cog):
         async def _audio(ctx, url: str = None, **kwargs):
             """
             ### {audio:url}
-                * Returns the provided audio URL or first audio attachment URL
+                * Returns the provided audio URL or first audio attachment URL.
                 * Supported types: MP3, WAV, OGG, OPUS, FLAC, M4A, MKA, WMA
-                * Returns "No valid media found" if no match
+                * Returns None if no match.
                 * Examples:
                     - `{audio:https://example.com/sound.mp3}` -> URL
                     - `{audio}` (with audio attachment) -> attachment URL
@@ -6041,8 +5774,8 @@ class Tags(commands.Cog):
         async def _av(ctx, url: str = None, **kwargs):
             """
             ### {av:url}
-                * Returns the provided audio/video URL or first matching attachment URL
-                * Returns "No valid media found" if no match
+                * Returns the provided audio/video URL or first matching attachment URL.
+                * Returns None if no match.
                 * Examples:
                     - `{av:https://example.com/media.mp4}` -> URL
                     - `{av}` (with audio/video attachment) -> attachment URL
@@ -6053,13 +5786,13 @@ class Tags(commands.Cog):
         async def _media(ctx, url: str = None, **kwargs):
             """
             ### {media:url}
-                * Returns the provided URL or first attachment URL (any type)
-                * Returns "No valid media found" if no match
+                * Returns the provided URL or first attachment URL. (any type)
+                * Returns None if no match.
                 * Examples:
-                    - `{media:https://example.com/file.txt}` -> URL
+                    - `{media:https://example.com/video.mp4}` -> URL
                     - `{media}` (with any attachment) -> attachment URL
             """
-            return await _get_media_url(ctx, url, media_types=None)
+            return await _get_media_url(ctx, url, media_types=AUDIO_TYPES+VIDEO_TYPES+IMAGE_TYPES)
         
     def _get_extension(self, content_type: str, filename: str = None) -> str:
         if content_type:
