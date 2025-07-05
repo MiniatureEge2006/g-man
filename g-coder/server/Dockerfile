@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     mono-complete \
     bash \
     cargo \
+    nim \
     libc6-dev \
     libssl-dev \
     zlib1g-dev \

@@ -70,7 +70,8 @@ class Code(commands.Cog):
             "c#": "csharp",
             "zig": "zig",
             "java": "java",
-            "kt": "kotlin"
+            "kt": "kotlin",
+            "nim": "nim"
         }.get(language, language)
 
         try:

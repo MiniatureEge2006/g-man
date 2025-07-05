@@ -4752,6 +4752,14 @@ class Tags(commands.Cog):
             """
             return await self.execute_language(ctx, 'kotlin', code, **kwargs)
         
+        @self.formatter.register('nim')
+        async def _nim(ctx, code, **kwargs):
+            """
+            ### {nim:code}
+                * Execute Nim code.
+            """
+            return await self.execute_language(ctx, 'nim', code, **kwargs)
+        
         @self.formatter.register('user')
         async def _user(ctx, i, **kwargs):
             """
@@ -6367,8 +6375,8 @@ class Tags(commands.Cog):
                 await conn.execute(
                     """UPDATE tag_aliases SET tag_name = $1
                     WHERE tag_name = $2 AND (
-                        ($3 AND user_id = $4) OR  -- Personal alias
-                        (NOT $3 AND guild_id = $5)  -- Server alias
+                        ($3 AND user_id = $4) OR
+                        (NOT $3 AND guild_id = $5)
                     )""",
                     new_name, old_name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None
                 )

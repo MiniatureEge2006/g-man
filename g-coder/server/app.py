@@ -14,7 +14,7 @@ APP_USER = "gcoder"
 EXECUTION_DIR = Path("/home/gcoder/executions")
 INPUT_DIR = EXECUTION_DIR / "input"
 OUTPUT_DIR = EXECUTION_DIR / "output"
-ALLOWED_LANGUAGES = ["bash", "python", "javascript", "typescript", "php", "ruby", "lua", "go", "rust", "c", "cpp", "csharp", "zig", "java", "kotlin"]
+ALLOWED_LANGUAGES = ["bash", "python", "javascript", "typescript", "php", "ruby", "lua", "go", "rust", "c", "cpp", "csharp", "zig", "java", "kotlin", "nim"]
 
 def ensure_dirs():
     EXECUTION_DIR.mkdir(mode=0o700, exist_ok=True)
@@ -118,27 +118,30 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
                 cmd = ['ts-node', '--files', '--transpile-only', str(script_path)]
                 output, return_code = await run_with_timeout(cmd, cwd=work_dir)
             else:
-                escaped_code = json.dumps(code)
-                wrapper = f"""
-                (async () => {{
-                    try {{
-                        eval({escaped_code});
-                        await new Promise(r => setTimeout(r, 50));
-                    }} catch (e) {{
-                        console.error(e.stack || e);
-                        process.exit(1);
-                    }}
-                }})();
-                """
-                output, return_code = await run_with_timeout(['node', '-e', wrapper], cwd=work_dir)
+                js_file = work_dir / "script.js"
+                with js_file.open("w") as f:
+                    f.write(code)
+                output, return_code = await run_with_timeout(['node', str(js_file)], cwd=work_dir)
         elif language == "python":
-            output, return_code = await run_with_timeout(['python', '-c', code], cwd=work_dir)
+            py_file = work_dir / "script.py"
+            with py_file.open("w") as f:
+                f.write(code)
+            output, return_code = await run_with_timeout(['python', str(py_file)], cwd=work_dir)
         elif language == "php":
-            output, return_code = await run_with_timeout(['php', '-r', code], cwd=work_dir)
+            php_file = work_dir / "script.php"
+            with php_file.open("w") as f:
+                f.write(code)
+            output, return_code = await run_with_timeout(['php', str(php_file)], cwd=work_dir)
         elif language == "ruby":
-            output, return_code = await run_with_timeout(['ruby', '-e', code], cwd=work_dir)
+            rb_file = work_dir / "script.rb"
+            with rb_file.open("w") as f:
+                f.write(code)
+            output, return_code = await run_with_timeout(['ruby', str(rb_file)], cwd=work_dir)
         elif language == "lua":
-            output, return_code = await run_with_timeout(['lua', '-e', code], cwd=work_dir)
+            lua_file = work_dir / "script.lua"
+            with lua_file.open("w") as f:
+                f.write(code)
+            output, return_code = await run_with_timeout(['lua', str(lua_file)], cwd=work_dir)
         elif language == "go":
             go_file = work_dir / "main.go"
             with go_file.open('w') as f:
@@ -216,6 +219,18 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
                 return_code = compile_code
             else:
                 output, return_code = await run_with_timeout(['java', '-jar', str(compile_jar)], cwd=work_dir)
+        elif language == "nim":
+            nim_file = work_dir  / "script.nim"
+            with nim_file.open("w") as f:
+                f.write(code)
+            compile_out, compile_code = await run_with_timeout(
+                ['nim', 'c', str(nim_file)], cwd=work_dir
+            )
+            if compile_code != 0:
+                output = compile_out
+                return_code = compile_code
+            else:
+                output, return_code = await run_with_timeout([str(work_dir / 'script')], cwd=work_dir)
 
         ensure_dirs()
         final_files = [f for f in os.listdir(OUTPUT_DIR) if f not in saved_files and (OUTPUT_DIR / f).is_file()]
