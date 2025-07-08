@@ -315,6 +315,33 @@ class Media(commands.Cog):
         await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
         await self.run_gscript_command(ctx, "text", input_key, text=text, x=x, y=y, color=color, font_size=font_size, font=font, outline_color=outline_color, outline_width=outline_width, shadow_color=shadow_color, shadow_offset=shadow_offset, shadow_blur=shadow_blur, wrap_width=wrap_width, line_spacing=line_spacing)
     
+    @iv.command(name="caption", description="Caption media.")
+    @app_commands.describe(
+        url="URL/Emoji/User.",
+        attachment="Video/Image file.",
+        text="Caption text.",
+        font_size="Font size.",
+        font="Caption font.",
+        color="Caption font color. (name, hex, or gradient)",
+        background_color="Caption padding color. (name, hex, or gradient)",
+        padding="Padding amount.",
+        outline_color="Caption font outline color. (name, hex, or gradient)",
+        outline_width="Caption font outline width amount.",
+        shadow_color="Caption font shadow color. (name, hex, or gradient)",
+        shadow_offset="Caption font shadow offset amount.",
+        shadow_blur="Caption font shadow blur amount."
+    )
+    async def caption(self, ctx: commands.Context, url: Optional[str] = None, attachment: Optional[discord.Attachment] = None, text: str = None, font_size: int = 36, font: str = "Futura Condensed Extra Bold", color: str = "#000000", background_color: str = "#FFFFFF", padding: int = 50, outline_color: str = None, outline_width: int = None, shadow_color: str = None, shadow_offset: int = 2, shadow_blur: int = 0):
+        await ctx.typing()
+        input_key = f"caption_{ctx.message.id}"
+        parsed = await self.process_media_input(ctx, url, attachment)
+        if parsed[2]:
+            raise commands.CommandError(parsed[2])
+        input_url = parsed[0][8:]
+
+        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
+        await self.run_gscript_command(ctx, "caption", input_key, text=text, font_size=font_size, font=font, color=color, background_color=background_color, padding=padding, outline_color=outline_color, outline_width=outline_width, shadow_color=shadow_color, shadow_offset=shadow_offset, shadow_blur=shadow_blur)
+    
     @iv.command(name="fps", description="Change a video or image's frame rate.")
     @app_commands.describe(
         url="URL/Emoji/User.", 

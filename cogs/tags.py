@@ -375,6 +375,21 @@ class MediaProcessor:
                 'wrap_width': {'required': False, 'type': int},
                 'line_spacing': {'required': False, 'type': int}
             },
+            'caption': {
+                'input_key': {'required': True, 'type': str},
+                'text': {'required': True, 'type': str},
+                'output_key': {'required': True, 'type': str},
+                'font_size': {'default': 36, 'type': int},
+                'font': {'default': 'Futura Condensed Extra Bold', 'type': str},
+                'color': {'default': '#000000', 'type': str},
+                'background_color': {'default': '#FFFFFF', 'type': str},
+                'padding': {'default': 50, 'type': int},
+                'outline_color': {'required': False, 'type': str},
+                'outline_width': {'required': False, 'type': int},
+                'shadow_color': {'required': False, 'type': str},
+                'shadow_offset': {'default': 2, 'type': int},
+                'shadow_blur': {'default': 0, 'type': int}
+            },
             'audioputreplace': {
                 'input_key': {'required': True, 'type': str},
                 'audio_key': {'required': True, 'type': str},
@@ -473,6 +488,7 @@ class MediaProcessor:
             'volume': self._adjust_volume,
             'overlay': self._overlay_media,
             'text': self._text,
+            'caption': self._apply_caption,
             'audioputreplace': self._replace_audio,
             'audioputmix': self._mix_audio,
             'tremolo': self._tremolo,
@@ -2429,6 +2445,117 @@ class MediaProcessor:
         except Exception as e:
             return f"Text error: {str(e)}"
 
+    async def _apply_caption(self, **kwargs) -> str:
+        try:
+            return await self._apply_caption_impl(**kwargs)
+        except ValueError as e:
+            return f"Caption error: {str(e)}"
+    
+    async def _apply_caption_impl(self, **kwargs) -> str:
+        input_key = kwargs['input_key']
+        text = kwargs['text']
+        output_key = kwargs['output_key']
+        padding = kwargs.get('padding', 50)
+        font_size = kwargs.get('font_size', 36)
+        font = kwargs.get('font', 'Futura Condensed Extra Bold')
+        color = kwargs.get('color', '#000000')
+        background_color = kwargs.get('background_color', '#FFFFFF')
+        outline_color = kwargs.get('outline_color')
+        outline_width = kwargs.get('outline_width')
+        shadow_color = kwargs.get('shadow_color')
+        shadow_offset = kwargs.get('shadow_offset', 2)
+        shadow_blur = kwargs.get('shadow_blur', 0)
+
+        if input_key not in self.media_cache:
+            return f"Error: {input_key} not found"
+
+        input_path = Path(self.media_cache[input_key])
+        is_video = input_path.suffix.lower() in ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv')
+        is_gif = input_path.suffix.lower() == '.gif'
+
+        width, height, _, _ = await self._probe_media_info(input_path)
+        if width == 0 or height == 0:
+            return "Error: could not determine input media dimensions"
+
+
+        bg_img = self._parse_color(background_color, (width, padding))
+        if isinstance(bg_img, tuple):
+            bg_img = await asyncio.to_thread(Image.new, 'RGBA', (width, padding), bg_img)
+        caption_file = self._get_temp_path('png')
+        await asyncio.to_thread(bg_img.save, caption_file)
+
+
+        text_key = f"{output_key}_text"
+        await self._create_image(
+            media_key=text_key,
+            width=str(width),
+            height=str(padding),
+            color='transparent'
+        )
+        await self._text(
+            input_key=text_key,
+            text=text,
+            x='center',
+            y=str((padding - font_size) // 2),
+            color=color,
+            output_key=text_key,
+            font_size=font_size,
+            font=font,
+            outline_color=outline_color,
+            outline_width=outline_width,
+            shadow_color=shadow_color,
+            shadow_offset=shadow_offset,
+            shadow_blur=shadow_blur,
+            wrap_width=width - 40
+        )
+
+        if is_video or is_gif:
+            output_file = self._get_temp_path(input_path.suffix[1:])
+            
+            cmd = [
+                'ffmpeg', '-hide_banner',
+                '-i', str(input_path),
+                '-i', str(caption_file),
+                '-i', self.media_cache[text_key],
+                '-filter_complex',
+                f'[1:v][2:v]overlay=0:0[bgtext];'
+                f'[0:v]pad=width={width}:height={height+padding}:y={padding}:color=black[padded];'
+                f'[padded][bgtext]overlay=0:0[v]',
+                '-map', '[v]',
+                '-map', '0:a?',
+                '-preset', 'fast',
+                '-crf', '23',
+                '-pix_fmt', 'yuv420p',
+                '-movflags', '+faststart',
+                '-y', output_file.as_posix()
+            ]
+            
+            success, error = await self._run_ffmpeg(cmd)
+            if success:
+                self.media_cache[output_key] = str(output_file)
+                return f"media://{output_file.as_posix()}"
+            return error
+        else:
+            output_file = self._get_temp_path(input_path.suffix[1:])
+            new_height = height + padding
+            base_img = await asyncio.to_thread(Image.new, 'RGBA', (width, new_height))
+            caption_bg = await asyncio.to_thread(Image.open, caption_file)
+            await asyncio.to_thread(base_img.paste, caption_bg, (0, 0))
+            text_img = await asyncio.to_thread(Image.open, self.media_cache[text_key])
+            await asyncio.to_thread(base_img.paste, text_img, (0, 0), text_img)
+            original_img = await asyncio.to_thread(Image.open, input_path)
+            await asyncio.to_thread(base_img.paste, original_img, (0, padding))
+            format_map = {
+                '.jpg': 'JPEG',
+                '.jpeg': 'JPEG',
+                '.png': 'PNG',
+                '.webp': 'WEBP'
+            }
+            save_format = format_map.get(input_path.suffix.lower(), 'PNG')
+            
+            await asyncio.to_thread(base_img.save, output_file, format=save_format)
+            self.media_cache[output_key] = str(output_file)
+            return f"media://{output_file.as_posix()}"
 
     async def _replace_audio(self, **kwargs) -> str:
         try:
