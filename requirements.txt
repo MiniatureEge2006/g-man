@@ -13,5 +13,3 @@ PyNaCl
 yt-dlp
 matplotlib
 jsonschema
-wand
-numpy

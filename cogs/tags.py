@@ -23,15 +23,12 @@ from urllib.parse import quote, unquote, urlparse
 import base64
 import json
 from jsonschema import validate, ValidationError
-import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import math
 import matplotlib.font_manager
 import hashlib
 from zoneinfo import ZoneInfo
 import dateparser
-from wand.image import Image as Img
-from wand.color import Color
 
 IMAGE_TYPES = ('image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif')
 VIDEO_TYPES = ('video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska', 'video/x-msvideo', 'video/x-ms-wmv')
@@ -240,13 +237,6 @@ class MediaProcessor:
             'load': {
                 'url': {'required': True, 'type': str},
                 'media_key': {'required': True, 'type': str}
-            },
-            'loadsvg': {
-                'svg_content': {'required': True, 'type': str},
-                'media_key': {'required': True, 'type': str},
-                'width': {'default': '512', 'type': str},
-                'height': {'default': '512', 'type': str},
-                'background': {'default': 'transparent', 'type': str}
             },
             'reverse': {
                 'input_key': {'required': True, 'type': str},
@@ -464,7 +454,6 @@ class MediaProcessor:
         }
         self.gscript_commands = {
             'load': self._load_media,
-            'loadsvg': self._load_svg,
             'reverse': self._reverse_media,
             'concat': self._concat_media,
             'render': self._render_media,
@@ -757,7 +746,6 @@ class MediaProcessor:
         if not color_str.startswith(('linear-gradient(', 'radial-gradient(')):
             return self._parse_single_color(color_str)
 
-
         color_str = self._replace_random_in_gradient(color_str)
         base_str = color_str
 
@@ -789,59 +777,75 @@ class MediaProcessor:
             else:
                 colors_and_stops.append((part, None))
 
-
         n = len(colors_and_stops)
         for i, (c, p) in enumerate(colors_and_stops):
             if p is None:
                 colors_and_stops[i] = (c, i/(n-1) if n>1 else 0.0)
 
         width, height = size
-        cx, cy = width//2, height//2
+        img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
 
         if base_str.startswith('linear-gradient('):
             rad = math.radians(angle)
             dx, dy = math.sin(rad), -math.cos(rad)
-            pattern = max(width, height)
+            max_dist = math.sqrt((dx*width)**2 + (dy*height)**2)
 
-            x_coords, y_coords = np.meshgrid(np.arange(width), np.arange(height))
-            pos = (x_coords * dx + y_coords * dy) / pattern
-            pos = np.clip(pos, 0.0, 1.0)
+            for y_pos in range(height):
+                for x_pos in range(width):
+                    pos = (x_pos*dx + y_pos*dy) / max_dist
+                    pos = max(0, min(1, pos))
 
-            gradient = np.zeros((height, width, 4), dtype=np.uint8)
-            for i in range(n-1):
-                start = colors_and_stops[i][1]
-                end   = colors_and_stops[i+1][1]
-                mask = (pos >= start) & (pos < end)
-                if not np.any(mask):
-                    continue
-                t = (pos[mask] - start) / (end - start)
-                c1 = np.array(self._parse_single_color(colors_and_stops[i][0]))
-                c2 = np.array(self._parse_single_color(colors_and_stops[i+1][0]))
-                gradient[mask] = (c1 + (c2 - c1) * t[..., None]).astype(np.uint8)
+                    for i in range(len(colors_and_stops)-1):
+                        start_pos = colors_and_stops[i][1]
+                        end_pos = colors_and_stops[i+1][1]
+                        
+                        if start_pos <= pos <= end_pos:
+                            if end_pos == start_pos:
+                                t = 0
+                            else:
+                                t = (pos - start_pos) / (end_pos - start_pos)
+                            
+                            c1 = self._parse_single_color(colors_and_stops[i][0])
+                            c2 = self._parse_single_color(colors_and_stops[i+1][0])
+                            
+                            r = int(c1[0] + (c2[0] - c1[0]) * t)
+                            g = int(c1[1] + (c2[1] - c1[1]) * t)
+                            b = int(c1[2] + (c2[2] - c1[2]) * t)
+                            a = int(c1[3] + (c2[3] - c1[3]) * t)
+                            
+                            draw.point((x_pos, y_pos), fill=(r, g, b, a))
+                            break
 
-            return Image.fromarray(gradient, 'RGBA')
-
-
-        img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(img)
-        max_diag = math.hypot(cx, cy)
-
-        stop_radii = [pct * max_diag for (_, pct) in colors_and_stops]
-
-        def lerp(c1, c2, t_val):
-            return tuple(int(c1[i] + (c2[i] - c1[i]) * t_val) for i in range(4))
-
-        stop_colors = [self._parse_single_color(c) for (c, _) in colors_and_stops]
-
-        for i in range(len(colors_and_stops)-1):
-            r0 = int(stop_radii[i])
-            r1 = int(stop_radii[i+1])
-            c0, c1 = stop_colors[i], stop_colors[i+1]
-            for r in range(r0, r1):
-                t = (r - stop_radii[i]) / (stop_radii[i+1] - stop_radii[i])
-                color = lerp(c0, c1, t)
-                bbox = [cx - r, cy - r, cx + r, cy + r]
-                draw.ellipse(bbox, outline=color)
+        elif base_str.startswith('radial-gradient('):
+            center_x, center_y = width // 2, height // 2
+            max_radius = math.sqrt(center_x**2 + center_y**2)
+            
+            for y_pos in range(height):
+                for x_pos in range(width):
+                    dist = math.sqrt((x_pos-center_x)**2 + (y_pos-center_y)**2) / max_radius
+                    dist = max(0, min(1, dist))
+                    
+                    for i in range(len(colors_and_stops)-1):
+                        start_pos = colors_and_stops[i][1]
+                        end_pos = colors_and_stops[i+1][1]
+                        
+                        if start_pos <= dist <= end_pos:
+                            if end_pos == start_pos:
+                                t = 0
+                            else:
+                                t = (dist - start_pos) / (end_pos - start_pos)
+                            
+                            c1 = self._parse_single_color(colors_and_stops[i][0])
+                            c2 = self._parse_single_color(colors_and_stops[i+1][0])
+                            
+                            r = int(c1[0] + (c2[0] - c1[0]) * t)
+                            g = int(c1[1] + (c2[1] - c1[1]) * t)
+                            b = int(c1[2] + (c2[2] - c1[2]) * t)
+                            a = int(c1[3] + (c2[3] - c1[3]) * t)
+                            
+                            draw.point((x_pos, y_pos), fill=(r, g, b, a))
+                            break
 
         return img
 
@@ -912,30 +916,24 @@ class MediaProcessor:
     def _parse_single_color(self, color_str: str) -> tuple:
         color_str = color_str.strip().lower()
         
-
         if color_str in ('none', 'transparent'):
             return (0, 0, 0, 0)
         
-
         if color_str in ('random', 'rand'):
             return self._generate_random_color()
         
-
         if color_str.startswith('#'):
             return self._hex_to_rgb(color_str)
         
-
         if color_str.startswith(('rgb(', 'rgba(')):
             try:
                 values_str = color_str.split('(')[1].split(')')[0]
                 values = [v.strip() for v in values_str.split(',')]
                 
-
                 r = int(values[0])
                 g = int(values[1])
                 b = int(values[2])
                 
-
                 a = 255
                 if len(values) > 3:
                     alpha = float(values[3])
@@ -948,7 +946,6 @@ class MediaProcessor:
             except (ValueError, IndexError):
                 pass
         
-
         if ',' in color_str or ' ' in color_str:
             separators = ',' if ',' in color_str else ' '
             try:
@@ -962,7 +959,6 @@ class MediaProcessor:
             except (ValueError, IndexError):
                 pass
         
-
         return {
             'white': (255, 255, 255, 255),
             'black': (0, 0, 0, 255),
@@ -1271,43 +1267,6 @@ class MediaProcessor:
             
             except Exception as http_error:
                 return f"Download error: {str(http_error)}"
-    
-    async def _load_svg(self, **kwargs) -> str:
-        try:
-            return await self._load_svg_impl(**kwargs)
-        except ValueError as e:
-            return f"SVG error: {str(e)}"
-    
-    async def _load_svg_impl(self, **kwargs) -> str:
-        svg_content = kwargs['svg_content']
-        media_key = kwargs['media_key']
-        width = await self._resolve_dimension(kwargs['width'])
-        height = await self._resolve_dimension(kwargs['height'])
-        background = kwargs['background']
-        
-
-        output_file = self._get_temp_path('png')
-        
-        try:
-            def convert_svg():
-                with Img(blob=svg_content.encode('utf-8'), format='svg') as img:
-                    img.resize(width, height)
-                    
-
-                    if background.lower() != 'transparent':
-                        bg = Color(self._parse_single_color(background))
-                        with Img(width=width, height=height, background=bg) as bg_img:
-                            bg_img.composite(img, 0, 0)
-                            bg_img.save(filename=str(output_file))
-                    else:
-                        img.save(filename=str(output_file))
-            await asyncio.get_event_loop().run_in_executor(None, convert_svg)
-                    
-        except Exception as e:
-            raise ValueError(f"SVG conversion failed: {str(e)}")
-    
-        self.media_cache[media_key] = str(output_file)
-        return f"media://{output_file.as_posix()}"
     
     async def _reverse_media(self, **kwargs) -> str:
         try:
@@ -2227,15 +2186,13 @@ class MediaProcessor:
             width = bbox[2] - bbox[0]
             height = bbox[3] - bbox[1]
             return width, height
-        async def load_font(font_name: str, font_size: int) -> ImageFont.FreeTypeFont:
-            
 
+        async def load_font(font_name: str, font_size: int) -> ImageFont.FreeTypeFont:
             try:
                 font = await asyncio.to_thread(ImageFont.truetype, font=font_name, size=font_size)
                 return font
-            except Exception as e:
+            except Exception:
                 pass
-
 
             try:
                 matches = []
@@ -2245,11 +2202,10 @@ class MediaProcessor:
                         try:
                             font = await asyncio.to_thread(ImageFont.truetype, f.fname, font_size)
                             return font
-                        except Exception as e:
+                        except Exception:
                             continue
-            except Exception as e:
+            except Exception:
                 pass
-
 
             system_paths = [
                 f"C:/Windows/Fonts/{font_name.replace(' ', '')}.ttf",
@@ -2263,9 +2219,8 @@ class MediaProcessor:
                 try:
                     font = await asyncio.to_thread(ImageFont.truetype, path, font_size)
                     return font
-                except Exception as e:
+                except Exception:
                     pass
-
 
             return await asyncio.to_thread(ImageFont.load_default)
 
@@ -2293,25 +2248,18 @@ class MediaProcessor:
                 return f"Error: {input_key} not found"
 
             input_path = Path(self.media_cache[input_key])
-
-
             base_img = await asyncio.to_thread(Image.open, input_path)
             base_img = await asyncio.to_thread(base_img.convert, 'RGBA')
 
-
-
             font = await load_font(font_name, font_size)
-
             if not isinstance(font, ImageFont.FreeTypeFont):
                 font = await asyncio.to_thread(ImageFont.load_default)
-
 
             draw = await asyncio.to_thread(ImageDraw.Draw, base_img)
 
             max_width = base_img.width
             if wrap_width:
                 max_width = int(wrap_width)
-                
 
             current_font_size = font_size
             while True:
@@ -2357,6 +2305,17 @@ class MediaProcessor:
                 y = int(y_raw)
 
 
+            txt_layer = await asyncio.to_thread(Image.new, 'L', base_img.size, 0)
+            txt_draw = await asyncio.to_thread(ImageDraw.Draw, txt_layer)
+
+            cur_y = y
+            for line in lines:
+                line_width, line_height = get_text_size(font, line)
+                cur_x = (base_img.width - line_width) // 2 if str(x_raw).lower() == "center" else x
+                await asyncio.to_thread(txt_draw.text, (cur_x, cur_y), line, font=font, fill=255)
+                cur_y += line_height + line_spacing
+
+
             if shadow_color:
                 shadow_layer = await asyncio.to_thread(Image.new, 'L', base_img.size, 0)
                 shadow_draw = await asyncio.to_thread(ImageDraw.Draw, shadow_layer)
@@ -2374,17 +2333,14 @@ class MediaProcessor:
                     shadow_layer = await asyncio.to_thread(shadow_layer.filter, ImageFilter.GaussianBlur(radius=shadow_blur))
 
                 shadow_img = await asyncio.to_thread(Image.new, 'RGBA', base_img.size, (0,0,0,0))
-                if isinstance(shadow_color, str) and shadow_color.startswith(('linear-gradient(', 'repeating-linear-gradient(', 'radial-gradient(', 'repeating-radial-gradient(')):
-                    shadow_gradient = self._parse_color(shadow_color, base_img.size)
-                    if isinstance(shadow_gradient, tuple):
-                        await asyncio.to_thread(shadow_img.paste, shadow_gradient, (0, 0), mask=shadow_layer)
-                    else:
-                        await asyncio.to_thread(shadow_img.paste, shadow_gradient, (0, 0), mask=shadow_layer)
+                shadow_color_parsed = await asyncio.to_thread(self._parse_color, shadow_color, base_img.size)
+                
+                if isinstance(shadow_color_parsed, tuple):
+                    await asyncio.to_thread(shadow_img.paste, shadow_color_parsed, (0, 0), mask=shadow_layer)
                 else:
-                    sc = self._parse_single_color(shadow_color)
-                    await asyncio.to_thread(shadow_img.paste, sc, (0, 0), mask=shadow_layer)
-                base_img = await asyncio.to_thread(Image.alpha_composite, base_img, shadow_img)
+                    await asyncio.to_thread(shadow_img.paste, shadow_color_parsed, (0, 0), mask=shadow_layer)
 
+                base_img = await asyncio.to_thread(Image.alpha_composite, base_img, shadow_img)
 
 
             if outline_color:
@@ -2405,7 +2361,7 @@ class MediaProcessor:
                                 cur_y += line_height + line_spacing
 
                 outline_img = await asyncio.to_thread(Image.new, 'RGBA', base_img.size, (0,0,0,0))
-                outline_color_parsed = self._parse_color(outline_color, base_img.size)
+                outline_color_parsed = await asyncio.to_thread(self._parse_color, outline_color, base_img.size)
                 
                 if isinstance(outline_color_parsed, tuple):
                     await asyncio.to_thread(outline_img.paste, outline_color_parsed, (0, 0), mask=outline_layer)
@@ -2415,27 +2371,22 @@ class MediaProcessor:
                 base_img = await asyncio.to_thread(Image.alpha_composite, base_img, outline_img)
 
 
-            txt_layer = await asyncio.to_thread(Image.new, 'L', base_img.size, 0)
-            txt_draw = await asyncio.to_thread(ImageDraw.Draw, txt_layer)
-
-            cur_y = y
-            for line in lines:
-                line_width, line_height = get_text_size(font, line)
-                cur_x = (base_img.width - line_width) // 2 if str(x_raw).lower() == "center" else x
-                await asyncio.to_thread(txt_draw.text, (cur_x, cur_y), line, font=font, fill=255)
-                cur_y += line_height + line_spacing
+            bbox = txt_layer.getbbox()
+            if not bbox:
+                return "Error: Text bounding box could not be determined"
 
 
-            gradient_img = self._parse_color(color, base_img.size)
-            if isinstance(gradient_img, tuple):
-                gradient_img = await asyncio.to_thread(Image.new, 'RGBA', base_img.size, gradient_img)
-            else:
-                gradient_img = gradient_img
-
-
+            gradient_img = await asyncio.to_thread(self._parse_color, color, (bbox[2]-bbox[0], bbox[3]-bbox[1]))
             result = await asyncio.to_thread(base_img.copy)
-            await asyncio.to_thread(result.paste, gradient_img, (0, 0), mask=txt_layer)
-
+            
+            if isinstance(gradient_img, Image.Image):
+                gradient_layer = await asyncio.to_thread(Image.new, 'RGBA', base_img.size, (0,0,0,0))
+                gradient_crop = await asyncio.to_thread(gradient_img.crop, (0, 0, bbox[2]-bbox[0], bbox[3]-bbox[1]))
+                await asyncio.to_thread(gradient_layer.paste, gradient_crop, (bbox[0], bbox[1]))
+                await asyncio.to_thread(result.paste, gradient_layer, (0, 0), mask=txt_layer)
+            else:
+                solid_color = await asyncio.to_thread(Image.new, 'RGBA', base_img.size, gradient_img)
+                await asyncio.to_thread(result.paste, solid_color, (0, 0), mask=txt_layer)
 
             output_file = self._get_temp_path('png')
             await asyncio.to_thread(result.save, output_file)
@@ -2478,7 +2429,7 @@ class MediaProcessor:
             return "Error: could not determine input media dimensions"
 
 
-        bg_img = self._parse_color(background_color, (width, padding))
+        bg_img = await asyncio.to_thread(self._parse_color, background_color, (width, padding))
         if isinstance(bg_img, tuple):
             bg_img = await asyncio.to_thread(Image.new, 'RGBA', (width, padding), bg_img)
         caption_file = self._get_temp_path('png')
@@ -2785,7 +2736,7 @@ class MediaProcessor:
             height = await self._resolve_dimension(kwargs['height'])
             size = (width, height)
 
-            color = self._parse_color(kwargs['color'], size)
+            color = await asyncio.to_thread(self._parse_color, kwargs['color'], size)
             if isinstance(color, Image.Image):
                 img = color
             else:
@@ -2827,7 +2778,7 @@ class MediaProcessor:
 
 
         if color.startswith(('linear-gradient', 'radial-gradient')):
-            bg_img = self._parse_color(color, (width, height))
+            bg_img = await asyncio.to_thread(self._parse_color, color, (width, height))
             bg_file = self._get_temp_path('png')
             bg_img.save(bg_file)
             bg_input = ['-stream_loop', '-1', '-i', bg_file.as_posix()]
@@ -2904,7 +2855,7 @@ class MediaProcessor:
         is_image = input_duration <= 0
 
         if color.startswith(('linear-gradient', 'radial-gradient')):
-            bg_img = self._parse_color(color, (width, height))
+            bg_img = await asyncio.to_thread(self._parse_color, color, (width, height))
             bg_file = self._get_temp_path('png')
             bg_img.save(bg_file)
             bg_input = ['-stream_loop', '-1', '-i', bg_file.as_posix()]
@@ -3320,7 +3271,6 @@ class Tags(commands.Cog):
                 * Example: `{gscript:load url key{newline}convert key mov converted{newline}render converted}
                 * Available GScript commands:
                     - load [url] [media_key]
-                    - loadsvg [svg_content] [media_key] [width] [height] [background]
                     - reverse [input_key] [output_key]
                     - concat [output_key] [input_keys...]
                     - convert [input_key] [format] [output_key]
@@ -3344,6 +3294,7 @@ class Tags(commands.Cog):
                     - volume [input_key] [volume_level] [output_key]
                     - overlay [base_key] [overlay_key] [x] [y] [output_key]
                     - text [input_key] [text] [x] [y] [color] [output_key] [font_size] [font] [outline_color] [outline_width] [shadow_color] [shadow_offset] [shadow_blur] [wrap_width] [line_spacing]
+                    - caption [input_key] [text] [output_key] [font_size] [font] [color] [background_color] [padding] [outline_color] [outline_width] [shadow_color] [shadow_offset] [shadow_blur]
                     - audioputreplace [media_key] [audio_key] [output_key] [preserve_length] [force_video] [loop_media]
                     - audioputmix [media_key] [audio_key] [output_key] [volume] [preserve_length] [loop_audio] [loop_media]
                     - tremolo [input_key] [frequency] [depth] [output_key]
@@ -3353,6 +3304,7 @@ class Tags(commands.Cog):
                     - fadeout [input_key] [start_time] [duration] [color] [audio] [output_key]
                     - colorkey [input_key] [color] [similarity] [blend] [output_key]
                     - chromakey [input_key] [color] [similarity] [blend] [output_key]
+                    - dobetween [input_key] [start_time] [end_time] [segment_key] [gmanscript]
             """
             try:
                 results = await self.processor.execute_media_script(script)
