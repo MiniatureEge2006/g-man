@@ -616,14 +616,6 @@ class MediaProcessor:
         file_path = self.media_cache[media_key]
         
 
-        if Path(file_path).suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp'):
-            try:
-                with Image.open(file_path) as img:
-                    return img.size
-            except:
-                pass
-        
-
         cmd = [
             'ffprobe', '-v', 'error',
             '-select_streams', 'v:0',
@@ -1094,14 +1086,6 @@ class MediaProcessor:
             return False, f"FFprobe error: {str(e)}"
     
     async def _probe_media_info(self, path: Path) -> tuple:
-        try:
-            if path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp'):
-                with Image.open(path) as img:
-                    return img.width, img.height, 0.0, False
-        except:
-            pass
-
-
         cmd = [
             'ffprobe', '-v', 'error',
             '-show_entries', 'stream=codec_type,width,height,duration',
@@ -1247,7 +1231,7 @@ class MediaProcessor:
             self.media_cache[media_key] = str(final_temp_file)
             return f"Loaded {media_key} via yt-dlp"
         
-        except Exception as e:
+        except Exception:
             try:
                 await self.ensure_session()
                 async with self.session.get(url) as resp:
