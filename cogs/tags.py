@@ -227,11 +227,6 @@ class MediaProcessor:
         self.temp_dir = Path(os.getenv('TEMP', '/tmp')) / 'gscript'
         self.temp_dir.mkdir(exist_ok=True)
         self.temp_files = set()
-        self._cleanup_task = None
-        self._last_cleanup = None
-        self.cleanup_interval = 300
-        self.file_max_age = 300
-        self.start_cleanup_task()
         self.session = None
         self.command_specs = {
             'load': {
@@ -490,73 +485,9 @@ class MediaProcessor:
             'dobetween': self._dobetween_media
         }
     
-    def start_cleanup_task(self):
-        if self._cleanup_task is None or self._cleanup_task.done():
-            self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
-    
     async def ensure_session(self):
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession()
-    
-    async def _periodic_cleanup(self):
-        while True:
-            try:
-                await self._cleanup_old_files()
-                self._last_cleanup = datetime.now()
-                await asyncio.sleep(self.cleanup_interval)
-            except Exception:
-                await asyncio.sleep(60)
-    async def _cleanup_old_files(self):
-        now = datetime.now().timestamp()
-        cleaned_files = 0
-        cleaned_dirs = 0
-
-
-        for key, path in list(self.media_cache.items()):
-            try:
-                if not os.path.exists(path):
-                    del self.media_cache[key]
-                    continue
-                
-                file_age = now - os.path.getmtime(path)
-                if file_age > self.file_max_age:
-                    os.unlink(path)
-                    del self.media_cache[key]
-                    cleaned_files += 1
-            except Exception:
-                pass
-
-        
-        for path in list(self.temp_files):
-            try:
-                if not os.path.exists(path):
-                    self.temp_files.discard(path)
-                    continue
-                
-                file_age = now - os.path.getmtime(path)
-                if file_age > self.file_max_age:
-                    os.unlink(path)
-                    self.temp_files.discard(path)
-                    cleaned_files += 1
-            except Exception:
-                pass
-
-        
-        try:
-            for item in self.temp_dir.glob('*'):
-                try:
-                    item_age = now - item.stat().st_mtime
-                    if item_age > self.file_max_age:
-                        if item.is_file():
-                            item.unlink()
-                            cleaned_files += 1
-                        elif item.is_dir():
-                            shutil.rmtree(item)
-                            cleaned_dirs += 1
-                except Exception:
-                    pass
-        except Exception:
-            pass
 
     
     async def cleanup(self):
@@ -1128,67 +1059,70 @@ class MediaProcessor:
         errors = []
         last_output_key = None
         i = 0
-
-        while i < len(lines):
-            line = lines[i]
-            try:
-                if line.lower().startswith('dobetween'):
-                    parts = line.split()
-                    input_key = parts[1]
-                    start = parts[2]
-                    end = parts[3]
-                    output_key = parts[4]
-                    sub_script = []
-                    i += 1
-                    while i < len(lines) and not lines[i].lower() == 'end':
-                        sub_script.append(lines[i])
+        try:
+            while i < len(lines):
+                line = lines[i]
+                try:
+                    if line.lower().startswith('dobetween'):
+                        parts = line.split()
+                        input_key = parts[1]
+                        start = parts[2]
+                        end = parts[3]
+                        output_key = parts[4]
+                        sub_script = []
                         i += 1
-                    if i >= len(lines):
-                        errors.append("Missing 'end' for dobetween")
-                        break
-                    result = await self._dobetween_media(input_key=input_key, start_time=start, end_time=end, output_key=output_key, sub_script='\n'.join(sub_script))
-                    last_output_key = output_key
-                    if result.startswith("Error"):
-                        errors.append(result)
-                    i += 1
-                else:
-                    parts = shlex.split(line)
-                    cmd = parts[0].lower()
-                    args = parts[1:]
-
-                    if cmd not in self.gscript_commands:
-                        errors.append(f"[{line}]\n -> Unknown command: `{cmd}`")
+                        while i < len(lines) and not lines[i].lower() == 'end':
+                            sub_script.append(lines[i])
+                            i += 1
+                        if i >= len(lines):
+                            errors.append("Missing 'end' for dobetween")
+                            break
+                        result = await self._dobetween_media(input_key=input_key, start_time=start, end_time=end, output_key=output_key, sub_script='\n'.join(sub_script))
+                        last_output_key = output_key
+                        if result.startswith("Error"):
+                            errors.append(result)
                         i += 1
-                        continue
+                    else:
+                        parts = shlex.split(line)
+                        cmd = parts[0].lower()
+                        args = parts[1:]
 
-                    try:
-                        parsed = self._parse_command_args(cmd, args)
-                    except Exception as e:
-                        errors.append(f"[{line}]\n -> Argument error: {e}")
+                        if cmd not in self.gscript_commands:
+                            errors.append(f"[{line}]\n -> Unknown command: `{cmd}`")
+                            i += 1
+                            continue
+
+                        try:
+                            parsed = self._parse_command_args(cmd, args)
+                        except Exception as e:
+                            errors.append(f"[{line}]\n -> Argument error: {e}")
+                            i += 1
+                            continue
+                        func = self.gscript_commands[cmd]
+                        result = await func(**parsed)
+                        if 'output_key' in parsed:
+                            last_output_key = parsed['output_key']
+                        if result.startswith("Error"):
+                            errors.append(result)
+                        elif cmd == "render" and result.startswith("media://"):
+                            output_files.append(result[8:])
                         i += 1
-                        continue
-                    func = self.gscript_commands[cmd]
-                    result = await func(**parsed)
-                    if 'output_key' in parsed:
-                        last_output_key = parsed['output_key']
-                    if result.startswith("Error"):
-                        errors.append(result)
-                    elif cmd == "render" and result.startswith("media://"):
-                        output_files.append(result[8:])
+                except Exception as e:
+                    errors.append(f"Error processing `{line}`: {str(e)}")
                     i += 1
-            except Exception as e:
-                errors.append(f"Error processing `{line}`: {str(e)}")
-                i += 1
 
-        if not errors and not output_files and last_output_key:
-            try:
-                auto_result = await self._render_media(media_key=last_output_key)
-                if auto_result.startswith("media://"):
-                    output_files.append(auto_result[8:])
-            except Exception as e:
-                errors.append(f"Auto-render failed: {str(e)}")
+            if not errors and not output_files and last_output_key:
+                try:
+                    auto_result = await self._render_media(media_key=last_output_key)
+                    if auto_result.startswith("media://"):
+                        output_files.append(auto_result[8:])
+                except Exception as e:
+                    errors.append(f"Auto-render failed: {str(e)}")
 
-        return errors if errors else output_files or ["Processing complete"]
+            return errors if errors else output_files or ["Processing complete"]
+        except Exception as e:
+            await self.cleanup()
+            return [f"Script execution error: {str(e)}"]
     
     async def _load_media(self, **kwargs) -> str:
         try:
@@ -1448,7 +1382,7 @@ class MediaProcessor:
         success, error = await self._run_ffmpeg(ffmpeg_cmd)
         if success:
             self.media_cache[output_key] = str(output_file)
-            return f"media://{output_file}"
+            return f"media://{output_file.as_posix()}"
         return error
     
     async def _render_media(self, **kwargs) -> str:
@@ -2764,7 +2698,7 @@ class MediaProcessor:
         if color.startswith(('linear-gradient', 'radial-gradient')):
             bg_img = await asyncio.to_thread(self._parse_color, color, (width, height))
             bg_file = self._get_temp_path('png')
-            bg_img.save(bg_file)
+            await asyncio.to_thread(bg_img.save, bg_file)
             bg_input = ['-stream_loop', '-1', '-i', bg_file.as_posix()]
         else:
             bg_input = ['-f', 'lavfi', '-i', f'color=c={color}:s={width}x{height}:d=9999']
@@ -2841,7 +2775,7 @@ class MediaProcessor:
         if color.startswith(('linear-gradient', 'radial-gradient')):
             bg_img = await asyncio.to_thread(self._parse_color, color, (width, height))
             bg_file = self._get_temp_path('png')
-            bg_img.save(bg_file)
+            await asyncio.to_thread(bg_img.save, bg_file)
             bg_input = ['-stream_loop', '-1', '-i', bg_file.as_posix()]
         else:
             bg_input = ['-f', 'lavfi', '-i', f'color=c={color}:s={width}x{height}:d=9999']
@@ -3152,43 +3086,8 @@ class Tags(commands.Cog):
         self.formatter = TagFormatter()
         self.processor = MediaProcessor()
         self.setup_formatters()
-        self.media_cache = {}
         self.setup_media_formatters()
         self.active_processes = set()
-        self._cleanup_task = None
-        self.start_cleanup_task()
-        self._custom_id_map = {}
-        self._stored_custom_ids = {}
-    
-    def _find_original_custom_id(self, display_id):
-        return self._custom_id_map.get(display_id)
-    
-    def start_cleanup_task(self):
-        if self._cleanup_task is None or self._cleanup_task.done():
-            self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
-        
-        asyncio.create_task(self.cleanup_resources())
-    
-    async def _periodic_cleanup(self):
-        while True:
-            try:
-                await self.processor._cleanup_old_files()
-                now = datetime.now()
-                for msg_id, vars_data in list(self._variables.items()):
-                    if (now - vars_data.get('_timestamp', now)).total_seconds() > 86400:
-                        del self._variables[msg_id]
-                await asyncio.sleep(3600)
-            except asyncio.CancelledError:
-                return
-            except Exception as e:
-                await asyncio.sleep(300)
-    
-    async def cleanup_resources(self):
-        try:
-            await self.processor.cleanup()
-            self._variables.clear()
-        except Exception as e:
-            pass
     
     async def execute_language(self, ctx, language: str, code: str, **kwargs):
         await self.processor.ensure_session()
@@ -3322,7 +3221,10 @@ class Tags(commands.Cog):
                     return (str(results), [], None, [])
 
             except Exception as e:
+                await self.processor.cleanup()
                 return (f"[gmanscript error: {str(e)}]", [], None, [])
+            finally:
+                await self.processor.cleanup()
 
     
     def setup_formatters(self):
@@ -5988,9 +5890,6 @@ class Tags(commands.Cog):
         else:
             pass
 
-
-
-
     async def execute_command(self, interaction: discord.Interaction, command_str: str):
         command_name, *args = command_str.split()
         command = self.bot.get_command(command_name)
@@ -6071,10 +5970,6 @@ class Tags(commands.Cog):
                 f"Failed to send tag result: {str(e)}",
                 ephemeral=True
             )
-
-    
-    def cog_unload(self):
-        asyncio.create_task(self.cleanup_resources())
     
     def parse_personal_flag(self, content: str) -> tuple[str, bool]:
         personal = False
