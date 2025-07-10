@@ -103,9 +103,7 @@ class Media(commands.Cog):
                 await ctx.send(file=file)
 
         finally:
-            for key in [input_key, output_key]:
-                if key in self.tags_cog.processor.media_cache:
-                    del self.tags_cog.processor.media_cache[key]
+            await self.tags_cog.processor.cleanup()
     
     @commands.hybrid_group(name="media", with_app_command=True, description="Media manipulation commands.")
     @app_commands.allowed_installs(guilds=True, users=True)
