@@ -37,6 +37,8 @@ class Audio(commands.Cog):
         self.metadata_cache = {}
         self.executor = ThreadPoolExecutor(max_workers=4)
         self.paused_times = {}
+        self.volumes = {}
+        self.default_volume = 0.25
 
     def get_queue(self, guild_id):
         if guild_id not in self.queues:
@@ -288,6 +290,7 @@ class Audio(commands.Cog):
             if filters:
                 ffmpeg_options['options'] += f" -af {','.join(filters)}"
             source = discord.FFmpegPCMAudio(file_path, **ffmpeg_options)
+            source = discord.PCMVolumeTransformer(source, volume=self.volumes.get(ctx.guild.id, self.default_volume))
             ctx.voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.cleanup_file_and_play_next(ctx, file_path), self.bot.loop))
             self.currently_playing[ctx.guild.id] = {
                 'info': info,
@@ -396,6 +399,7 @@ class Audio(commands.Cog):
         if filters:
             ffmpeg_options['options'] += f" -af {','.join(filters)}"
         source = discord.FFmpegPCMAudio(stream_url, **ffmpeg_options)
+        source = discord.PCMVolumeTransformer(source, volume=self.volumes.get(ctx.guild.id, self.default_volume))
         ctx.voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.cleanup_file_and_play_next(ctx, ""), self.bot.loop))
         self.currently_playing[ctx.guild.id] = {
             'info': info,
@@ -424,6 +428,7 @@ class Audio(commands.Cog):
         if filters:
             ffmpeg_options['options'] += f" -af {','.join(filters)}"
         source = discord.FFmpegPCMAudio(file_path, **ffmpeg_options)
+        source = discord.PCMVolumeTransformer(source, volume=self.volumes.get(ctx.guild.id, self.default_volume))
         ctx.voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.cleanup_file_and_play_next(ctx, file_path), self.bot.loop))
         self.currently_playing[ctx.guild.id] = {
             'info': info,
@@ -600,6 +605,7 @@ class Audio(commands.Cog):
         if filters:
             ffmpeg_options['options'] += f" -af {','.join(filters)}"
         source = discord.FFmpegPCMAudio(stream_url, **ffmpeg_options)
+        source = discord.PCMVolumeTransformer(source, volume=self.volumes.get(ctx.guild.id, self.default_volume))
         ctx.voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next_stream(ctx), self.bot.loop))
         self.currently_playing[ctx.guild.id] = {
             'info': info,
@@ -763,6 +769,29 @@ class Audio(commands.Cog):
 
         title = removed[3]
         await ctx.send(f"Removed **{title}** from the queue.")
+    
+    @commands.hybrid_command(name="volume", description="Adjust the playback volume. (0-100%)", aliases=["vol"])
+    @app_commands.describe(level="Volume level. (0-100)")
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def volume(self, ctx: commands.Context, level: int):
+        await ctx.typing()
+        if not ctx.voice_client or not ctx.voice_client.is_playing():
+            await ctx.send("Nothing is currently playing.")
+            return
+        if ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You must be in the same voice channel as me to adjust volume.")
+            return
+        
+        level = max(0, min(100, level))
+        volume_level = level / 100.0
+        self.volumes[ctx.guild.id] = volume_level
+        
+        
+        if ctx.voice_client.source:
+            if ctx.voice_client.source and hasattr(ctx.voice_client.source, 'volume'):
+                ctx.voice_client.source.volume = volume_level
+        
+        await ctx.send(f"Volume set to {level}%")
 
     @commands.hybrid_command(name="nowplaying", description="Display information about the currently playing audio/song.", aliases=["np"])
     @app_commands.allowed_installs(guilds=True, users=False)
