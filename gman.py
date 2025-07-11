@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import io
 import textwrap
 import bot_info
@@ -342,6 +343,35 @@ async def ping(ctx: commands.Context):
     content = f"Pong!\nGateway: {ws_latency}ms\nAPI: {api_response_time}ms\nUptime: {days}d {hours}h {minutes}m {seconds}s\nCPU Usage: {cpu_usage}%\nMemory Usage: {memory_usage} MB / {memory_total} MB"
 
     await message.edit(content=content)
+
+
+@bot.command(name="sudo", description="Execute a command as another user. Use sudo! to bypass checks and permissions.", aliases=["sudo!"])
+@bot_info.is_owner()
+async def sudo(ctx: commands.Context, user: discord.Member, command: str, *, arguments: str = None):
+    async def get_effective_prefix(bot, message):
+        return await get_prefix(bot, message)
+    
+    fake_message = copy.copy(ctx.message)
+    fake_message.author = user
+    effective_prefixes = await get_effective_prefix(bot, fake_message)
+    used_prefix = effective_prefixes[0] if effective_prefixes else bot_info.data['prefix']
+    fake_message.content = f"{used_prefix}{command}" + (f" {arguments}" if arguments else "")
+
+    new_ctx = await bot.get_context(fake_message)
+
+    if new_ctx.command is None:
+        await ctx.send(f"Command `{command}` not found or cannot be executed.")
+        return
+
+    try:
+        if ctx.invoked_with and ctx.invoked_with.endswith('!'):
+            await new_ctx.command.reinvoke(new_ctx)
+            return
+        await new_ctx.command.invoke(new_ctx)
+        return
+    except Exception as e:
+        await ctx.send(f"Error while running command as {user}: {e}")
+        raise
 
 
 @bot.command(name="sync", description="Sync slash commands.")
