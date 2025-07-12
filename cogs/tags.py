@@ -444,7 +444,7 @@ class MediaProcessor:
                 'start_time': {'required': True, 'type': str},
                 'end_time': {'required': True, 'type': str},
                 'output_key': {'required': True, 'type': str},
-                'segment_key': {'default': '_dobetween_segment', 'type': str}
+                'segment_key': {'default': 'segment', 'type': str}
             }
         }
         self.gscript_commands = {
@@ -2897,52 +2897,85 @@ class MediaProcessor:
         start_time = kwargs['start_time']
         end_time = kwargs['end_time']
         output_key = kwargs['output_key']
-        segment_key = kwargs.get('segment_key', '_dobetween_segment')
+        segment_key = kwargs.get('segment_key', 'segment')
         sub_script = kwargs.get('sub_script', '')
+        
+        if input_key not in self.media_cache:
+            return f"Error: {input_key} not found"
+
+
+        resolved_start = await self._resolve_timestamp(input_key, start_time)
+        resolved_end = await self._resolve_timestamp(input_key, end_time)
+
+
         before_key = f"{segment_key}_before"
+        segment_key = f"{segment_key}_main"
         after_key = f"{segment_key}_after"
         edited_key = f"{segment_key}_edited"
 
 
-        tasks = [
-            self._trim_media(input_key=input_key, start_time='0', end_time=start_time, output_key=before_key),
-            self._trim_media(input_key=input_key, start_time=start_time, end_time=end_time, output_key=segment_key),
-            self._trim_media(input_key=input_key, start_time=end_time, end_time='9999999', output_key=after_key)
+        trim_tasks = [
+            self._trim_media(
+                input_key=input_key,
+                start_time='0',
+                end_time=resolved_start,
+                output_key=before_key
+            ),
+            self._trim_media(
+                input_key=input_key,
+                start_time=resolved_start,
+                end_time=resolved_end,
+                output_key=segment_key
+            ),
+            self._trim_media(
+                input_key=input_key,
+                start_time=resolved_end,
+                end_time='9999999',
+                output_key=after_key
+            )
         ]
-        results = await asyncio.gather(*tasks)
+        
+        results = await asyncio.gather(*trim_tasks)
         if any(r.startswith("Error") for r in results):
             return f"Trim error(s): {results}"
 
 
-        patched_lines = []
-        for line in sub_script.splitlines():
-            line = line.strip()
-            if not line:
-                continue
+        if sub_script:
+            patched_lines = []
+            for line in sub_script.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
 
-            parts = shlex.split(line)
-            cmd = parts[0]
-            pos = [p for p in parts[1:] if '=' not in p]
-            kw = dict(p.split('=', 1) for p in parts[1:] if '=' in p)
+                parts = shlex.split(line)
+                cmd = parts[0]
+                pos_args = [p for p in parts[1:] if '=' not in p]
+                kw_args = dict(p.split('=', 1) for p in parts[1:] if '=' in p)
 
-            if 'input_key' not in kw:
-                kw['input_key'] = segment_key
-            if 'output_key' not in kw:
-                kw['output_key'] = edited_key
 
-            new_parts = [cmd] + pos + [f"{k}={v}" for k, v in kw.items()]
-            patched_lines.append(shlex.join(new_parts))
+                if 'input_key' not in kw_args:
+                    kw_args['input_key'] = segment_key
+                if 'output_key' not in kw_args:
+                    kw_args['output_key'] = edited_key
 
-        patched_script = "\n".join(patched_lines)
-        script_result = await self.execute_media_script(patched_script)
-        if any(r.startswith("Error") for r in script_result):
-            return f"Sub-script error: {script_result}"
 
+                new_parts = [cmd] + pos_args + [f"{k}={v}" for k, v in kw_args.items()]
+                patched_lines.append(shlex.join(new_parts))
+
+            patched_script = "\n".join(patched_lines)
+            script_result = await self.execute_media_script(patched_script)
+            if any(r.startswith("Error") for r in script_result):
+                return f"Sub-script error: {script_result}"
+
+            segment_to_use = edited_key
+        else:
+            segment_to_use = segment_key
 
         concat_result = await self._concat_media(
-            input_keys=[before_key, edited_key, after_key],
+            input_keys=[before_key, segment_to_use, after_key],
             output_key=output_key
         )
+        
         return concat_result
 
 
