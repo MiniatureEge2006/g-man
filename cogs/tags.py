@@ -5040,7 +5040,7 @@ class Tags(commands.Cog):
         async def _randuser(ctx, user, **kwargs):
             """
             ### {randuser}
-                * Returns a random user from current the server.
+                * Returns a random user from the server.
                 * Example: `{randuser}`
             """
             if ctx.guild:
@@ -5048,11 +5048,37 @@ class Tags(commands.Cog):
                 return random_user.name
             return None
         
+        @self.formatter.register('randonline')
+        async def _randonline(ctx, user, **kwargs):
+            """
+            ### {randonline}
+                * Returns a random online user from the server.
+                * Example: `{randonline}`
+            """
+            if ctx.guild:
+                online_users = [user for user in ctx.guild.members if user.status != discord.Status.offline]
+                random_online_user = random.choice(online_users)
+                return random_online_user.name
+            return None
+        
+        @self.formatter.register('randonlineid')
+        async def _randonlineid(ctx, user, **kwargs):
+            """
+            ### {randonlineid}
+                * Returns a random online user ID from the server.
+                * Example: `{randonlineid}`
+            """
+            if ctx.guild:
+                online_users = [user for user in ctx.guild.members if user.status != discord.Status.offline]
+                random_online_user = random.choice(online_users)
+                return random_online_user.id
+            return None
+        
         @self.formatter.register('randuserid')
         async def _randuserid(ctx, user, **kwargs):
             """
             ### {randuserid}
-                * Returns a random user ID from the current server.
+                * Returns a random user ID from the server.
                 * Example: `{randuserid}`
             """
             if ctx.guild:
@@ -5061,32 +5087,85 @@ class Tags(commands.Cog):
             return None
         
         @self.formatter.register('channel')
-        async def _channel(ctx, i, **kwargs):
+        async def _channel(ctx, channel, **kwargs):
             """
-            ### {channel}
-                * Returns current channel name.
+            ### {channel:channel}
+                * Returns a channel name. Defaults to current channel.
                 * Example: `{channel}` -> "general"
             """
-            if isinstance(ctx.channel, discord.DMChannel):
-                return "DMs"
-            elif isinstance(ctx.channel, discord.TextChannel):
+            if not channel:
                 return ctx.channel.name
-            else:
-                return str(ctx.channel)
+            try:
+                channel = await commands.GuildChannelConverter().convert(ctx, channel)
+                return channel.name
+            except Exception:
+                return ctx.channel.name
+        
+        @self.formatter.register('channelmention')
+        async def _channelmention(ctx, channel, **kwargs):
+            """
+            ### {channelmention:channel}
+                * Returns a channel mention. Defaults to current channel.
+                * Example: `{channelmention}` -> "#general"
+            """
+            if not channel:
+                return ctx.channel.mention
+            try:
+                channel = await commands.GuildChannelConverter().convert(ctx, channel)
+                return channel.mention
+            except Exception:
+                return ctx.channel.mention
         
         @self.formatter.register('channelid')
-        async def _channelid(ctx, i, **kwargs):
+        async def _channelid(ctx, channel, **kwargs):
             """
-            ### {channelid}
-                * Returns current channel ID.
-                * Example: `{channel}` -> "1337131589087400046"
+            ### {channelid:channel}
+                * Returns a channel ID. Defaults to current channel.
+                * Example: `{channelid}` -> "1337131589087400046"
             """
-            if isinstance(ctx.channel, discord.DMChannel):
+            if not channel:
                 return ctx.channel.id
-            elif isinstance(ctx.channel, discord.TextChannel):
+            try:
+                channel = await commands.GuildChannelConverter().convert(ctx, channel)
+                return channel.id
+            except Exception:
                 return ctx.channel.id
-            else:
-                return ctx.channel.id if ctx.channel else None
+        
+        @self.formatter.register('randchannel')
+        async def _randchannel(ctx, channel, **kwargs):
+            """
+            ### {randchannel}
+                * Returns a random channel name from the server.
+                * Example: `{randchannel}`
+            """
+            if ctx.guild:
+                random_channel = random.choice(ctx.guild.channels)
+                return random_channel.name
+            return None
+        
+        @self.formatter.register('randchannelmention')
+        async def _randchannelmention(ctx, channel, **kwargs):
+            """
+            ### {randchannelmention}
+                * Returns a random channel mention from the server.
+                * Example: `{randchannelmention}`
+            """
+            if ctx.guild:
+                random_channel = random.choice(ctx.guild.channels)
+                return random_channel.mention
+            return None
+        
+        @self.formatter.register('randchannelid')
+        async def _randchannelid(ctx, channel, **kwargs):
+            """
+            ### {randchannelid}
+                * Returns a random channel ID from the server.
+                * Example: `{randchannelid}`
+            """
+            if ctx.guild:
+                random_channel = random.choice(ctx.guild.channels)
+                return random_channel.id
+            return None
         
         @self.formatter.register('guild')
         @self.formatter.register('server')
@@ -5117,13 +5196,37 @@ class Tags(commands.Cog):
                 return None
             else:
                 return None
+        
+        @self.formatter.register('guildicon')
+        @self.formatter.register('servericon')
+        async def _guildicon(ctx, i, **kwargs):
+            """
+            ### {guildicon}
+                * Returns current server icon URL.
+                * Example: `{guildicon}`
+            """
+            if ctx.guild and ctx.guild.icon:
+                return ctx.guild.icon.url
+            return None
+        
+        @self.formatter.register('guildbanner')
+        @self.formatter.register('serverbanner')
+        async def _guildbanner(ctx, i, **kwargs):
+            """
+            ### {guildbanner}
+                * Returns current server banner URL.
+                * Example: `{guildbanner}`
+            """
+            if ctx.guild and ctx.guild.banner:
+                return ctx.guild.banner.url
+            return None
 
         @self.formatter.register('embed')
         async def _embed(ctx, args_str, **kwargs):
             """
             ### {embed:JSON}
-            Builds an embed from JSON data.
-            Example: `{embed:{"title":"Hello"}}`
+                * Builds an embed from JSON data.
+                * Example: `{embed:{"title":"Hello"}}`
             """
             try:
                 processed_content, _, _, _ = await ctx.cog.formatter.format(args_str, ctx, **kwargs)
@@ -5155,8 +5258,8 @@ class Tags(commands.Cog):
         async def _button(ctx, args_str, **kwargs):
             """
             ### {button:JSON}
-            Builds a button component from JSON data.
-            Example: `{button:{"label":"Click","style":"primary"}}`
+                * Builds a button component from JSON data.
+                * Example: `{button:{"label":"Click","style":"primary"}}`
             """
             try:
                 params = await parse_component_input(ctx, args_str)
@@ -5185,10 +5288,8 @@ class Tags(commands.Cog):
         async def _select(ctx, args_str, **kwargs):
             """
             ### {select:JSON}
-            Builds a select menu component from JSON data.
-            
-            Example:
-            `{select:{"placeholder": "Choose","min": 1,"options": [{"label":"A","value":"a"},{"label":"B","value":"b"}]}}`
+                * Builds a select menu component from JSON data.
+                * Example: `{select:{"placeholder": "Choose","min": 1,"options": [{"label":"A","value":"a"},{"label":"B","value":"b"}]}}`
             """
             try:
                 data = await parse_component_input(ctx, args_str)
