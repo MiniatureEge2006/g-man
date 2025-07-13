@@ -6045,6 +6045,9 @@ class Tags(commands.Cog):
         if message.id in self._variables:
             del self._variables[message.id]
     
+    def cog_unload(self):
+        asyncio.create_task(self.processor.cleanup())
+    
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction):
         if interaction.type != discord.InteractionType.component:
