@@ -5222,6 +5222,8 @@ class Tags(commands.Cog):
             return None
 
         @self.formatter.register('embed')
+        @self.formatter.register('embedjson')
+        @self.formatter.register('json.embed')
         async def _embed(ctx, args_str, **kwargs):
             """
             ### {embed:JSON}
@@ -5229,7 +5231,7 @@ class Tags(commands.Cog):
                 * Example: `{embed:{"title":"Hello"}}`
             """
             try:
-                processed_content, _, _, _ = await ctx.cog.formatter.format(args_str, ctx, **kwargs)
+                processed_content, _, _, _ = await self.formatter.format(args_str, ctx, **kwargs)
                 embed_data = json.loads(processed_content)
                 resolved_data = await resolve_json_tags(ctx, embed_data)
                 embed = DiscordGenerator._build_embed(**resolved_data)
@@ -5250,11 +5252,13 @@ class Tags(commands.Cog):
             elif isinstance(data, list):
                 return [await resolve_json_tags(ctx, item) for item in data]
             elif isinstance(data, str):
-                processed, _, _, _ = await ctx.cog.formatter.format(data, ctx)
+                processed, _, _, _ = await self.formatter.format(data, ctx)
                 return processed
             return data
             
         @self.formatter.register('button')
+        @self.formatter.register('buttonjson')
+        @self.formatter.register('json.button')
         async def _button(ctx, args_str, **kwargs):
             """
             ### {button:JSON}
@@ -5285,6 +5289,8 @@ class Tags(commands.Cog):
                 return (f"[button error: {str(e)}]", [], None, [])
         
         @self.formatter.register('select')
+        @self.formatter.register('selectjson')
+        @self.formatter.register('json.select')
         async def _select(ctx, args_str, **kwargs):
             """
             ### {select:JSON}
@@ -5302,7 +5308,69 @@ class Tags(commands.Cog):
             except Exception as e:
                 return (f"[select error: {str(e)}]", [], None, [])
         
+        @self.formatter.register('paginator')
+        @self.formatter.register('paginatorjson')
+        @self.formatter.register('page')
+        @self.formatter.register('pagejson')
+        @self.formatter.register('json.paginator')
+        @self.formatter.register('json.page')
+        async def _paginator(ctx, content, **kwargs):
+            """
+            ### {paginator:embedjson|...}
+                * Creates an embed paginator with multiple pages.
+                * Each page must be a valid JSON embed object.
+                * Supports unlimited pages.
+                * Example: `{paginator:{"title":"Page 1"}|{"description":"Page 2","color":"#ff0000"}}`
+            """
+            try:
+                pages = []
+                current_page = []
+                escape_next = False
+                
+                for char in content:
+                    if escape_next:
+                        current_page.append(char)
+                        escape_next = False
+                    elif char == '\\':
+                        escape_next = True
+                    elif char == '|' and not escape_next:
+                        pages.append(''.join(current_page))
+                        current_page = []
+                    else:
+                        current_page.append(char)
+                
+                if current_page:
+                    pages.append(''.join(current_page))
+
+                if not pages:
+                    return "No pages provided."
+
+                embed_pages = []
+                for page in pages:
+                    try:
+                        processed_content, _, _, _ = await self.formatter.format(page, ctx, **kwargs)
+                        embed_data = json.loads(processed_content)
+                        resolved_data = await resolve_json_tags(ctx, embed_data)
+                        embed = DiscordGenerator._build_embed(**resolved_data)
+                        embed_pages.append(embed)
+                    except json.JSONDecodeError as e:
+                        return f"Invalid embed JSON: {str(e)}"
+                    except Exception as e:
+                        return f"Error creating embed: {str(e)}"
+
+                interaction = kwargs.get('interaction', None)
+                if interaction is None and hasattr(ctx, 'interaction'):
+                    interaction = ctx.interaction
+                    
+                view = TagPaginator(embed_pages, interaction)
+                
+                return ("", [embed_pages[0]], view, [])
+
+            except Exception as e:
+                return f"[paginator error: {str(e)}]"
+        
         @self.formatter.register('json.user')
+        @self.formatter.register('userjson')
         async def _json_user(ctx, user_ref='', **kwargs):
             """
             ### {json.user:user}
@@ -5333,6 +5401,7 @@ class Tags(commands.Cog):
                 return f"[JSON User Error: {str(e)}]"
         
         @self.formatter.register('json.member')
+        @self.formatter.register('memberjson')
         async def _json_member(ctx, user_ref='', **kwargs):
             """
             ### {json.member:user}
@@ -5371,6 +5440,7 @@ class Tags(commands.Cog):
                 return f"[JSON Member Error: {str(e)}]"
         
         @self.formatter.register('json.memberoruser')
+        @self.formatter.register('memberoruserjson')
         async def _json_memberoruser(ctx, user_ref='', **kwargs):
             """
             ### {json.memberoruser:user}
@@ -5411,6 +5481,7 @@ class Tags(commands.Cog):
                 return f"[JSON MemberOrUser Error: {str(e)}]"
         
         @self.formatter.register('json.message')
+        @self.formatter.register('messagejson')
         async def _json_message(ctx, message_ref='', **kwargs):
             """
             ### {json.message:message}
@@ -5464,6 +5535,7 @@ class Tags(commands.Cog):
                 return f"[JSON Message Error: {str(e)}]"
         
         @self.formatter.register('json.guild')
+        @self.formatter.register('guildjson')
         async def _json_guild(ctx, guild_ref='', **kwargs):
             """
             ### {json.guild}
@@ -5525,6 +5597,7 @@ class Tags(commands.Cog):
                 return f"[JSON Guild Error: {str(e)}]"
         
         @self.formatter.register('json.channel')
+        @self.formatter.register('channeljson')
         async def _json_channel(ctx, channel_ref='', **kwargs):
             """
             ### {json.channel:channel}
@@ -5569,6 +5642,7 @@ class Tags(commands.Cog):
                 return f"[JSON Channel Error: {str(e)}]"
         
         @self.formatter.register('json.role')
+        @self.formatter.register('rolejson')
         async def _json_role(ctx, role_ref='', **kwargs):
             """
             ### {json.role:role}
@@ -5638,6 +5712,7 @@ class Tags(commands.Cog):
                 return f"[JSON Role Error: {str(e)}]"
         
         @self.formatter.register('json.emoji')
+        @self.formatter.register('emojijson')
         async def _json_emoji(ctx, emoji_ref, **kwargs):
             """
             ### {json.emoji:emoji}
@@ -5695,6 +5770,7 @@ class Tags(commands.Cog):
                 return f"[JSON Emoji Error: {str(e)}]"
         
         @self.formatter.register('json.attachment')
+        @self.formatter.register('attachmentjson')
         async def _json_attachment(ctx, attachment_ref, **kwargs):
             """
             ### {json.attachment:index}
