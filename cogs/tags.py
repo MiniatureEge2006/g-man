@@ -2389,53 +2389,32 @@ class MediaProcessor:
             wrap_width=width - 40
         )
 
-        if is_video or is_gif:
-            output_file = self._get_temp_path(input_path.suffix[1:])
+        output_file = self._get_temp_path(input_path.suffix[1:])
             
-            cmd = [
-                'ffmpeg', '-hide_banner',
-                '-i', str(input_path),
-                '-i', str(caption_file),
-                '-i', self.media_cache[text_key],
-                '-filter_complex',
-                f'[1:v][2:v]overlay=0:0[bgtext];'
-                f'[0:v]pad=width={width}:height={height+padding}:y={padding}:color=black[padded];'
-                f'[padded][bgtext]overlay=0:0[v]',
-                '-map', '[v]',
-                '-map', '0:a?',
-                '-preset', 'fast',
-                '-crf', '23',
-                '-pix_fmt', 'yuv420p',
-                '-movflags', '+faststart',
-                '-y', output_file.as_posix()
-            ]
+        cmd = [
+            'ffmpeg', '-hide_banner',
+            '-i', str(input_path),
+            '-i', str(caption_file),
+            '-i', self.media_cache[text_key],
+            '-filter_complex',
+            '[1:v][2:v]overlay=0:0[bgtext];'
+            f'[0:v]pad=width={width}:height={height+padding}:y={padding}:color=black[padded];'
+            '[padded][bgtext]overlay=0:0[v]',
+            *(['-frames:v', '1'] if not is_video and not is_gif else []),
+            '-map', '[v]',
+            '-map', '0:a?',
+            '-preset', 'fast',
+            '-crf', '23',
+            '-pix_fmt', 'yuv420p',
+            '-movflags', '+faststart',
+            '-y', output_file.as_posix()
+        ]
             
-            success, error = await self._run_ffmpeg(cmd)
-            if success:
-                self.media_cache[output_key] = str(output_file)
-                return f"media://{output_file.as_posix()}"
-            return error
-        else:
-            output_file = self._get_temp_path(input_path.suffix[1:])
-            new_height = height + padding
-            base_img = await asyncio.to_thread(Image.new, 'RGBA', (width, new_height))
-            caption_bg = await asyncio.to_thread(Image.open, caption_file)
-            await asyncio.to_thread(base_img.paste, caption_bg, (0, 0))
-            text_img = await asyncio.to_thread(Image.open, self.media_cache[text_key])
-            await asyncio.to_thread(base_img.paste, text_img, (0, 0), text_img)
-            original_img = await asyncio.to_thread(Image.open, input_path)
-            await asyncio.to_thread(base_img.paste, original_img, (0, padding))
-            format_map = {
-                '.jpg': 'JPEG',
-                '.jpeg': 'JPEG',
-                '.png': 'PNG',
-                '.webp': 'WEBP'
-            }
-            save_format = format_map.get(input_path.suffix.lower(), 'PNG')
-            
-            await asyncio.to_thread(base_img.save, output_file, format=save_format)
+        success, error = await self._run_ffmpeg(cmd)
+        if success:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
+        return error
 
     async def _replace_audio(self, **kwargs) -> str:
         try:
