@@ -132,10 +132,11 @@ class Search(commands.Cog):
     async def paginate_results(self, ctx: commands.Context, entries):
 
         class MediaNavView(discord.ui.View):
-            def __init__(self, cog, entries):
+            def __init__(self, cog, entries, original_author):
                 super().__init__(timeout=60)
                 self.cog = cog
                 self.message = None
+                self.original_author = original_author
                 self.entries = entries
                 self.current_page = 0
                 self.total = len(entries)
@@ -145,6 +146,15 @@ class Search(commands.Cog):
                 embed = self.cog.format_result_embed(self.entries[self.current_page], self.current_page, self.total)
                 await (interaction.response.edit_message(embed=embed, view=self)
                        if interaction else self.message.edit(embed=embed, view=self))
+            
+            async def interaction_check(self, interaction: discord.Interaction):
+                if interaction.user != self.original_author:
+                    await interaction.response.send_message("You can't control this pagination.", ephemeral=True)
+                    return False
+                return True
+            
+            async def on_timeout(self):
+                await self.message.edit(view=None)
             
             @discord.ui.button(emoji="⏮️", style=discord.ButtonStyle.secondary, row=0)
             async def first_page(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -219,8 +229,9 @@ class Search(commands.Cog):
             @discord.ui.button(emoji="🗑️", style=discord.ButtonStyle.danger, row=2)
             async def delete_message(self, interaction: discord.Interaction, button: discord.ui.Button):
                 await interaction.message.delete()
+                self.stop()
         
-        view = MediaNavView(self, entries)
+        view = MediaNavView(self, entries, ctx.author)
         embed = self.format_result_embed(entries[0], 0, len(entries))
         view.message = await ctx.send(embed=embed, view=view)
     

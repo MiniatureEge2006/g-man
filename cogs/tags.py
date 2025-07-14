@@ -36,11 +36,22 @@ AUDIO_TYPES = ('audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/ogg', 'audio/opus'
 
 
 class TagPaginator(discord.ui.View):
-    def __init__(self, pages: List[discord.Embed], interaction: discord.Interaction):
+    def __init__(self, pages: List[discord.Embed], interaction: discord.Interaction, original_author):
         super().__init__(timeout=60)
         self.pages = pages
         self.current_page = 0
+        self.original_author = original_author
+        self.message = None
         self.interaction = interaction
+    
+    async def interaction_check(self, interaction: discord.Interaction):
+        if interaction.user != self.original_author:
+            await interaction.response.send_message("You can't control this pagination.", ephemeral=True)
+            return False
+        return True
+    
+    async def on_timeout(self):
+        await self.message.edit(view=None)
 
     async def update_message(self, interaction: discord.Interaction):
         await interaction.response.edit_message(embed=self.pages[self.current_page], view=self)
@@ -5308,67 +5319,6 @@ class Tags(commands.Cog):
             except Exception as e:
                 return (f"[select error: {str(e)}]", [], None, [])
         
-        @self.formatter.register('paginator')
-        @self.formatter.register('paginatorjson')
-        @self.formatter.register('page')
-        @self.formatter.register('pagejson')
-        @self.formatter.register('json.paginator')
-        @self.formatter.register('json.page')
-        async def _paginator(ctx, content, **kwargs):
-            """
-            ### {paginator:embedjson|...}
-                * Creates an embed paginator with multiple pages.
-                * Each page must be a valid JSON embed object.
-                * Supports unlimited pages.
-                * Example: `{paginator:{"title":"Page 1"}|{"description":"Page 2","color":"#ff0000"}}`
-            """
-            try:
-                pages = []
-                current_page = []
-                escape_next = False
-                
-                for char in content:
-                    if escape_next:
-                        current_page.append(char)
-                        escape_next = False
-                    elif char == '\\':
-                        escape_next = True
-                    elif char == '|' and not escape_next:
-                        pages.append(''.join(current_page))
-                        current_page = []
-                    else:
-                        current_page.append(char)
-                
-                if current_page:
-                    pages.append(''.join(current_page))
-
-                if not pages:
-                    return "No pages provided."
-
-                embed_pages = []
-                for page in pages:
-                    try:
-                        processed_content, _, _, _ = await self.formatter.format(page, ctx, **kwargs)
-                        embed_data = json.loads(processed_content)
-                        resolved_data = await resolve_json_tags(ctx, embed_data)
-                        embed = DiscordGenerator._build_embed(**resolved_data)
-                        embed_pages.append(embed)
-                    except json.JSONDecodeError as e:
-                        return f"Invalid embed JSON: {str(e)}"
-                    except Exception as e:
-                        return f"Error creating embed: {str(e)}"
-
-                interaction = kwargs.get('interaction', None)
-                if interaction is None and hasattr(ctx, 'interaction'):
-                    interaction = ctx.interaction
-                    
-                view = TagPaginator(embed_pages, interaction)
-                
-                return ("", [embed_pages[0]], view, [])
-
-            except Exception as e:
-                return f"[paginator error: {str(e)}]"
-        
         @self.formatter.register('json.user')
         @self.formatter.register('userjson')
         async def _json_user(ctx, user_ref='', **kwargs):
@@ -6657,8 +6607,8 @@ class Tags(commands.Cog):
                 embed.set_footer(text=f"Page {i//per_page + 1} of {(len(tags)-1)//per_page + 1}")
                 pages.append(embed)
             
-            view = TagPaginator(pages, ctx.interaction)
-            await ctx.send(embed=pages[0], view=view)
+            view = TagPaginator(pages, ctx.interaction, ctx.author)
+            view.message = await ctx.send(embed=pages[0], view=view)
     
     @tag.command(name="info", description="Get information about a tag.", with_app_command=True)
     @app_commands.describe(
@@ -6805,8 +6755,8 @@ class Tags(commands.Cog):
                 embed.set_footer(text=f"Page {i//per_page + 1} of {(len(rows)-1)//per_page + 1}")
                 pages.append(embed)
 
-            view = TagPaginator(pages, ctx.interaction)
-            await ctx.send(embed=pages[0], view=view)
+            view = TagPaginator(pages, ctx.interaction, ctx.author)
+            view.message = await ctx.send(embed=pages[0], view=view)
     
     @tag.command(name="random", description="Show a random tag.", with_app_command=True)
     @app_commands.describe(args="Arguments and flags. (e.g. --personal, --user @User, --hide-name)", personal="Whether to fetch from personal tags.")
@@ -7029,8 +6979,8 @@ class Tags(commands.Cog):
                     embed.set_footer(text=f"Page {i//per_page + 1} of {(len(aliases)-1)//per_page + 1}")
                     pages.append(embed)
 
-                view = TagPaginator(pages, ctx.interaction)
-                await ctx.send(embed=pages[0], view=view)
+                view = TagPaginator(pages, ctx.interaction, ctx.author)
+                view.message = await ctx.send(embed=pages[0], view=view)
                 
             except Exception as e:
                 await ctx.send(f"An error occurred: {str(e)}")

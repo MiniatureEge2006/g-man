@@ -1032,16 +1032,27 @@ async def eval(ctx, *, code):
         pages = ["```py\nNo output.\n```"]
     
     class EvalView(discord.ui.View):
-        def __init__(self, total_pages: int):
+        def __init__(self, total_pages: int, original_author):
             super().__init__()
             self.current_page = 0
             self.timeout = 60.0
+            self.original_author = original_author
+            self.message = None
             self.total_pages = total_pages
             self.update_button_states()
         
         def update_button_states(self):
             self.children[0].disabled = self.current_page == 0
             self.children[1].disabled = self.current_page == self.total_pages - 1
+        
+        async def interaction_check(self, interaction: discord.Interaction):
+            if interaction.user != self.original_author:
+                await interaction.response.send_message("You can't control this pagination.", ephemeral=True)
+                return False
+            return True
+        
+        async def on_timeout(self):
+            await self.message.edit(view=None)
 
         @discord.ui.button(label="◀", style=discord.ButtonStyle.primary, disabled=True)
         async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1087,12 +1098,14 @@ async def eval(ctx, *, code):
             await interaction.response.send_modal(JumpView(self))
 
         @discord.ui.button(label="⏹️", style=discord.ButtonStyle.danger)
-        async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async def _stop(self, interaction: discord.Interaction, button: discord.ui.Button):
             await interaction.response.edit_message(view=None)
+            self.stop()
         
         @discord.ui.button(label="🗑️", style=discord.ButtonStyle.danger)
         async def clear(self, interaction: discord.Interaction, button: discord.ui.Button):
             await interaction.message.delete()
+            self.stop()
         
         async def update_page(self, interaction: discord.Interaction):
             embed = discord.Embed(title="Evaluation Result", description=f"```py\n{pages[self.current_page]}\n```", color=discord.Color.og_blurple())
@@ -1103,9 +1116,9 @@ async def eval(ctx, *, code):
     embed = discord.Embed(title="Evaluation Result", description=f"```py\n{pages[0]}\n```", color=discord.Color.og_blurple())
     embed.set_footer(text=f"Page 1/{len(pages)}")
 
-    view = EvalView(total_pages=len(pages))
+    view = EvalView(total_pages=len(pages), original_author=ctx.author)
 
-    await ctx.send(embed=embed, view=view)
+    view.message = await ctx.send(embed=embed, view=view)
 
 def cleanup_code(content: str) -> str:
     if content.startswith('```') and content.endswith('```'):
