@@ -193,7 +193,7 @@ class Code(commands.Cog):
             view.language = language
 
             embed.set_author(
-                name=f"{ctx.author.display_name}",
+                name=f"{ctx.author.name}",
                 icon_url=ctx.author.display_avatar.url,
                 url=f"https://discord.com/users/{ctx.author.id}"
             )
@@ -275,10 +275,37 @@ class Code(commands.Cog):
 
         markdown_match = re.match(r"```(\w+)\s*([\s\S]+?)```", code)
         if markdown_match:
-            language = markdown_match.group(1).lower()
-            code = markdown_match.group(2).strip()
+            extracted_language = markdown_match.group(1).lower()
+            extracted_code = markdown_match.group(2).strip()
+            if extracted_language:
+                language = extracted_language
+                language = {
+                    "py": "python",
+                    "sh": "bash",
+                    "js": "javascript",
+                    "node": "javascript",
+                    "ts": "typescript",
+                    "php": "php",
+                    "rb": "ruby",
+                    "lua": "lua",
+                    "go": "go",
+                    "rs": "rust",
+                    "c": "c",
+                    "c++": "cpp",
+                    "cs": "csharp",
+                    "c#": "csharp",
+                    "zig": "zig",
+                    "java": "java",
+                    "kt": "kotlin",
+                    "nim": "nim"
+                }.get(language.lower(), language.lower())
+            code = extracted_code
         else:
-            code = code.strip()
+            inline_match = re.match(r"`([^`]+)`", code)
+            if inline_match:
+                code = inline_match.group(1).strip()
+            else:
+                code = code.strip()
 
         await self._execute_code(ctx, language, code, files)
 
