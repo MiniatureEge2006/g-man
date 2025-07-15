@@ -384,7 +384,9 @@ class MediaProcessor:
                 'outline_width': {'required': False, 'type': int},
                 'shadow_color': {'required': False, 'type': str},
                 'shadow_offset': {'default': 2, 'type': int},
-                'shadow_blur': {'default': 0, 'type': int}
+                'shadow_blur': {'default': 0, 'type': int},
+                'wrap_width': {'required': False, 'type': int},
+                'line_spacing': {'required': False, 'type': int}
             },
             'audioputreplace': {
                 'input_key': {'required': True, 'type': str},
@@ -2186,20 +2188,6 @@ class MediaProcessor:
 
             draw = await asyncio.to_thread(ImageDraw.Draw, base_img)
 
-            max_width = base_img.width
-            if wrap_width:
-                max_width = int(wrap_width)
-
-            current_font_size = font_size
-            while True:
-                test_font = await load_font(font_name, current_font_size)
-                text_width, _ = get_text_size(test_font, text)
-                
-                if text_width <= max_width or current_font_size <= 8:
-                    font = test_font
-                    break
-                current_font_size = max(8, int(current_font_size * 0.9))
-
             def wrap_text(draw, text, font, max_width):
                 words = text.split(' ')
                 lines = []
@@ -2345,6 +2333,8 @@ class MediaProcessor:
         shadow_color = kwargs.get('shadow_color')
         shadow_offset = kwargs.get('shadow_offset', 2)
         shadow_blur = kwargs.get('shadow_blur', 0)
+        wrap_width = kwargs.get('wrap_width', None)
+        line_spacing = kwargs.get('line_spacing', 5)
 
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
@@ -2387,7 +2377,8 @@ class MediaProcessor:
             shadow_color=shadow_color,
             shadow_offset=shadow_offset,
             shadow_blur=shadow_blur,
-            wrap_width=width - 40
+            wrap_width=wrap_width,
+            line_spacing=line_spacing
         )
 
         output_file = self._get_temp_path(input_path.suffix[1:])
