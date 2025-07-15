@@ -2352,6 +2352,7 @@ class MediaProcessor:
         input_path = Path(self.media_cache[input_key])
         is_video = input_path.suffix.lower() in ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv')
         is_gif = input_path.suffix.lower() == '.gif'
+        is_webp = input_path.suffix.lower() == '.webp'
 
         width, height, _, _ = await self._probe_media_info(input_path)
         if width == 0 or height == 0:
@@ -2402,14 +2403,26 @@ class MediaProcessor:
             '[padded][bgtext]overlay=0:0[v]',
             *(['-frames:v', '1'] if not is_video and not is_gif else []),
             '-map', '[v]',
-            '-map', '0:a?',
-            '-preset', 'fast',
-            '-crf', '23',
-            '-pix_fmt', 'yuv420p',
-            '-movflags', '+faststart',
-            '-y', output_file.as_posix()
+            '-map', '0:a?'
         ]
-            
+
+        if is_webp:
+            cmd.extend([
+                '-c:v', 'libwebp',
+                '-lossless', '0',
+                '-compression_level', '6',
+                '-loop', '0',
+                '-f', 'webp'
+            ])
+        else:
+            cmd.extend([
+                '-preset', 'fast',
+                '-crf', '23',
+                '-pix_fmt', 'yuv420p',
+                '-movflags', '+faststart'
+            ])
+
+        cmd.extend(['-y', output_file.as_posix()])
         success, error = await self._run_ffmpeg(cmd)
         if success:
             self.media_cache[output_key] = str(output_file)
