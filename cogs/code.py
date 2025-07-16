@@ -224,12 +224,7 @@ class Code(commands.Cog):
             view.message = await send(embed=embed, view=view)
 
         except Exception as e:
-            error_embed = discord.Embed(
-                title="Code execution Error",
-                description=f"```\n{str(e)[:2000]}\n```",
-                color=discord.Color.red()
-            )
-            await send(embed=error_embed)
+            raise commands.CommandError(str(e))
     
     @commands.hybrid_command(name="code", description="Execute code.", with_app_command=True)
     @app_commands.describe(
@@ -270,7 +265,7 @@ class Code(commands.Cog):
         files = attachments if attachments else []
 
         if not ctx.interaction and language == "bash" and code is None:
-            await ctx.send("Available languages: `python (py)`, `javascript (node, js)`, `typescript (ts)`, `php`, `ruby (rb)`, `lua`, `go`, `rust (rs)`, `c`, `c++ (cpp)`, `c# (cs, csharp)`, `zig`, `java`, `kotlin (kt)`, `nim`")
+            await ctx.send("Available languages: `python (py)`, `bash (sh)`, `javascript (node, js)`, `typescript (ts)`, `php`, `ruby (rb)`, `lua`, `go`, `rust (rs)`, `c`, `c++ (cpp)`, `c# (cs, csharp)`, `zig`, `java`, `kotlin (kt)`, `nim`")
             return
 
         markdown_match = re.match(r"```(\w+)\s*([\s\S]+?)```", code)

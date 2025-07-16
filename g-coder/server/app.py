@@ -66,13 +66,17 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
     saved_files = []
     for file in files:
         await validate_file(file)
-        file_path = work_dir / file.filename
+        file_path = INPUT_DIR / file.filename
         with file_path.open('wb') as f:
             content = await file.read()
             f.write(content)
         saved_files.append(file.filename)
+    
+    env = os.environ.copy()
+    for i, filename in enumerate(saved_files, start=1):
+        env[f"FILE_{i}"] = str(INPUT_DIR / filename)
 
-    async def run_with_timeout(cmd, cwd=None, env=None, input_data=None):
+    async def run_with_timeout(cmd, cwd=None, env=env, input_data=None):
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=cwd,
@@ -93,7 +97,12 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
         output = ""
         return_code = 1
         if language == "bash":
-            output, return_code = await run_with_timeout(['bash', '-c', code])
+            sh_file = work_dir / "script.sh"
+            with sh_file.open("w") as f:
+                f.write("#!/bin/bash\n")
+                f.write(code)
+            sh_file.chmod(0o700)
+            output, return_code = await run_with_timeout([str(sh_file)], cwd=work_dir)
         elif language in ["javascript", "typescript"]:
             if language == "typescript":
                 script_path = work_dir / "script.ts"
@@ -246,6 +255,9 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
         print(f"Code execution Error: {traceback.format_exc()}")
         raise HTTPException(500, detail=f"Code execution failed: {str(e)}")
     finally:
+        for filename in saved_files:
+            file_path = INPUT_DIR / filename
+            safe_delete(file_path)
         ensure_dirs()
 
 
