@@ -213,6 +213,57 @@ async def on_message(message):
     
     await bot.process_commands(message)
 
+@bot.event
+async def on_message_edit(before, after):
+    ctx1 = await bot.get_context(before)
+    ctx2 = await bot.get_context(after)
+    
+    if not (ctx1.command and ctx2.command):
+        return
+
+    original_response = None
+    async for message in ctx1.channel.history(limit=10):
+        if message.author == bot.user:
+            original_response = message
+            break
+    
+    if not original_response:
+        return
+
+    async def edit_send(*args, **kwargs):
+        edit_kwargs = {}
+        if 'content' in kwargs:
+            edit_kwargs['content'] = kwargs['content']
+        elif args:
+            edit_kwargs['content'] = args[0]
+        
+        if 'embeds' in kwargs:
+            edit_kwargs['embeds'] = kwargs['embeds']
+        elif 'embed' in kwargs:
+            edit_kwargs['embed'] = kwargs['embed']
+        
+        if 'view' in kwargs:
+            edit_kwargs['view'] = kwargs['view']
+        
+        files = []
+        if 'file' in kwargs:
+            files.append(kwargs['file'])
+        elif 'files' in kwargs:
+            files.extend([f for f in kwargs['files']])
+        
+        if files:
+            edit_kwargs['attachments'] = files
+        
+        await original_response.edit(**edit_kwargs)
+        return original_response
+
+    ctx2.send = edit_send
+
+    try:
+        await bot.invoke(ctx2)
+    except Exception as e:
+        await original_response.edit(content=f"Error executing edited command: {str(e)}")
+
 
 @bot.event
 async def on_command(ctx: commands.Context):
