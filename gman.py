@@ -110,24 +110,24 @@ async def command_permission_check(ctx: commands.Context) -> bool:
     if guild_id:
         async with bot.db.acquire() as conn:
             server_query = "SELECT status, reason FROM server_command_permissions WHERE guild_id = $1 AND command_name = $2"
-            server_result = await conn.fetchrow(server_query, ctx.guild.id, ctx.command.name)
+            server_result = await conn.fetchrow(server_query, ctx.guild.id, ctx.command.qualified_name)
             if server_result:
                 if not server_result["status"] and not is_admin:
-                    await ctx.send(f"Command blocked. This server disabled this command. Reason: `{server_result['reason']}`")
+                    await ctx.send(f"Command `{ctx.command.qualified_name}` blocked. This server disabled this command. Reason: `{server_result['reason']}`", ephemeral=True)
                     return False
             block_query = "SELECT status, target_type, reason FROM command_permissions WHERE guild_id = $1 AND command_name = $2 AND ((target_type = 'user' AND target_id = $3) OR (target_type = 'channel' AND target_id = $4) OR (target_type = 'role' AND target_id = ANY($5::BIGINT[])))"
-            block_result = await conn.fetch(block_query, ctx.guild.id, ctx.command.name, ctx.author.id, ctx.channel.id, role_ids)
+            block_result = await conn.fetch(block_query, ctx.guild.id, ctx.command.qualified_name, ctx.author.id, ctx.channel.id, role_ids)
             for row in block_result:
                 if not row["status"] and not is_admin:
                     if row["target_type"] == "user":
-                        await ctx.send(f"Command blocked. You are part of the command blocklist. Reason: `{row['reason']}`")
+                        await ctx.send(f"Command `{ctx.command.qualified_name}` blocked. You are part of this command's blocklist. Reason: `{row['reason']}`", ephemeral=True)
                     elif row["target_type"] == "channel":
-                        await ctx.send(f"Command blocked. This channel is part of the command blocklist. Reason: `{row['reason']}`")
+                        await ctx.send(f"Command `{ctx.command.qualified_name}` blocked. This channel is part of this command's blocklist. Reason: `{row['reason']}`", ephemeral=True)
                     elif row["target_type"] == "role":
-                        await ctx.send(f"Command blocked. One of your roles is part of the command blocklist. Reason: `{row['reason']}`")
+                        await ctx.send(f"Command `{ctx.command.qualified_name}` blocked. One of your roles is part of this command's blocklist. Reason: `{row['reason']}`", ephemeral=True)
                     return False
             allow_query = "SELECT status, target_type, target_id, reason FROM command_permissions WHERE guild_id = $1 AND command_name = $2 AND status = TRUE"
-            allow_result = await conn.fetch(allow_query, ctx.guild.id, ctx.command.name)
+            allow_result = await conn.fetch(allow_query, ctx.guild.id, ctx.command.qualified_name)
             if allow_result:
                 allowed = False
                 for row in allow_result:
@@ -138,7 +138,13 @@ async def command_permission_check(ctx: commands.Context) -> bool:
                     elif row["target_type"] == "role" and row["target_id"] in role_ids:
                         allowed = True
                 if not allowed and not is_admin:
-                    await ctx.send(f"Command blocked. Either you, this channel, or one of your roles are not part of the allowlist. Reason: `{row['reason']}`")
+                    for row in allow_result:
+                        if row["target_type"] == "user":
+                            await ctx.send(f"Command `{ctx.command.qualified_name}` blocked. You are not part of this command's allowlist. Reason: `{row['reason']}`", ephemeral=True)
+                        elif row["target_type"] == "channel":
+                            await ctx.send(f"Command `{ctx.command.qualified_name}` blocked. This channel is not part of this command's allowlist. Reason: `{row['reason']}`", ephemeral=True)
+                        elif row["target_type"] == "role":
+                            await ctx.send(f"Command `{ctx.command.qualified_name}` blocked. One of your roles is not part of this command's allowlist. Reason: `{row['reason']}`", ephemeral=True)
                     return False
         return True
     else:
@@ -158,12 +164,12 @@ async def check_access(ctx: commands.Context):
     async with bot.db.acquire() as conn:
         global_blocked = await conn.fetchval("SELECT reason FROM global_blocked_users WHERE discord_id = $1", user_id)
         if global_blocked:
-            await ctx.send(f"You are globally blocked from using G-Man. Reason: `{global_blocked}`")
+            await ctx.send(f"You are globally blocked from using {bot.user.name}. Reason: `{global_blocked}`", ephemeral=True)
             raise commands.CheckFailure("User is globally blocked.")
         if guild_id:
             server_blocked = await conn.fetchval("SELECT reason FROM global_blocked_servers WHERE guild_id = $1", guild_id)
             if server_blocked:
-                await ctx.send(f"This server is globally blocked from using G-Man. Reason: `{server_blocked}`")
+                await ctx.send(f"This server is globally blocked from using {bot.user.name}. Reason: `{server_blocked}`", ephemeral=True)
                 raise commands.CheckFailure("Server is globally blocked.")
         if str(user_id) in bot_info.data['owners']:
             return
@@ -173,13 +179,27 @@ async def check_access(ctx: commands.Context):
         if allowlist_active:
             is_allowed = await conn.fetchval("SELECT 1 FROM allowlist WHERE (type = 'user' AND entity_id = $1) OR (type = 'channel' AND entity_id = $2) OR (type = 'role' AND entity_id = ANY($3))", user_id, channel_id, roles)
             if not is_allowed:
-                await ctx.send("You, this channel, or one of your roles are not part of the allowlist.")
+                allowlist_entries = await conn.fetch("SELECT type, entity_id, reason FROM allowlist")
+                for entry in allowlist_entries:
+                    if entry["type"] == "user":
+                        await ctx.send(f"You are not part of the allowlist to use {bot.user.name} in this server. Reason: `{entry['reason']}`", ephemeral=True)
+                    elif entry["type"] == "channel":
+                        await ctx.send(f"This channel is not part of the allowlist to use {bot.user.name} in this server. Reason: `{entry['reason']}`", ephemeral=True)
+                    elif entry["type"] == "role":
+                        await ctx.send(f"One of your roles is not part of the allowlist to use {bot.user.name} in this server. Reason: `{entry['reason']}`", ephemeral=True)
                 raise commands.CheckFailure("User/Channel/Role is not allowed.")
             if is_allowed:
                 return
         blocked = await conn.fetchval("SELECT reason FROM blocklist WHERE (type = 'user' AND entity_id = $1) OR (type = 'channel' AND entity_id = $2) OR (type = 'role' AND entity_id = ANY($3))", user_id, channel_id, roles)
         if blocked:
-            await ctx.send(f"You, this channel, or one of your roles are part of the blocklist. Reason: `{blocked}`")
+            blocklist_entries = await conn.fetch("SELECT type, entity_id, reason FROM blocklist")
+            for entry in blocklist_entries:
+                if entry["type"] == "user":
+                    await ctx.send(f"You are part of the blocklist in this server to use {bot.user.name}. Reason: `{entry['reason']}`", ephemeral=True)
+                elif entry["type"] == "channel":
+                    await ctx.send(f"This channel is part of the blocklist in this server to use {bot.user.name}. Reason: `{entry['reason']}`", ephemeral=True)
+                elif entry["type"] == "role":
+                    await ctx.send(f"One of your roles is part of the blocklist in this server to use {bot.user.name}. Reason: `{entry['reason']}`", ephemeral=True)
             raise commands.CheckFailure("User/Channel/Role is blocked.")
     
     
@@ -474,11 +494,20 @@ async def command_permission(
         "reset": None
     }[status.lower()]
 
+    try:
+        cmd = bot.get_command(command)
+        if not cmd:
+            await ctx.send(f"Command `{command}` not found.")
+            return
+        root_name = cmd.qualified_name
+    except Exception as e:
+        await ctx.send(f"Error resolving command: {str(e)}")
+        return
 
     if target_type == "server":
         if status_value is None:
             query = "DELETE FROM server_command_permissions WHERE guild_id = $1 AND command_name = $2"
-            params = (ctx.guild.id, command)
+            params = (ctx.guild.id, root_name)
             action = "reset"
         else:
             query = """
@@ -487,13 +516,13 @@ async def command_permission(
                 ON CONFLICT (guild_id, command_name)
                 DO UPDATE SET status = EXCLUDED.status, reason = EXCLUDED.reason
             """
-            params = (ctx.guild.id, command, status_value, reason, ctx.author.id, datetime.datetime.now())
+            params = (ctx.guild.id, root_name, status_value, reason, ctx.author.id, datetime.datetime.now())
             action = "allowed" if status_value else "denied"
         
         async with bot.db.acquire() as conn:
             await conn.execute(query, *params)
         
-        await ctx.send(f"Command `{command}` has been {action} server-wide. Reason: `{reason}`")
+        await ctx.send(f"Command `{root_name}` has been {action} server-wide. Reason: `{reason}`")
         return
 
 
@@ -512,7 +541,7 @@ async def command_permission(
 
     if status_value is None:
         query = "DELETE FROM command_permissions WHERE guild_id = $1 AND command_name = $2 AND target_type = $3 AND target_id = $4"
-        params = (ctx.guild.id, command, target_type, target_obj.id)
+        params = (ctx.guild.id, root_name, target_type, target_obj.id)
         action = "reset"
     else:
         query = """
@@ -521,42 +550,47 @@ async def command_permission(
             ON CONFLICT (guild_id, command_name, target_type, target_id)
             DO UPDATE SET status = EXCLUDED.status, reason = EXCLUDED.reason
         """
-        params = (ctx.guild.id, command, target_type, target_obj.id, status_value, reason, ctx.author.id, datetime.datetime.now())
+        params = (ctx.guild.id, root_name, target_type, target_obj.id, status_value, reason, ctx.author.id, datetime.datetime.now())
         action = "allowed" if status_value else "denied"
 
     async with bot.db.acquire() as conn:
         await conn.execute(query, *params)
 
-    await ctx.send(f"Command `{command}` has been {action} for {target_type} {target_obj}. Reason: `{reason}`")
+    await ctx.send(f"Command `{root_name}` has been {action} for {target_type} {target_obj}. Reason: `{reason}`")
 
 @bot.command(name="commandclear", description="Clear all command permissions for a command.", aliases=["cmdclear"])
 @commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.manage_guild)
 async def command_clear(ctx: commands.Context, command: str, target_type: str):
+    cmd = bot.get_command(command)
+    if not cmd:
+        await ctx.send(f"Command `{command}` not found.")
+        return
+    root_name = cmd.qualified_name
     if target_type == "server":
         query = "DELETE FROM server_command_permissions WHERE guild_id = $1 AND command_name = $2"
         try:
             async with bot.db.acquire() as conn:
-                result = await conn.execute(query, ctx.guild.id, command)
+                result = await conn.execute(query, ctx.guild.id, root_name)
                 if result == "DELETE 0":
-                    await ctx.send(f"No server-wide command permissions found for command `{command}`.")
+                    await ctx.send(f"No server-wide command permissions found for command `{root_name}`.")
                 else:
-                    await ctx.send(f"Server-wide command permissions for command `{command}` have been cleared.")
+                    await ctx.send(f"Server-wide command permissions for command `{root_name}` have been cleared.")
         except Exception as e:
             await ctx.send(f"Error clearing server-wide command permissions: {e}")
         return
     query = "DELETE FROM command_permissions WHERE guild_id = $1 AND command_name = $2 AND target_type = $3"
     try:
         async with bot.db.acquire() as conn:
-            result = await conn.execute(query, ctx.guild.id, command, target_type)
+            result = await conn.execute(query, ctx.guild.id, root_name, target_type)
             if result == "DELETE 0":
-                await ctx.send(f"No command permissions found for command `{command}` for {target_type}.")
+                await ctx.send(f"No command permissions found for command `{root_name}` for {target_type}.")
             else:
-                await ctx.send(f"Command permissions for command `{command}` have been cleared for {target_type}.")
+                await ctx.send(f"Command permissions for command `{root_name}` have been cleared for {target_type}.")
     except Exception as e:
         await ctx.send(f"Error clearing command permissions: {e}")
     return
 
-@bot.command(name="commandlist", description="List all command permissions for a command.", aliases=["cmdlist"])
+@bot.command(name="commandlist", description="List all command permissions.", aliases=["cmdlist"])
 @commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.manage_guild)
 async def command_list(ctx: commands.Context):
     query = """
