@@ -2154,6 +2154,29 @@ class MediaProcessor:
                     pass
 
             return await asyncio.to_thread(ImageFont.load_default)
+        
+        async def download_twemoji(emoji_unicode):
+            try:
+                codepoints = []
+                for c in emoji_unicode:
+                    if 0xFE00 <= ord(c) <= 0xFE0F or 0x1F3FB <= ord(c) <= 0x1F3FF:
+                        continue
+                    codepoints.append(f"{ord(c):x}")
+                
+                if not codepoints:
+                    return None
+                    
+                codepoint = '-'.join(codepoints)
+                url = f"https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/72x72/{codepoint}.png"
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url) as resp:
+                        if resp.status == 200:
+                            emoji_data = await resp.read()
+                            emoji_img = await asyncio.to_thread(Image.open, BytesIO(emoji_data))
+                            return await asyncio.to_thread(emoji_img.convert, 'RGBA')
+            except Exception:
+                return None
 
         try:
             input_key = kwargs['input_key']
@@ -2229,6 +2252,26 @@ class MediaProcessor:
             for line in lines:
                 line_width, line_height = get_text_size(font, line)
                 cur_x = (base_img.width - line_width) // 2 if str(x_raw).lower() == "center" else x
+                char_x = cur_x
+                i = 0
+                while i < len(line):
+                    char = line[i]
+                    if ord(char) >= 0x1F600 and ord(char) <= 0x1F64F or ord(char) >= 0x1F300 and ord(char) <= 0x1F5FF:
+                        emoji_end = i + 1
+                        while emoji_end < len(line) and (line[emoji_end] in '\uFE0F\u200D' or 0x1F3FB <= ord(line[emoji_end]) <= 0x1F3FF):
+                            emoji_end += 1
+                        emoji = line[i:emoji_end]
+                        emoji_img = await download_twemoji(emoji)
+                        if emoji_img:
+                            emoji_size = int(font_size)
+                            emoji_img = await asyncio.to_thread(emoji_img.resize, (emoji_size, emoji_size))
+                            await asyncio.to_thread(txt_layer.paste, emoji_img, (char_x, cur_y), emoji_img)
+                            char_x += emoji_size
+                            i = emoji_end
+                            continue
+                    await asyncio.to_thread(txt_draw.text, (char_x, cur_y), char, font=font, fill=255)
+                    char_x += get_text_size(font, char)[0]
+                    i += 1
                 await asyncio.to_thread(txt_draw.text, (cur_x, cur_y), line, font=font, fill=255)
                 cur_y += line_height + line_spacing
 
