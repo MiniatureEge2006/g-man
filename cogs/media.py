@@ -331,7 +331,7 @@ class Media(commands.Cog):
         wrap_width="Text wrap width amount.",
         line_spacing="Text line spacing amount."
     )
-    async def caption(self, ctx: commands.Context, url: Optional[str] = None, attachment: Optional[discord.Attachment] = None, text: str = None, font_size: int = 36, font: str = "Futura Condensed Extra Bold", color: str = "#000000", background_color: str = "#FFFFFF", padding: int = 50, outline_color: str = None, outline_width: int = None, shadow_color: str = None, shadow_offset: int = 2, shadow_blur: int = 0, wrap_width: int = None, line_spacing: int = 5):
+    async def caption(self, ctx: commands.Context, url: Optional[str] = None, attachment: Optional[discord.Attachment] = None, text: str = None, font_size: int = 0, font: str = "Futura Condensed Extra Bold", color: str = "#000000", background_color: str = "#FFFFFF", padding: int = 0, outline_color: str = None, outline_width: int = None, shadow_color: str = None, shadow_offset: int = 2, shadow_blur: int = 0, wrap_width: int = None, line_spacing: int = 5):
         await ctx.typing()
         input_key = f"caption_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)

@@ -375,18 +375,18 @@ class MediaProcessor:
                 'input_key': {'required': True, 'type': str},
                 'text': {'required': True, 'type': str},
                 'output_key': {'required': True, 'type': str},
-                'font_size': {'default': 36, 'type': int},
+                'font_size': {'default': 0, 'type': int},
                 'font': {'default': 'Futura Condensed Extra Bold', 'type': str},
                 'color': {'default': '#000000', 'type': str},
                 'background_color': {'default': '#FFFFFF', 'type': str},
-                'padding': {'default': 50, 'type': int},
+                'padding': {'default': 0, 'type': int},
                 'outline_color': {'required': False, 'type': str},
                 'outline_width': {'required': False, 'type': int},
                 'shadow_color': {'required': False, 'type': str},
                 'shadow_offset': {'default': 2, 'type': int},
                 'shadow_blur': {'default': 0, 'type': int},
                 'wrap_width': {'required': False, 'type': int},
-                'line_spacing': {'required': False, 'type': int}
+                'line_spacing': {'default': 5, 'type': int}
             },
             'audioputreplace': {
                 'input_key': {'required': True, 'type': str},
@@ -2105,20 +2105,7 @@ class MediaProcessor:
             return f"media://{output_file.as_posix()}"
         return error
     
-    async def _text(self, **kwargs) -> str:
-        try:
-            return await self._text_impl(**kwargs)
-        except ValueError as e:
-            return f"Text error: {str(e)}"
-        
-    async def _text_impl(self, **kwargs) -> str:
-        def get_text_size(font, text):
-            bbox = font.getbbox(text)
-            width = bbox[2] - bbox[0]
-            height = bbox[3] - bbox[1]
-            return width, height
-
-        async def load_font(font_name: str, font_size: int) -> ImageFont.FreeTypeFont:
+    async def load_font(self, font_name: str, font_size: int) -> ImageFont.FreeTypeFont:
             try:
                 font = await asyncio.to_thread(ImageFont.truetype, font=font_name, size=font_size)
                 return font
@@ -2154,6 +2141,19 @@ class MediaProcessor:
                     pass
 
             return await asyncio.to_thread(ImageFont.load_default)
+    
+    async def _text(self, **kwargs) -> str:
+        try:
+            return await self._text_impl(**kwargs)
+        except ValueError as e:
+            return f"Text error: {str(e)}"
+        
+    async def _text_impl(self, **kwargs) -> str:
+        def get_text_size(font, text):
+            bbox = font.getbbox(text)
+            width = bbox[2] - bbox[0]
+            height = bbox[3] - bbox[1]
+            return width, height
         
         async def download_twemoji(emoji_unicode):
             try:
@@ -2205,7 +2205,7 @@ class MediaProcessor:
             base_img = await asyncio.to_thread(Image.open, input_path)
             base_img = await asyncio.to_thread(base_img.convert, 'RGBA')
 
-            font = await load_font(font_name, font_size)
+            font = await self.load_font(font_name, font_size)
             if not isinstance(font, ImageFont.FreeTypeFont):
                 font = await asyncio.to_thread(ImageFont.load_default)
 
@@ -2272,7 +2272,6 @@ class MediaProcessor:
                     await asyncio.to_thread(txt_draw.text, (char_x, cur_y), char, font=font, fill=255)
                     char_x += get_text_size(font, char)[0]
                     i += 1
-                await asyncio.to_thread(txt_draw.text, (cur_x, cur_y), line, font=font, fill=255)
                 cur_y += line_height + line_spacing
 
 
@@ -2366,8 +2365,10 @@ class MediaProcessor:
         input_key = kwargs['input_key']
         text = kwargs['text']
         output_key = kwargs['output_key']
-        padding = kwargs.get('padding', 50)
-        font_size = kwargs.get('font_size', 36)
+        padding = kwargs.get('padding', 0)
+        auto_padding = padding == 0
+        font_size = kwargs.get('font_size', 0)
+        auto_font_size = font_size == 0
         font = kwargs.get('font', 'Futura Condensed Extra Bold')
         color = kwargs.get('color', '#000000')
         background_color = kwargs.get('background_color', '#FFFFFF')
@@ -2376,7 +2377,8 @@ class MediaProcessor:
         shadow_color = kwargs.get('shadow_color')
         shadow_offset = kwargs.get('shadow_offset', 2)
         shadow_blur = kwargs.get('shadow_blur', 0)
-        wrap_width = kwargs.get('wrap_width', None)
+        wrap_width = kwargs.get('wrap_width', 0)
+        auto_wrap_width = not wrap_width or wrap_width <= 0
         line_spacing = kwargs.get('line_spacing', 5)
 
         if input_key not in self.media_cache:
@@ -2390,8 +2392,52 @@ class MediaProcessor:
         width, height, _, _ = await self._probe_media_info(input_path)
         if width == 0 or height == 0:
             return "Error: could not determine input media dimensions"
+        
+        if auto_font_size or auto_padding or auto_wrap_width:
+            base_font_scale = 0.07
+            reference_dimension = min(width, height)
 
+            if auto_font_size:
+                font_size = max(12, int(reference_dimension * base_font_scale))
 
+            font_obj = await self.load_font(font, font_size)
+
+            def get_text_size(font, text):
+                bbox = font.getbbox(text)
+                return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+            def wrap_text(text, font, max_width):
+                words = text.split(' ')
+                lines = []
+                current_line = ""
+                for word in words:
+                    test_line = current_line + word + " "
+                    test_width, _ = get_text_size(font, test_line)
+                    if test_width <= max_width:
+                        current_line = test_line
+                    else:
+                        lines.append(current_line.rstrip())
+                        current_line = word + " "
+                lines.append(current_line.rstrip())
+                return lines
+
+            if auto_wrap_width:
+                wrap_width = width - int(width * 0.1)
+
+            lines = await asyncio.to_thread(wrap_text, text, font_obj, wrap_width)
+
+            def measure_multiline_text(font, lines):
+                ascent, descent = font.getmetrics()
+                line_height = ascent + descent
+                return (line_height + line_spacing) * len(lines) - line_spacing
+
+            total_text_height = await asyncio.to_thread(measure_multiline_text, font_obj, lines)
+
+            buffer = int(font_size * 0.3)
+            if auto_padding:
+                padding = total_text_height + buffer
+
+        padding = int(padding)
         bg_img = await asyncio.to_thread(self._parse_color, background_color, (width, padding))
         if isinstance(bg_img, tuple):
             bg_img = await asyncio.to_thread(Image.new, 'RGBA', (width, padding), bg_img)
@@ -2410,7 +2456,7 @@ class MediaProcessor:
             input_key=text_key,
             text=text,
             x='center',
-            y=str((padding - font_size) // 2),
+            y=str((padding - total_text_height) // 2),
             color=color,
             output_key=text_key,
             font_size=font_size,
@@ -2425,7 +2471,8 @@ class MediaProcessor:
         )
 
         output_file = self._get_temp_path(input_path.suffix[1:])
-            
+        overlay_height = padding
+        padded_height = max(height + overlay_height, height + overlay_height + 2)
         cmd = [
             'ffmpeg', '-hide_banner',
             '-i', str(input_path),
@@ -2433,7 +2480,7 @@ class MediaProcessor:
             '-i', self.media_cache[text_key],
             '-filter_complex',
             '[1:v][2:v]overlay=0:0[bgtext];'
-            f'[0:v]pad=width={width}:height={height+padding}:y={padding}:color=black[padded];'
+            f'[0:v]pad=width={width}:height={padded_height}:y={overlay_height}:color=black[padded];'
             '[padded][bgtext]overlay=0:0[v]',
             *(['-frames:v', '1'] if not is_video and not is_gif else []),
             '-map', '[v]',
