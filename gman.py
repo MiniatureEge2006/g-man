@@ -238,17 +238,23 @@ async def on_message_edit(before, after):
     ctx1 = await bot.get_context(before)
     ctx2 = await bot.get_context(after)
     
-    if not (ctx1.command and ctx2.command):
+    if not (ctx1.valid and ctx2.valid):
         return
 
     original_response = None
-    async for message in ctx1.channel.history(limit=10):
+    async for message in ctx1.channel.history(limit=5):
         if message.author == bot.user:
             original_response = message
             break
     
     if not original_response:
         return
+    
+    async for message in ctx1.channel.history(limit=5):
+        if message.author == ctx1.author and message.id > after.id:
+            return
+        if message.author == bot.user and message.id > original_response.id:
+            return
 
     async def edit_send(*args, **kwargs):
         edit_kwargs = {}
