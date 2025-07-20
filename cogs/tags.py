@@ -498,6 +498,21 @@ class MediaProcessor:
             'dobetween': self._dobetween_media
         }
     
+    async def _handle_error(self, operation: str, error: Exception, details: str = "") -> str:
+        error_type = type(error).__name__
+        error_msg = str(error) or "No error details available"
+        
+        if isinstance(error, KeyError):
+            return f"Media Error [{operation}]: Missing required key '{error_msg}'"
+        elif isinstance(error, ValueError):
+            return f"Media Error [{operation}]: Invalid value - {error_msg}"
+        elif isinstance(error, FileNotFoundError):
+            return f"Media Error [{operation}]: File not found - {error_msg}"
+        elif isinstance(error, RuntimeError):
+            return f"Media Error [{operation}]: Processing failed - {error_msg}"
+        else:
+            return f"Media Error [{operation}]: Unexpected error ({error_type}) - {error_msg} {details}"
+    
     async def ensure_session(self):
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession()
@@ -915,65 +930,80 @@ class MediaProcessor:
         }.get(color_str, (0, 0, 0, 255))
 
 
-    def _parse_command_args(self, cmd: str, args: list[str]) -> dict:
+    async def _parse_command_args(self, cmd: str, args: list[str]) -> dict:
         try:
+            if cmd not in self.command_specs:
+                raise ValueError(f"Unknown command: '{cmd}'")
+
             spec = self.command_specs[cmd]
             parsed = {}
             remaining_args = args.copy()
 
             def str2bool(v: str) -> bool:
-                return str(v).strip().lower() in ('true', '1', 'yes')
+                v = str(v).strip().lower()
+                if v in ('true', '1', 'yes', 'on'):
+                    return True
+                if v in ('false', '0', 'no', 'off'):
+                    return False
+                raise ValueError(f"Invalid boolean value: '{v}'")
 
             def convert(val: str, typ):
-                return str2bool(val) if typ is bool else typ(val)
-
-
-            spec_items = list(spec.items())
-            for i, (param, param_spec) in enumerate(spec_items):
-                if not remaining_args:
-                    if param_spec.get('required', False):
-                        raise ValueError(f"Missing required argument: `{param}`")
+                try:
+                    if typ is bool:
+                        return str2bool(val)
+                    return typ(val)
+                except ValueError as e:
+                    raise ValueError(f"Invalid {typ.__name__} value: '{val}' ({str(e)})")
+            for param, param_spec in spec.items():
+                if param in ('input_keys', 'extra_args'):
                     continue
-
+                    
+                if not remaining_args and param_spec.get('required', False):
+                    raise ValueError(f"Missing required argument: '{param}'")
+                if not remaining_args:
+                    continue
+                    
                 if '=' in remaining_args[0] and not remaining_args[0].startswith(('http://', 'https://')):
                     break
-
+                    
                 value = remaining_args.pop(0)
                 try:
                     parsed[param] = convert(value, param_spec['type'])
                 except Exception as e:
-                    raise ValueError(f"{param}={value} ({e})")
-
+                    raise ValueError(f"{param}={value} ({str(e)})")
 
             if cmd == 'concat':
+                if not remaining_args:
+                    raise ValueError("concat requires at least one input key")
                 parsed['input_keys'] = remaining_args
                 remaining_args = []
             elif cmd == 'render':
                 parsed['extra_args'] = remaining_args
                 remaining_args = []
 
-
             for arg in remaining_args:
                 if '=' in arg:
-                    key, value = arg.split('=', 1)
-                    key = key.lower()
-                    if key in spec:
-                        try:
-                            parsed[key] = convert(value, spec[key]['type'])
-                        except Exception as e:
-                            raise ValueError(f"{key}={value} ({e})")
-                    else:
-                        raise ValueError(f"Unknown argument: {key}")
-
+                    try:
+                        key, value = arg.split('=', 1)
+                        key = key.strip().lower()
+                        if key not in spec:
+                            raise ValueError(f"Unknown argument: '{key}'")
+                        parsed[key] = convert(value, spec[key]['type'])
+                    except ValueError as e:
+                        raise ValueError(f"Invalid argument format: '{arg}' ({str(e)})")
 
             for param, param_spec in spec.items():
                 if param not in parsed and 'default' in param_spec:
                     parsed[param] = param_spec['default']
 
-            return parsed
+            for param, param_spec in spec.items():
+                if param_spec.get('required', False) and param not in parsed:
+                    raise ValueError(f"Missing required argument: '{param}'")
 
+            return parsed
+            
         except Exception as e:
-            raise ValueError(f"{cmd} command error: {e}")
+            raise ValueError(f"{cmd} command error: {str(e)}")
 
     
     async def _run_ffmpeg(self, cmd: list) -> tuple:
@@ -999,6 +1029,9 @@ class MediaProcessor:
                 error_msg = stderr.decode('utf-8', errors='replace').strip()
                 if platform.system() == 'Windows':
                     error_msg = error_msg.replace('\r\n', '\n')
+                error_lines = error_msg.split('\n')
+                if error_lines:
+                    error_msg = error_lines[-1].strip()
                 return False, f"FFmpeg error: {error_msg}"
             return True, stdout.decode('utf-8', errors='replace').strip()
         except asyncio.TimeoutError:
@@ -1067,81 +1100,109 @@ class MediaProcessor:
             return (1, 1, 0.0, False)
     
     async def execute_media_script(self, script):
-        lines = [line.strip() for line in script.splitlines() if line.strip()]
-        output_files = []
-        errors = []
-        last_output_key = None
-        i = 0
         try:
+            lines = [line.strip() for line in script.splitlines() if line.strip()]
+            output_files = []
+            errors = []
+            last_output_key = None
+            i = 0
+            
             while i < len(lines):
                 line = lines[i]
                 try:
                     if line.lower().startswith('dobetween'):
-                        parts = line.split()
-                        input_key = parts[1]
-                        start = parts[2]
-                        end = parts[3]
-                        output_key = parts[4]
-                        sub_script = []
-                        i += 1
-                        while i < len(lines) and not lines[i].lower() == 'end':
-                            sub_script.append(lines[i])
-                            i += 1
-                        if i >= len(lines):
-                            errors.append("Missing 'end' for dobetween")
-                            break
-                        result = await self._dobetween_media(input_key=input_key, start_time=start, end_time=end, output_key=output_key, sub_script='\n'.join(sub_script))
-                        last_output_key = output_key
-                        if result.startswith("Error"):
-                            errors.append(result)
-                        i += 1
-                    else:
-                        parts = shlex.split(line)
-                        cmd = parts[0].lower()
-                        args = parts[1:]
-
-                        if cmd not in self.gscript_commands:
-                            errors.append(f"[{line}]\n -> Unknown command: `{cmd}`")
-                            i += 1
-                            continue
-
                         try:
-                            parsed = self._parse_command_args(cmd, args)
+                            parts = line.split()
+                            if len(parts) < 5:
+                                raise ValueError("dobetween requires input_key, start_time, end_time, output_key")
+                                
+                            input_key = parts[1]
+                            start = parts[2]
+                            end = parts[3]
+                            output_key = parts[4]
+                            sub_script = []
+                            i += 1
+                            
+                            while i < len(lines) and not lines[i].lower() == 'end':
+                                sub_script.append(lines[i])
+                                i += 1
+                                
+                            if i >= len(lines):
+                                raise ValueError("Missing 'end' for dobetween")
+                                
+                            result = await self._dobetween_media(
+                                input_key=input_key,
+                                start_time=start,
+                                end_time=end,
+                                output_key=output_key,
+                                sub_script='\n'.join(sub_script))
+                            
+                            if result.startswith("Error"):
+                                raise RuntimeError(result)
+                                
+                            last_output_key = output_key
+                            i += 1
                         except Exception as e:
-                            errors.append(f"[{line}]\n -> Argument error: {e}")
+                            errors.append(await self._handle_error("dobetween", e, f"in line: {line}"))
                             i += 1
                             continue
-                        func = self.gscript_commands[cmd]
-                        result = await func(**parsed)
-                        if 'output_key' in parsed:
-                            last_output_key = parsed['output_key']
-                        if result.startswith("Error"):
-                            errors.append(result)
-                        elif cmd == "render" and result.startswith("media://"):
-                            output_files.append(result[8:])
-                        i += 1
+                    else:
+                        try:
+                            parts = shlex.split(line)
+                            if not parts:
+                                i += 1
+                                continue
+                                
+                            cmd = parts[0].lower()
+                            args = parts[1:]
+                            
+                            if cmd not in self.gscript_commands:
+                                raise ValueError(f"Unknown command: '{cmd}'")
+                            
+                            parsed = await self._parse_command_args(cmd, args)
+                            func = self.gscript_commands[cmd]
+                            
+                            result = await func(**parsed)
+                            
+                            if 'output_key' in parsed:
+                                last_output_key = parsed['output_key']
+                                
+                            if result.startswith("Error"):
+                                raise RuntimeError(result)
+                                
+                            i += 1
+                        except Exception as e:
+                            errors.append(await self._handle_error("command", e, f"in line: {line}"))
+                            i += 1
+                            continue
+                            
                 except Exception as e:
-                    errors.append(f"Error processing `{line}`: {str(e)}")
+                    errors.append(await self._handle_error("processing", e, f"in line: {line}"))
                     i += 1
-
+                    continue
             if not errors and not output_files and last_output_key:
                 try:
                     auto_result = await self._render_media(media_key=last_output_key)
                     if auto_result.startswith("media://"):
                         output_files.append(auto_result[8:])
                 except Exception as e:
-                    errors.append(f"Auto-render failed: {str(e)}")
+                    errors.append(await self._handle_error("auto-render", e))
 
-            return errors if errors else output_files or ["Processing complete"]
+            return errors if errors else output_files
+            
         except Exception as e:
             await self.cleanup()
-            return [f"Script execution error: {str(e)}"]
+            return [await self._handle_error("script execution", e)]
     
     async def _load_media(self, **kwargs) -> str:
         try:
+            if 'url' not in kwargs:
+                raise ValueError("Missing 'url' parameter")
+            if 'media_key' not in kwargs:
+                raise ValueError("Missing 'media_key' parameter")
             return await self._load_media_impl(**kwargs)
-        except ValueError as e:
-            return f"Load error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("load", e)
 
     
     async def _load_media_impl(self, **kwargs) -> str:
@@ -1201,9 +1262,13 @@ class MediaProcessor:
     
     async def _reverse_media(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
             return await self._reverse_media_impl(**kwargs)
-        except ValueError as e:
-            return f"Reverse error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("reverse", e)
     
     async def _reverse_media_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -1244,9 +1309,13 @@ class MediaProcessor:
     
     async def _concat_media(self, **kwargs) -> str:
         try:
+            if 'input_keys' not in kwargs:
+                raise ValueError("Missing 'input_keys' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
             return await self._concat_media_impl(**kwargs)
-        except ValueError as e:
-            return f"Concat error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("concat", e)
     
     async def _concat_media_impl(self, **kwargs) -> str:
         input_keys = kwargs.get('input_keys')
@@ -1400,9 +1469,11 @@ class MediaProcessor:
     
     async def _render_media(self, **kwargs) -> str:
         try:
+            if 'media_key' not in kwargs:
+                raise ValueError("Missing 'media_key' parameter")
             return await self._render_media_impl(**kwargs)
-        except ValueError as e:
-            return f"Render error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("render", e)
     
     async def _render_media_impl(self, **kwargs) -> str:
         media_key = kwargs['media_key']
@@ -1470,9 +1541,15 @@ class MediaProcessor:
     
     async def _convert_media(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
+            if 'format' not in kwargs:
+                raise ValueError("Missing 'format' parameter")
             return await self._convert_media_impl(**kwargs)
-        except ValueError as e:
-            return f"Convert error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("convert", e)
 
     async def _convert_media_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -1511,9 +1588,15 @@ class MediaProcessor:
     
     async def _adjust_contrast(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
+            if 'contrast_level' not in kwargs:
+                raise ValueError("Missing 'contrast_level' parameter")
             return await self._adjust_contrast_impl(**kwargs)
-        except ValueError as e:
-            return f"Contrast error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("contrast", e)
     
     async def _adjust_contrast_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -1543,9 +1626,15 @@ class MediaProcessor:
     
     async def _adjust_opacity(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
+            if 'opacity_level' not in kwargs:
+                raise ValueError("Missing 'opacity_level' parameter")
             return await self._adjust_opacity_impl(**kwargs)
-        except ValueError as e:
-            return f"Opacity error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("opacity", e)
 
     async def _adjust_opacity_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -1578,9 +1667,15 @@ class MediaProcessor:
     
     async def _adjust_saturation(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
+            if 'saturation_level' not in kwargs:
+                raise ValueError("Missing 'saturation_level' parameter")
             return await self._adjust_saturation_impl(**kwargs)
-        except ValueError as e:
-            return f"Saturation error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("saturate", e)
 
     async def _adjust_saturation_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -1608,9 +1703,15 @@ class MediaProcessor:
     
     async def _adjust_hue(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
+            if 'hue_shift' not in kwargs:
+                raise ValueError("Missing 'hue_shift' parameter")
             return await self._adjust_hue_impl(**kwargs)
-        except ValueError as e:
-            return f"Hue error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("hue", e)
 
     async def _adjust_hue_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -1638,9 +1739,15 @@ class MediaProcessor:
     
     async def _adjust_brightness(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
+            if 'brightness_level' not in kwargs:
+                raise ValueError("Missing 'brightness_level' parameter")
             return await self._adjust_brightness_impl(**kwargs)
-        except ValueError as e:
-            return f"Brightness error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("brightness", e)
 
     async def _adjust_brightness_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -1668,9 +1775,15 @@ class MediaProcessor:
     
     async def _adjust_gamma(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
+            if 'gamma_level' not in kwargs:
+                raise ValueError("Missing 'gamma_level' parameter")
             return await self._adjust_gamma_impl(**kwargs)
-        except ValueError as e:
-            return f"Gamma error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("gamma", e)
 
     async def _adjust_gamma_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -1698,9 +1811,13 @@ class MediaProcessor:
     
     async def _clone_media(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
             return await self._clone_media_impl(**kwargs)
-        except ValueError as e:
-            return f"Clone error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("clone", e)
 
     async def _clone_media_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -1720,9 +1837,15 @@ class MediaProcessor:
     
     async def _change_fps(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
+            if 'fps_value' not in kwargs:
+                raise ValueError("Missing 'fps_value' parameter")
             return await self._change_fps_impl(**kwargs)
-        except ValueError as e:
-            return f"FPS error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("fps", e)
 
     async def _change_fps_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -1750,9 +1873,13 @@ class MediaProcessor:
 
     async def _apply_grayscale(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
             return await self._apply_grayscale_impl(**kwargs)
-        except ValueError as e:
-            return f"Grayscale error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("grayscale", e)
 
     async def _apply_grayscale_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -1779,9 +1906,13 @@ class MediaProcessor:
 
     async def _apply_sepia(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
             return await self._apply_sepia_impl(**kwargs)
-        except ValueError as e:
-            return f"Sepia error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("sepia", e)
 
     async def _apply_sepia_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -1808,9 +1939,13 @@ class MediaProcessor:
     
     async def _invert_media(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
             return await self._invert_media_impl(**kwargs)
-        except ValueError as e:
-            return f"Invert error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("invert", e)
 
     async def _invert_media_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -1837,9 +1972,17 @@ class MediaProcessor:
     
     async def _resize_media(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
+            if 'width' not in kwargs:
+                raise ValueError("Missing 'width' parameter")
+            if 'height' not in kwargs:
+                raise ValueError("Missing 'height' parameter")
             return await self._resize_media_impl(**kwargs)
-        except ValueError as e:
-            return f"Resize error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("resize", e)
     
     async def _resize_media_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -1875,9 +2018,21 @@ class MediaProcessor:
     
     async def _crop_media(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
+            if 'x' not in kwargs:
+                raise ValueError("Missing 'x' parameter")
+            if 'y' not in kwargs:
+                raise ValueError("Missing 'y' parameter")
+            if 'width' not in kwargs:
+                raise ValueError("Missing 'width' parameter")
+            if 'height' not in kwargs:
+                raise ValueError("Missing 'height' parameter")
             return await self._crop_media_impl(**kwargs)
-        except ValueError as e:
-            return f"Crop error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("crop", e)
     
     async def _crop_media_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -1910,9 +2065,15 @@ class MediaProcessor:
     
     async def _rotate_media(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
+            if 'angle' not in kwargs:
+                raise ValueError("Missing 'angle' parameter")
             return await self._rotate_media_impl(**kwargs)
-        except ValueError as e:
-            return f"Rotate error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("rotate", e)
     
     async def _rotate_media_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -1943,9 +2104,17 @@ class MediaProcessor:
     
     async def _trim_media(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
+            if 'start_time' not in kwargs:
+                raise ValueError("Missing 'start_time' parameter")
+            if 'end_time' not in kwargs:
+                raise ValueError("Missing 'end_time' parameter")
             return await self._trim_media_impl(**kwargs)
-        except ValueError as e:
-            return f"Trim error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("trim", e)
     
     async def _trim_media_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -1973,6 +2142,12 @@ class MediaProcessor:
     
     async def _change_speed(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
+            if 'speed' not in kwargs:
+                raise ValueError("Missing 'speed' parameter")
             return await self._change_speed_impl(**kwargs)
         except ValueError as e:
             return f"Speed error: {str(e)}"
@@ -2022,9 +2197,15 @@ class MediaProcessor:
     
     async def _adjust_volume(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
+            if 'volume_level' not in kwargs:
+                raise ValueError("Missing 'volume_level' parameter")
             return await self._adjust_volume_impl(**kwargs)
-        except ValueError as e:
-            return f"Volume error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("volume", e)
     
     async def _adjust_volume_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -2054,9 +2235,19 @@ class MediaProcessor:
     
     async def _overlay_media(self, **kwargs) -> str:
         try:
+            if 'base_key' not in kwargs:
+                raise ValueError("Missing 'base_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
+            if 'overlay_key' not in kwargs:
+                raise ValueError("Missing 'overlay_key' parameter")
+            if 'x' not in kwargs:
+                raise ValueError("Missing 'x' parameter")
+            if 'y' not in kwargs:
+                raise ValueError("Missing 'y' parameter")
             return await self._overlay_media_impl(**kwargs)
-        except ValueError as e:
-            return f"Overlay error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("overlay", e)
     
     async def _overlay_media_impl(self, **kwargs) -> str:
         base_key = kwargs.get('base_key') or kwargs['input_key']
@@ -2144,9 +2335,15 @@ class MediaProcessor:
     
     async def _text(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
+            if 'text' not in kwargs:
+                raise ValueError("Missing 'text' parameter")
             return await self._text_impl(**kwargs)
-        except ValueError as e:
-            return f"Text error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("text", e)
         
     async def _text_impl(self, **kwargs) -> str:
         def get_text_size(font, text):
@@ -2357,9 +2554,15 @@ class MediaProcessor:
 
     async def _apply_caption(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
+            if 'text' not in kwargs:
+                raise ValueError("Missing 'text' parameter")
             return await self._apply_caption_impl(**kwargs)
-        except ValueError as e:
-            return f"Caption error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("caption", e)
     
     async def _apply_caption_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -2512,9 +2715,15 @@ class MediaProcessor:
 
     async def _replace_audio(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
+            if 'audio_key' not in kwargs:
+                raise ValueError("Missing 'audio_key' parameter")
             return await self._replace_audio_impl(**kwargs)
-        except ValueError as e:
-            return f"Audio Put Replace error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("audioputreplace", e)
     
     async def _replace_audio_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -2593,9 +2802,15 @@ class MediaProcessor:
     
     async def _mix_audio(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
+            if 'audio_key' not in kwargs:
+                raise ValueError("Missing 'audio_key' parameter")
             return await self._mix_audio_impl(**kwargs)
-        except ValueError as e:
-            return f"Audio Put Mix error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("audioputmix", e)
     
     async def _mix_audio_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -2668,9 +2883,13 @@ class MediaProcessor:
     
     async def _tremolo(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
             return await self._tremolo_impl(**kwargs)
-        except ValueError as e:
-            return f"Tremolo error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("tremolo", e)
     
     async def _tremolo_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -2698,9 +2917,13 @@ class MediaProcessor:
     
     async def _vibrato(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
             return await self._vibrato_impl(**kwargs)
-        except ValueError as e:
-            return f"Vibrato error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("vibrato", e)
     
     async def _vibrato_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -2728,9 +2951,15 @@ class MediaProcessor:
     
     async def _create_image(self, **kwargs) -> str:
         try:
+            if 'media_key' not in kwargs:
+                raise ValueError("Missing 'media_key' parameter")
+            if 'width' not in kwargs:
+                raise ValueError("Missing 'width' parameter")
+            if 'height' not in kwargs:
+                raise ValueError("Missing 'height' parameter")
             return await self._create_image_impl(**kwargs)
-        except ValueError as e:
-            return f"Create error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("create", e)
     
     async def _create_image_impl(self, **kwargs) -> str:
         try:
@@ -2753,9 +2982,13 @@ class MediaProcessor:
     
     async def _fadein_media(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
             return await self._fadein_media_impl(**kwargs)
-        except ValueError as e:
-            return f"Fade in error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("fadein", e)
     
     async def _fadein_media_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -2831,9 +3064,13 @@ class MediaProcessor:
     
     async def _fadeout_media(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
             return await self._fadeout_media_impl(**kwargs)
-        except ValueError as e:
-            return f"Fade out error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("fadeout", e)
     
     async def _fadeout_media_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -2908,9 +3145,13 @@ class MediaProcessor:
     
     async def _colorkey(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
             return await self._colorkey_impl(**kwargs)
-        except ValueError as e:
-            return f"Colorkey error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("colorkey", e)
     
     async def _colorkey_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -2940,9 +3181,13 @@ class MediaProcessor:
     
     async def _chromakey(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
             return await self._chromakey_impl(**kwargs)
-        except ValueError as e:
-            return f"Chromakey error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("chromakey", e)
     
     async def _chromakey_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -2972,9 +3217,17 @@ class MediaProcessor:
     
     async def _dobetween_media(self, **kwargs) -> str:
         try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
+            if 'start_time' not in kwargs:
+                raise ValueError("Missing 'start_time' parameter")
+            if 'end_time' not in kwargs:
+                raise ValueError("Missing 'end_time' parameter")
             return await self._dobetween_media_impl(**kwargs)
-        except ValueError as e:
-            return f"Dobetween error: {str(e)}"
+        except Exception as e:
+            return await self._handle_error("dobetween", e)
     
     async def _dobetween_media_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
@@ -3294,7 +3547,7 @@ class Tags(commands.Cog):
                     - volume [input_key] [volume_level] [output_key]
                     - overlay [base_key] [overlay_key] [x] [y] [output_key]
                     - text [input_key] [text] [x] [y] [color] [output_key] [font_size] [font] [outline_color] [outline_width] [shadow_color] [shadow_offset] [shadow_blur] [wrap_width] [line_spacing]
-                    - caption [input_key] [text] [output_key] [font_size] [font] [color] [background_color] [padding] [outline_color] [outline_width] [shadow_color] [shadow_offset] [shadow_blur]
+                    - caption [input_key] [text] [output_key] [font_size] [font] [color] [background_color] [padding] [outline_color] [outline_width] [shadow_color] [shadow_offset] [shadow_blur] [wrap_width] [line_spacing]
                     - audioputreplace [media_key] [audio_key] [output_key] [preserve_length] [force_video] [loop_media]
                     - audioputmix [media_key] [audio_key] [output_key] [volume] [preserve_length] [loop_audio] [loop_media]
                     - tremolo [input_key] [frequency] [depth] [output_key]
@@ -3310,32 +3563,38 @@ class Tags(commands.Cog):
                 results = await self.processor.execute_media_script(script)
 
                 if isinstance(results, list):
-                    if len(results) > 0 and results[0] == "Processing complete":
-                        return ("Processing complete.", [], None, [])
-
-
-                    errors = [r for r in results if isinstance(r, str) and not r.startswith("media://") and not os.path.isfile(r)]
-                    if errors:
-                        return ("\n".join(errors), [], None, [])
-
-
+                    ffmpeg_errors = [r for r in results if isinstance(r, str) and r.startswith(("FFmpeg error", "Media Error"))]
+                    if ffmpeg_errors:
+                        error_msg = "\n".join(ffmpeg_errors[:5])
+                        if len(ffmpeg_errors) > 5:
+                            error_msg += f"\n...and {len(ffmpeg_errors)-5} more errors."
+                        return (error_msg, [], None, [])
+                    
                     files = []
                     for path in results:
-                        if os.path.isfile(path):
+                        if isinstance(path, str) and os.path.isfile(path):
                             try:
                                 with open(path, 'rb') as f:
                                     data = BytesIO(f.read())
                                 filename = os.path.basename(path)
                                 files.append(discord.File(data, filename=filename))
                                 os.remove(path)
-                            except Exception:
+                            except Exception as e:
                                 continue
+                    
                     if files:
                         return ("", [], None, files[:10])
-                    else:
-                        return ("No valid files could be loaded.", [], None, [])
+                    
+                    other_results = [r for r in results if isinstance(r, str) and not r.startswith("media://")]
+                    if other_results:
+                        return ("\n".join(other_results[:5]), [], None, [])
+                    
+                    return ("GScript executed but produced no output or files.", [], None, [])
+
+                elif isinstance(results, str):
+                    return (results, [], None, [])
                 else:
-                    return (str(results), [], None, [])
+                    return ("GScript executed but returned an unexpected result type.", [], None, [])
 
             except Exception as e:
                 await self.processor.cleanup()
