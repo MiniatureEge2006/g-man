@@ -228,51 +228,44 @@ async def on_ready():
 async def on_message(message: discord.Message):
     ctx = await bot.get_context(message)
 
+    if message.author.bot:
+        return
+
     if ctx.command is None:
         return
     
     await bot.process_commands(message)
 
 @bot.event
-async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
-    if payload.data.get("content") is None:
+async def on_message_edit(before: discord.Message, after: discord.Message):
+    if before.author.bot or before.content == after.content:
         return
-    
-    channel = bot.get_channel(payload.channel_id)
-    if not channel:
-        channel = await bot.fetch_channel(payload.channel_id)
-    
-    try:
-        after = await channel.fetch_message(payload.message_id)
-    except discord.NotFound:
-        return
-    
-    before = payload.cached_message or after
 
-    if before.content == after.content:
-        return
-    
     ctx_before = await bot.get_context(before)
     ctx_after = await bot.get_context(after)
 
     if not (ctx_before.valid and ctx_after.valid):
         return
     
+    if ctx_after.command is None:
+        return
+
     original_response = None
-    async for msg in channel.history(limit=10, after=before.created_at):
+    async for msg in before.channel.history(limit=10, after=before):
         if msg.author == bot.user:
             original_response = msg
             break
-    
+
+    async for msg in before.channel.history(limit=5, after=after):
+        if msg.author == before.author:
+            return
+
     if not original_response:
         return
-    
-    async for msg in channel.history(limit=10, after=after.created_at):
-        if msg.author == after.author:
-            return
-    
+
     async def edit_send(*args, **kwargs):
         edit_kwargs = {}
+
         if 'content' in kwargs:
             edit_kwargs['content'] = kwargs['content']
         elif args:
@@ -295,15 +288,18 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         if files:
             edit_kwargs['attachments'] = files
 
-        await original_response.edit(**edit_kwargs)
-        return original_response
-    
+        try:
+            await original_response.edit(**edit_kwargs)
+            return original_response
+        except discord.HTTPException:
+            return await after.channel.send(*args, **kwargs)
+
     ctx_after.send = edit_send
 
     try:
         await bot.invoke(ctx_after)
     except Exception as e:
-        await original_response.edit(content=f"Error executing edited command: {str(e)}")
+        await original_response.edit(content=f"Error executing edited command: {e}")
 
 @bot.event
 async def on_command(ctx: commands.Context):
