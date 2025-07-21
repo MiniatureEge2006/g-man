@@ -225,7 +225,7 @@ async def on_ready():
 
 
 @bot.event
-async def on_message(message):
+async def on_message(message: discord.Message):
     ctx = await bot.get_context(message)
 
     if ctx.command is None:
@@ -234,62 +234,76 @@ async def on_message(message):
     await bot.process_commands(message)
 
 @bot.event
-async def on_message_edit(before, after):
-    ctx1 = await bot.get_context(before)
-    ctx2 = await bot.get_context(after)
-    
-    if not (ctx1.valid and ctx2.valid):
+async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
+    if payload.data.get("content") is None:
         return
+    
+    channel = bot.get_channel(payload.channel_id)
+    if not channel:
+        channel = await bot.fetch_channel(payload.channel_id)
+    
+    try:
+        after = await channel.fetch_message(payload.message_id)
+    except discord.NotFound:
+        return
+    
+    before = payload.cached_message or after
 
+    if before.content == after.content:
+        return
+    
+    ctx_before = await bot.get_context(before)
+    ctx_after = await bot.get_context(after)
+
+    if not (ctx_before.valid and ctx_after.valid):
+        return
+    
     original_response = None
-    async for message in ctx1.channel.history(limit=5):
-        if message.author == bot.user:
-            original_response = message
+    async for msg in channel.history(limit=10, after=before.created_at):
+        if msg.author == bot.user:
+            original_response = msg
             break
     
     if not original_response:
         return
     
-    async for message in ctx1.channel.history(limit=5):
-        if message.author == ctx1.author and message.id > after.id:
+    async for msg in channel.history(limit=10, after=after.created_at):
+        if msg.author == after.author:
             return
-        if message.author == bot.user and message.id > original_response.id:
-            return
-
+    
     async def edit_send(*args, **kwargs):
         edit_kwargs = {}
         if 'content' in kwargs:
             edit_kwargs['content'] = kwargs['content']
         elif args:
             edit_kwargs['content'] = args[0]
-        
+
         if 'embeds' in kwargs:
             edit_kwargs['embeds'] = kwargs['embeds']
         elif 'embed' in kwargs:
             edit_kwargs['embed'] = kwargs['embed']
-        
+
         if 'view' in kwargs:
             edit_kwargs['view'] = kwargs['view']
-        
+
         files = []
         if 'file' in kwargs:
             files.append(kwargs['file'])
         elif 'files' in kwargs:
-            files.extend([f for f in kwargs['files']])
-        
+            files.extend(kwargs['files'])
+
         if files:
             edit_kwargs['attachments'] = files
-        
+
         await original_response.edit(**edit_kwargs)
         return original_response
-
-    ctx2.send = edit_send
+    
+    ctx_after.send = edit_send
 
     try:
-        await bot.invoke(ctx2)
+        await bot.invoke(ctx_after)
     except Exception as e:
         await original_response.edit(content=f"Error executing edited command: {str(e)}")
-
 
 @bot.event
 async def on_command(ctx: commands.Context):
@@ -374,23 +388,23 @@ async def on_command_completion(ctx: commands.Context):
     )
 
 @bot.event
-async def on_guild_join(guild):
+async def on_guild_join(guild: discord.Guild):
     logger = logging.getLogger()
     logger.info(f"Joined guild {guild.name} (ID: {guild.id})")
 
 @bot.event
-async def on_guild_remove(guild):
+async def on_guild_remove(guild: discord.Guild):
     logger = logging.getLogger()
     logger.info(f"Removed from guild {guild.name} (ID: {guild.id})")
 
 
 @bot.event
-async def on_guild_unavailable(guild):
+async def on_guild_unavailable(guild: discord.Guild):
     logger = logging.getLogger()
     logger.info(f"Guild unavailable: {guild.name} (ID: {guild.id})")
 
 @bot.event
-async def on_guild_available(guild):
+async def on_guild_available(guild: discord.Guild):
     logger = logging.getLogger()
     logger.info(f"Guild available: {guild.name} (ID: {guild.id})")
 
