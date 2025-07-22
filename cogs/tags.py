@@ -1029,9 +1029,6 @@ class MediaProcessor:
                 error_msg = stderr.decode('utf-8', errors='replace').strip()
                 if platform.system() == 'Windows':
                     error_msg = error_msg.replace('\r\n', '\n')
-                error_lines = error_msg.split('\n')
-                if error_lines:
-                    error_msg = error_lines[-1].strip()
                 return False, f"FFmpeg error: {error_msg}"
             return True, stdout.decode('utf-8', errors='replace').strip()
         except asyncio.TimeoutError:
