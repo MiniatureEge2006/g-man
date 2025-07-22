@@ -4,6 +4,7 @@ import io
 import textwrap
 import bot_info
 import datetime
+import dateparser
 import time
 import psutil
 import logging
@@ -310,6 +311,15 @@ async def on_command(ctx: commands.Context):
     channel = f"#{ctx.channel.name} (ID: {ctx.channel.id})" if ctx.guild else f"DMs with {ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
     command_name = ctx.command.qualified_name
     command_content = ctx.message.content if not ctx.interaction else "".join(f"/{ctx.interaction.command.qualified_name} " + " ".join(f"{k}:{v}" for k, v in ctx.interaction.namespace.__dict__.items() if v is not None))
+    async with bot.db.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO command_usage (command_name, user_id, channel_id, guild_id, content) VALUES ($1, $2, $3, $4, $5)",
+            command_name,
+            ctx.author.id,
+            ctx.channel.id,
+            ctx.guild.id if ctx.guild else None,
+            command_content
+            )
     log_message = (
         f"\n--- {'Slash ' if ctx.interaction else ''}Command Log ---\n"
         f"Timestamp: {timestamp}\n"
@@ -491,7 +501,316 @@ async def sync(ctx: commands.Context, guilds: commands.Greedy[discord.Object], s
     await ctx.send(f"Synced the tree to {ret}/{len(guilds)} guilds.")
     
 
+@bot.hybrid_command(name="commandusage", description="View command usage history.", aliases=["cmdusage", "commandhistory", "cmdhistory"])
+@app_commands.describe(
+    command="Filter by command name.",
+    user="Filter by user.",
+    channel="Filter by channel.",
+    guild="Filter by guild. (bot owners only)",
+    limit="Number of entries to show.",
+    before="Show entries before this date.",
+    after="Show entries after this date."
+)
+@commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.manage_guild)
+@app_commands.allowed_installs(guilds=True, users=False)
+async def command_usage(
+    ctx: commands.Context,
+    command: Optional[str] = None,
+    user: Optional[str] = None,
+    channel: Optional[str] = None,
+    guild: Optional[str] = None,
+    limit: Optional[int] = None,
+    before: Optional[str] = None,
+    after: Optional[str] = None
+):
+    await ctx.typing()
+    converted_user = None
+    converted_channel = None
+    converted_guild = None
+    force_current_guild = False
+    if user:
+        try:
+            converted_user = await commands.UserConverter().convert(ctx, user)
+        except commands.BadArgument:
+            await ctx.send(f"Could not find user: {user}")
+            return
+    
+    if channel:
+        try:
+            converted_channel = await commands.GuildChannelConverter().convert(ctx, channel)
+        except commands.BadArgument:
+            await ctx.send(f"Could not find channel: {channel}")
+            return
+    
+    if guild:
+        try:
+            specified_guild = await commands.GuildConverter().convert(ctx, guild)
+            if str(ctx.author.id) not in bot_info.data['owners']:
+                if specified_guild.id != ctx.guild.id:
+                    await ctx.send("Only bot owners can filter by other guilds.")
+                    return
+                else:
+                    force_current_guild = True
+                    converted_guild = None
+            else:
+                converted_guild = specified_guild
+        except commands.BadArgument:
+            if str(ctx.author.id) not in bot_info.data['owners']:
+                try:
+                    if int(guild) == ctx.guild.id:
+                        force_current_guild = True
+                        converted_guild = None
+                    else:
+                        await ctx.send("Only bot owners can filter by other guilds.")
+                        return
+                except ValueError:
+                    await ctx.send(f"Could not find guild: {guild}")
+                    return
+            else:
+                await ctx.send(f"Could not find guild: {guild}")
+                return
+    before_date = None
+    after_date = None
+    
+    if before:
+        try:
+            before_date = dateparser.parse(
+                before,
+                settings={
+                    'RETURN_AS_TIMEZONE_AWARE': True,
+                    'TIMEZONE': 'UTC',
+                    'PREFER_DATES_FROM': 'past'
+                }
+            )
+            if not before_date:
+                raise ValueError("Could not parse date")
+            before_date = before_date.astimezone(datetime.timezone.utc)
+        except Exception as e:
+            await ctx.send(f"Could not parse 'before' date/time: {str(e)}\nExamples: '2 weeks ago', '2025', 'january 2024', 'last monday'")
+            return
+    
+    if after:
+        try:
+            after_date = dateparser.parse(
+                after,
+                settings={
+                    'RETURN_AS_TIMEZONE_AWARE': True,
+                    'TIMEZONE': 'UTC',
+                    'PREFER_DATES_FROM': 'future'
+                }
+            )
+            if not after_date:
+                raise ValueError("Could not parse date")
+            after_date = after_date.astimezone(datetime.timezone.utc)
+        except Exception as e:
+            await ctx.send(f"Could not parse 'after' date/time: {str(e)}\nExamples: 'yesterday', '2024-06', '3 months ago'")
+            return
+    
 
+    query = "SELECT command_name, user_id, channel_id, guild_id, timestamp, content FROM command_usage WHERE "
+    conditions = []
+    params = []
+    
+
+    if str(ctx.author.id) not in bot_info.data['owners'] or force_current_guild:
+        conditions.append("guild_id = $1")
+        params.append(ctx.guild.id)
+    elif converted_guild:
+        conditions.append("guild_id = $1")
+        params.append(converted_guild.id)
+    
+    if command:
+        conditions.append("command_name ILIKE $" + str(len(params) + 1))
+        params.append(f"%{command}%")
+    
+    if user:
+        conditions.append("user_id = $" + str(len(params) + 1))
+        params.append(converted_user.id)
+    
+    if channel:
+        conditions.append("channel_id = $" + str(len(params) + 1))
+        params.append(converted_channel.id)
+    
+    if before_date:
+        conditions.append("timestamp < $" + str(len(params) + 1))
+        params.append(before_date)
+    
+    if after_date:
+        conditions.append("timestamp > $" + str(len(params) + 1))
+        params.append(after_date)
+    
+    if not conditions:
+        conditions.append("TRUE")
+    
+    query += " AND ".join(conditions) + " ORDER BY timestamp DESC"
+    if limit is not None:
+        query += " LIMIT $" + str(len(params) + 1)
+        params.append(limit)
+    
+    async with bot.db.acquire() as conn:
+        records = await conn.fetch(query, *params)
+    
+    if not records:
+        await ctx.send("No command usage records found matching your filters.")
+        return
+    
+    processed = []
+    for record in records:
+        try:
+            user_obj = bot.get_user(record['user_id']) or await bot.fetch_user(record['user_id'])
+            user_name = f"{user_obj.mention} - {user_obj.name}#{user_obj.discriminator}"
+        except discord.NotFound:
+            user_name = f"Unknown User ({record['user_id']})"
+        
+        try:
+            channel_obj = bot.get_channel(record['channel_id']) or await bot.fetch_channel(record['channel_id'])
+            channel_name = f"{channel_obj.mention} - #{channel_obj.name}" if hasattr(channel_obj, 'mention') and hasattr(channel_obj, 'name') else f"Channel {record['channel_id']}"
+        except (discord.NotFound, discord.Forbidden):
+            channel_name = f"Unknown Channel ({record['channel_id']})"
+        
+        guild_name = "DMs"
+        if record['guild_id']:
+            try:
+                guild_obj = bot.get_guild(record['guild_id']) or await bot.fetch_guild(record['guild_id'])
+                guild_name = guild_obj.name
+            except discord.NotFound:
+                guild_name = f"Unknown Guild ({record['guild_id']})"
+        
+        processed.append({
+            "command": record['command_name'],
+            "user": user_name,
+            "user_id": record['user_id'],
+            "channel": channel_name,
+            "channel_id": record['channel_id'],
+            "guild": guild_name,
+            "guild_id": record['guild_id'],
+            "timestamp": f"<t:{int(record['timestamp'].timestamp())}:R>",
+            "content": record['content'][:50] + "..." if len(record['content']) > 50 else record['content']
+        })
+    
+    pages = []
+    current_page = []
+    current_length = 0
+    
+    for entry in processed:
+        entry_text = (
+            f"**Command:** `{entry['command']}`\n"
+            f"**User:** {entry['user']} (`{entry['user_id']}`)\n"
+            f"**Channel:** {entry['channel']} (`{entry['channel_id']}`)\n"
+            f"**Guild:** {entry['guild']} (`{entry['guild_id']}`)\n"
+            f"**When:** {entry['timestamp']}\n"
+            f"**Content:** `{entry['content']}`\n"
+        )
+        
+        if current_length + len(entry_text) > 2000:
+            pages.append("\n".join(current_page))
+            current_page = []
+            current_length = 0
+        
+        current_page.append(entry_text)
+        current_length += len(entry_text) + 1
+    
+    if current_page:
+        pages.append("\n".join(current_page))
+    
+
+    class CommandUsagePaginator(discord.ui.View):
+        def __init__(self, pages: list, author: discord.Member):
+            super().__init__(timeout=60.0)
+            self.pages = pages
+            self.current_page = 0
+            self.author = author
+            self.message = None
+            self.records = records
+            self.update_buttons()
+        
+        def update_buttons(self):
+            self.children[0].disabled = self.current_page == 0
+            self.children[1].disabled = self.current_page == len(self.pages) - 1
+        
+        async def interaction_check(self, interaction: discord.Interaction):
+            if interaction.user != self.author:
+                await interaction.response.send_message("You can't control this pagination.", ephemeral=True)
+                return False
+            return True
+        
+        async def on_timeout(self):
+            if self.message:
+                await self.message.edit(view=None)
+        
+        @discord.ui.button(label="⬅️", style=discord.ButtonStyle.primary, disabled=True)
+        async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
+            self.current_page -= 1
+            await self.update_page(interaction)
+        
+        @discord.ui.button(label="➡️", style=discord.ButtonStyle.primary, disabled=False)
+        async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+            self.current_page += 1
+            await self.update_page(interaction)
+        
+        @discord.ui.button(label="🔁", style=discord.ButtonStyle.primary)
+        async def shuffle(self, interaction: discord.Interaction, button: discord.ui.Button):
+            self.current_page = random.randint(0, len(self.pages) - 1)
+            await self.update_page(interaction)
+        
+        @discord.ui.button(label="🔢", style=discord.ButtonStyle.primary)
+        async def jump(self, interaction: discord.Interaction, button: discord.ui.Button):
+            modal = JumpModal(self)
+            await interaction.response.send_modal(modal)
+        
+        @discord.ui.button(label="⏹️", style=discord.ButtonStyle.danger)
+        async def _stop(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await interaction.response.edit_message(view=None)
+            self.stop()
+        
+        @discord.ui.button(label="🗑️", style=discord.ButtonStyle.danger)
+        async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await interaction.message.delete()
+            self.stop()
+        
+        async def update_page(self, interaction: discord.Interaction):
+            embed = discord.Embed(
+                title=f"Command Usage History",
+                description=self.pages[self.current_page],
+                color=discord.Color.blurple()
+            )
+            embed.set_footer(text=f"Page {self.current_page + 1}/{len(self.pages)} of {len(self.records)} entries")
+            self.update_buttons()
+            await interaction.response.edit_message(embed=embed, view=self)
+    
+    class JumpModal(discord.ui.Modal):
+        def __init__(self, paginator):
+            super().__init__(title="Jump to Page")
+            self.paginator = paginator
+            self.page_input = discord.ui.TextInput(
+                label="Page Number",
+                placeholder=f"Enter a number between 1 and {len(self.paginator.pages)}",
+                required=True
+            )
+            self.add_item(self.page_input)
+        
+        async def on_submit(self, interaction: discord.Interaction):
+            try:
+                page_num = int(self.page_input.value)
+                if 1 <= page_num <= len(self.paginator.pages):
+                    self.paginator.current_page = page_num - 1
+                    await self.paginator.update_page(interaction)
+                else:
+                    await interaction.response.send_message(
+                        f"Please enter a number between 1 and {len(self.paginator.pages)}",
+                        ephemeral=True
+                    )
+            except ValueError:
+                await interaction.response.send_message("Please enter a valid number.", ephemeral=True)
+    
+    view = CommandUsagePaginator(pages, ctx.author)
+    embed = discord.Embed(
+        title=f"Command Usage History",
+        description=pages[0],
+        color=discord.Color.blurple()
+    )
+    embed.set_footer(text=f"Page 1/{len(pages)} of {len(records)} entries")
+    view.message = await ctx.send(embed=embed, view=view)
 
 @bot.command(name="command", description="Enable or disable a command.", aliases=["cmd"])
 @commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.manage_guild)
@@ -499,7 +818,7 @@ async def command_permission(
     ctx: commands.Context,
     command: str,
     target_type: Literal["server", "user", "channel", "role"],
-    target: Optional[Union[commands.MemberConverter, commands.TextChannelConverter, commands.RoleConverter]] = None,
+    target: Optional[Union[commands.MemberConverter, commands.GuildChannelConverter, commands.RoleConverter]] = None,
     status: Literal["allow", "deny", "reset"] = "allow",
     *, 
     reason: str = "No reason provided"
@@ -549,7 +868,7 @@ async def command_permission(
         if target_type == "user":
             target_obj = await commands.MemberConverter().convert(ctx, str(target))
         elif target_type == "channel":
-            target_obj = await commands.TextChannelConverter().convert(ctx, str(target))
+            target_obj = await commands.GuildChannelConverter().convert(ctx, str(target))
         elif target_type == "role":
             target_obj = await commands.RoleConverter().convert(ctx, str(target))
     except commands.BadArgument as e:
@@ -648,7 +967,7 @@ async def command_list(ctx: commands.Context):
                     target = await commands.MemberConverter().convert(ctx, str(record["target_id"]))
                     entry["target"] = f"User: {target.mention}"
                 elif record["target_type"] == "channel":
-                    target = await commands.TextChannelConverter().convert(ctx, str(record["target_id"]))
+                    target = await commands.GuildChannelConverter().convert(ctx, str(record["target_id"]))
                     entry["target"] = f"Channel: {target.mention}"
                 elif record["target_type"] == "role":
                     target = await commands.RoleConverter().convert(ctx, str(record["target_id"]))
@@ -702,14 +1021,101 @@ async def command_list(ctx: commands.Context):
     if current_page:
         pages.append("\n\n".join(current_page))
     
+    class CommandListPaginator(discord.ui.View):
+        def __init__(self, pages: list, author: discord.Member):
+            super().__init__(timeout=60.0)
+            self.pages = pages
+            self.current_page = 0
+            self.author = author
+            self.message = None
+            self.update_buttons()
+        
+        def update_buttons(self):
+            self.children[0].disabled = self.current_page == 0
+            self.children[1].disabled = self.current_page == len(self.pages) - 1
+        
+        async def interaction_check(self, interaction: discord.Interaction):
+            if interaction.user != self.author:
+                await interaction.response.send_message("You can't control this pagination.", ephemeral=True)
+                return False
+            return True
+        
+        async def on_timeout(self):
+            if self.message:
+                await self.message.edit(view=None)
+        
+        @discord.ui.button(label="⬅️", style=discord.ButtonStyle.primary, disabled=True)
+        async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
+            self.current_page -= 1
+            await self.update_page(interaction)
+        
+        @discord.ui.button(label="➡️", style=discord.ButtonStyle.primary, disabled=False)
+        async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+            self.current_page += 1
+            await self.update_page(interaction)
+        
+        @discord.ui.button(label="🔁", style=discord.ButtonStyle.primary)
+        async def shuffle(self, interaction: discord.Interaction, button: discord.ui.Button):
+            self.current_page = random.randint(0, len(self.pages) - 1)
+            await self.update_page(interaction)
+        
+        @discord.ui.button(label="🔢", style=discord.ButtonStyle.primary)
+        async def jump(self, interaction: discord.Interaction, button: discord.ui.Button):
+            modal = JumpModal(self)
+            await interaction.response.send_modal(modal)
+        
+        @discord.ui.button(label="⏹️", style=discord.ButtonStyle.danger)
+        async def _stop(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await interaction.response.edit_message(view=None)
+            self.stop()
+        
+        @discord.ui.button(label="🗑️", style=discord.ButtonStyle.danger)
+        async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await interaction.message.delete()
+            self.stop()
+        
+        async def update_page(self, interaction: discord.Interaction):
+            embed = discord.Embed(
+                title=f"Command Permissions (Page {self.current_page + 1}/{len(self.pages)})",
+                description=self.pages[self.current_page],
+                color=discord.Color.blurple()
+            )
+            self.update_buttons()
+            await interaction.response.edit_message(embed=embed, view=self)
 
-    for i, page in enumerate(pages, 1):
-        embed = discord.Embed(
-            title=f"Command Permissions (Page {i}/{len(pages)})",
-            description=page,
-            color=discord.Color.blurple()
-        )
-        await ctx.send(embed=embed)
+    class JumpModal(discord.ui.Modal):
+        def __init__(self, paginator):
+            super().__init__(title="Jump to Page")
+            self.paginator = paginator
+            self.page_input = discord.ui.TextInput(
+                label="Page Number",
+                placeholder=f"Enter a number between 1 and {len(self.paginator.pages)}",
+                required=True
+            )
+            self.add_item(self.page_input)
+        
+        async def on_submit(self, interaction: discord.Interaction):
+            try:
+                page_num = int(self.page_input.value)
+                if 1 <= page_num <= len(self.paginator.pages):
+                    self.paginator.current_page = page_num - 1
+                    await self.paginator.update_page(interaction)
+                else:
+                    await interaction.response.send_message(
+                        f"Please enter a number between 1 and {len(self.paginator.pages)}",
+                        ephemeral=True
+                    )
+            except ValueError:
+                await interaction.response.send_message("Please enter a valid number.", ephemeral=True)
+
+
+    view = CommandListPaginator(pages, ctx.author)
+    embed = discord.Embed(
+        title=f"Command Permissions (Page 1/{len(pages)})",
+        description=pages[0],
+        color=discord.Color.blurple()
+    )
+    view.message = await ctx.send(embed=embed, view=view)
 
 @bot.command(name="blocklist", description="List all blocked users, channels, and roles.")
 @commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
@@ -813,7 +1219,7 @@ async def block(ctx: commands.Context, type: str, target: str, *, reason = "No r
             entity_id = converted.id
             converted_name = str(converted)
         elif type == "channel":
-            conv = commands.TextChannelConverter()
+            conv = commands.GuildChannelConverter()
             converted = await conv.convert(ctx, target)
             entity_id = converted.id
             converted_name = str(converted)
@@ -896,7 +1302,7 @@ async def unblock(ctx: commands.Context, type: str, target: str):
             entity_id = converted.id
             converted_name = str(converted)
         elif type == "channel":
-            conv = commands.TextChannelConverter()
+            conv = commands.GuildChannelConverter()
             converted = await conv.convert(ctx, target)
             entity_id = converted.id
             converted_name = str(converted)
@@ -947,12 +1353,12 @@ async def unblock(ctx: commands.Context, type: str, target: str):
 
 @bot.command(name="allow", description="Allows a user, channel, or role to use the bot.")
 @commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
-async def allow(ctx: commands.Context, type: str, target: commands.MemberConverter | commands.TextChannelConverter | commands.RoleConverter, *, reason = "No reason provided"):
+async def allow(ctx: commands.Context, type: str, target: commands.MemberConverter | commands.GuildChannelConverter | commands.RoleConverter, *, reason = "No reason provided"):
     valid_types = ["user", "channel", "role"]
     if type not in valid_types:
         await ctx.send("Invalid type. Valid types: `user`, `channel`, or `role`.")
         return
-    converter = commands.MemberConverter() if type == "user" else commands.TextChannelConverter() if type == "channel" else commands.RoleConverter()
+    converter = commands.MemberConverter() if type == "user" else commands.GuildChannelConverter() if type == "channel" else commands.RoleConverter()
     converted = await converter.convert(ctx, str(target))
     converted_name = converted.name if converted else target
     type_id = target.id if hasattr(target, "id") else target
@@ -966,12 +1372,12 @@ async def allow(ctx: commands.Context, type: str, target: commands.MemberConvert
 
 @bot.command(name="deny", description="Denies a user, channel, or role from using the bot. (Not to be confused with `block`.)")
 @commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
-async def deny(ctx: commands.Context, type: str, target: commands.MemberConverter | commands.TextChannelConverter | commands.RoleConverter):
+async def deny(ctx: commands.Context, type: str, target: commands.MemberConverter | commands.GuildChannelConverter | commands.RoleConverter):
     valid_types = ["user", "channel", "role"]
     if type not in valid_types:
         await ctx.send("Invalid type. Valid types: `user`, `channel`, or `role`.")
         return
-    converter = commands.MemberConverter() if type == "user" else commands.TextChannelConverter() if type == "channel" else commands.RoleConverter()
+    converter = commands.MemberConverter() if type == "user" else commands.GuildChannelConverter() if type == "channel" else commands.RoleConverter()
     converted = await converter.convert(ctx, str(target))
     converted_name = converted.name if converted else target
     type_id = target.id if hasattr(target, "id") else target
@@ -1152,13 +1558,13 @@ async def eval(ctx, *, code):
         async def on_timeout(self):
             await self.message.edit(view=None)
 
-        @discord.ui.button(label="◀", style=discord.ButtonStyle.primary, disabled=True)
+        @discord.ui.button(label="⬅️", style=discord.ButtonStyle.primary, disabled=True)
         async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
             if self.current_page > 0:
                 self.current_page -= 1
                 await self.update_page(interaction)
 
-        @discord.ui.button(label="▶", style=discord.ButtonStyle.primary, disabled=False)
+        @discord.ui.button(label="➡️", style=discord.ButtonStyle.primary, disabled=False)
         async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
             if self.current_page < self.total_pages - 1:
                 self.current_page += 1

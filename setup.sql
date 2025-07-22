@@ -156,3 +156,13 @@ CREATE TABLE IF NOT EXISTS ai_conversations (
     history JSONB NOT NULL,
     last_updated TIMESTAMPTZ NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS command_usage (
+    id SERIAL PRIMARY KEY,
+    command_name TEXT NOT NULL,
+    user_id BIGINT NOT NULL,
+    channel_id BIGINT NOT NULL,
+    guild_id BIGINT,
+    timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    content TEXT
+);
