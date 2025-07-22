@@ -1029,7 +1029,7 @@ class MediaProcessor:
                 error_msg = stderr.decode('utf-8', errors='replace').strip()
                 if platform.system() == 'Windows':
                     error_msg = error_msg.replace('\r\n', '\n')
-                return False, f"FFmpeg error: {error_msg}"
+                return False, f"Error: FFmpeg error: {error_msg}"
             return True, stdout.decode('utf-8', errors='replace').strip()
         except asyncio.TimeoutError:
             proc.kill()
@@ -1054,7 +1054,7 @@ class MediaProcessor:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=20)
             if proc.returncode != 0:
                 error_msg = stderr.decode('utf-8', errors='replace').strip()
-                return False, f"FFprobe error: {error_msg}"
+                return False, f"Error: FFprobe error: {error_msg}"
             return True, stdout.decode('utf-8', errors='replace').strip()
         except Exception as e:
             return False, f"FFprobe error: {str(e)}"
