@@ -1033,9 +1033,9 @@ class MediaProcessor:
             return True, stdout.decode('utf-8', errors='replace').strip()
         except asyncio.TimeoutError:
             proc.kill()
-            return False, "FFmpeg processing took longer than 120 seconds."
+            return False, "Error: FFmpeg processing took longer than 120 seconds."
         except Exception as e:
-            return False, f"Unexpected error: {str(e)}"
+            return False, f"Error: {str(e)}"
         finally:
             self.active_processes.discard(proc)
     
@@ -1057,7 +1057,7 @@ class MediaProcessor:
                 return False, f"Error: FFprobe error: {error_msg}"
             return True, stdout.decode('utf-8', errors='replace').strip()
         except Exception as e:
-            return False, f"FFprobe error: {str(e)}"
+            return False, f"Error: {str(e)}"
     
     async def _probe_media_info(self, path: Path) -> tuple:
         cmd = [
