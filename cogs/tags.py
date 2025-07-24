@@ -29,6 +29,7 @@ import matplotlib.font_manager
 import hashlib
 from zoneinfo import ZoneInfo
 import dateparser
+import ollama
 
 IMAGE_TYPES = ('image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif')
 VIDEO_TYPES = ('video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska', 'video/x-msvideo', 'video/x-ms-wmv')
@@ -3662,6 +3663,86 @@ class Tags(commands.Cog):
             
             except Exception as e:
                 return f"[attachtext error: {str(e)}", [], None, []
+        
+        @self.formatter.register('ai')
+        async def _ai(ctx, prompt, **kwargs):
+            """
+            ### {ai:prompt}
+                * G-AI but as a tag function. (functions similarly to the AI command.)
+                * Example: `{ai:hello}`
+            """
+            try:
+                ai = ctx.bot.get_cog('AI')
+                if not ai:
+                    return "[AI error: AI cog not loaded]"
+                
+                think_mode = re.search(r'(^|\s)--think($|\s)', prompt) is not None
+                if think_mode:
+                    prompt = re.sub(r'(^|\s)--think($|\s)', ' ', prompt).strip()
+                
+                show_thinking = re.search(r'(^|\s)--show-thinking($|\s)', prompt) is not None
+                if show_thinking:
+                    prompt = re.sub(r'(^|\s)--show-thinking($|\s)', ' ', prompt).strip()
+                
+                class AIContext:
+                    __slots__ = ('bot', 'author', 'guild', 'channel', 'message', '_state')
+                    
+                    def __init__(self, original_ctx):
+                        self.bot = original_ctx.bot
+                        self.author = original_ctx.author
+                        self.guild = original_ctx.guild
+                        self.channel = original_ctx.channel
+                        self.message = original_ctx.message
+                        self._state = original_ctx._state
+                        
+                    async def typing(self):
+                        pass
+                        
+                    async def reply(self, content, **kwargs):
+                        return content
+                        
+                    async def send(self, content, **kwargs):
+                        return content
+
+                fake_ctx = AIContext(ctx)
+                
+                messages = [{
+                    "role": "system", 
+                    "content": await ai.create_system_prompt(fake_ctx, prompt)
+                }]
+                
+
+                conv_key = (fake_ctx.guild.id, fake_ctx.channel.id, fake_ctx.author.id) if fake_ctx.guild else (fake_ctx.author.id, fake_ctx.channel.id)
+                history = await ai.get_conversation_history(conv_key)
+                
+                if history:
+                    messages.extend(history[-ai.MAX_CONVERSATION_HISTORY_LENGTH:])
+                
+                messages.append({"role": "user", "content": prompt})
+                
+
+                response = await asyncio.to_thread(
+                    ollama.chat,
+                    model=bot_info.data['ollama_model'],
+                    messages=messages,
+                    think=think_mode
+                )
+                
+                content = response.message.content
+                if show_thinking and hasattr(response.message, 'thinking'):
+                    content = f"**Thinking...**\n{response.message.thinking}**...done thinking**\n{content}"
+                
+
+                new_history = (history[-ai.MAX_CONVERSATION_HISTORY_LENGTH * 2:] if history else []) + [
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": content}
+                ]
+                await ai.save_conversation_history(conv_key, new_history)
+                
+                return content
+                
+            except Exception as e:
+                return f"[AI error: {str(e)}]"
 
             
         @self.formatter.register('args')
