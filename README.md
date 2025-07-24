@@ -16,7 +16,7 @@ A Discord multi-purpose bot.
 * A YouTube search command.
 * Music commands with FFMPEG audio filters support along with a queue system.
 * A prefix changing system.
-* An AI chatbot command via Ollama.
+* An AI chatbot command via Ollama that supports executing TagScript.
 * Code execution server and command that includes custom packages like yt-dlp, ffmpeg, etc.
 * And lastly, a tag system with tagscripting support.
 

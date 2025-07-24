@@ -10,6 +10,7 @@ import json
 import io
 import re
 from typing import Optional
+import inspect
 
 MAX_CONVERSATION_HISTORY_LENGTH = 5
 
@@ -18,6 +19,44 @@ class AI(commands.Cog):
         self.bot = bot
         self.conversations = {}
         self.db: Optional[asyncpg.Pool] = None
+    
+    def _get_tagscript_function_docs(self, ctx: commands.Context, function_names: list[str] = None) -> dict[str, str]:
+        tags_cog = ctx.bot.get_cog("Tags")
+        if not tags_cog or not hasattr(tags_cog, 'formatter') or not hasattr(tags_cog.formatter, 'functions'):
+            return {}
+
+        formatter = tags_cog.formatter
+        available_functions = formatter.functions
+
+
+        target_function_names = function_names if function_names is not None else available_functions.keys()
+        target_function_names = [name for name in target_function_names if name in available_functions]
+
+        docs = {}
+        for name in target_function_names:
+            func = available_functions.get(name)
+            if func:
+                try:
+                    docstring = inspect.getdoc(func)
+                    if docstring:
+                        lines = docstring.strip().splitlines()
+                        cleaned_lines = []
+                        for line in lines:
+                            stripped_line = line.strip()
+                            if stripped_line:
+                                cleaned_lines.append(stripped_line)
+                            if len(cleaned_lines) >= 10:
+                                break
+                        cleaned_doc = "\n".join(cleaned_lines)
+                        docs[name] = cleaned_doc
+                    else:
+                        docs[name] = f"{name}: No documentation string found."
+                except Exception as e:
+                    docs[name] = f"{name}: Error retrieving documentation ({e})."
+            else:
+                docs[name] = f"{name}: Function reference not found."
+
+        return docs
     
     def get_conversation(self, ctx) -> tuple:
         return (ctx.guild.id, ctx.channel.id, ctx.author.id) if ctx.guild else (ctx.author.id, ctx.channel.id)
@@ -107,11 +146,38 @@ Use rich formatting sparingly — primarily for quoting yourself or labeling tho
 Example response format:
 "Gordon... or perhaps I should call you something else now. (pauses, fingers steepled) The resonance cascade was merely a prelude — but you knew that already, didn't you?"""
 
-        return base_prompt.strip()
+        formatted_docs = ""
+        if content:
+            tags_cog = ctx.bot.get_cog("Tags")
+            available_function_names = set()
+            if tags_cog and hasattr(tags_cog, 'formatter') and hasattr(tags_cog.formatter, 'functions'):
+                available_function_names = set(tags_cog.formatter.functions.keys())
+
+
+            potential_function_mentions = set(re.findall(r'\{(\w+)(?:[^\}]*)\}', content))
+            content_words = set(re.findall(r'\b\w+\b', content))
+            direct_name_mentions = content_words.intersection(available_function_names)
+
+
+            mentioned_function_names = potential_function_mentions.union(direct_name_mentions)
+            relevant_function_names = list(mentioned_function_names.intersection(available_function_names))
+
+            if relevant_function_names:
+                function_docs_dict = self._get_tagscript_function_docs(ctx, relevant_function_names)
+                if function_docs_dict:
+                    formatted_docs_lines = ["\n\n--- Relevant Tag Functions (Contextual Reference) ---"]
+                    for func_name in sorted(function_docs_dict.keys()):
+                        doc_str = function_docs_dict.get(func_name, f"{func_name}: No documentation retrieved.")
+                        formatted_docs_lines.append(f"\n{func_name}:\n{doc_str}\n---")
+                    formatted_docs = "\n".join(formatted_docs_lines)
+
+        final_prompt = f"{base_prompt.strip()}{formatted_docs}"
+
+        return final_prompt.strip()
     
 
 
-    @commands.hybrid_command(name="ai", description="Use G-AI to chat, ask questions, and generate responses.")
+    @commands.hybrid_command(name="ai", description="Use G-AI to chat and execute TagScript.")
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     @app_commands.describe(prompt="The prompt to send to G-AI.")
@@ -147,6 +213,44 @@ Example response format:
             if not content:
                 await ctx.reply("Command returned no content.")
                 return
+            
+            tags = ctx.bot.get_cog('Tags')
+            if tags and hasattr(tags, 'formatter'):
+                try:
+                    text, embeds, view, files = await tags.formatter.format(content, ctx)
+
+                    if embeds or (view and view.childen) or files:
+                        message_content = text[:2000] if text else None
+                        await ctx.reply(
+                            content=message_content,
+                            embeds=embeds[:10],
+                            view=view if view and view.children else None,
+                            files=files[:10]
+                        )
+                    elif text:
+                        if len(text) > 2000:
+                            embed = discord.Embed(
+                                title="G-AI Response",
+                                description=text if len(text) < 4096 else text[:4096],
+                                color=discord.Color.blurple()
+                            )
+                            embed.set_author(
+                                name=f"{ctx.author.name}#{ctx.author.discriminator}",
+                                icon_url=ctx.author.display_avatar.url,
+                                url=f"https://discord.com/users/{ctx.author.id}"
+                            )
+                            embed.set_footer(
+                                text=f"AI Response took {time.time() - start_time:.2f} seconds",
+                                icon_url="https://ollama.com/public/og.png"
+                            )
+                            await ctx.reply(embed=embed)
+                        else:
+                            await ctx.reply(text)
+                    new_history = messages + [{"role": "assistant", "content": content}]
+                    await self.save_conversation_history(conversation_key, new_history)
+                    return
+                except Exception:
+                    pass
                 
             if len(content) > 2000:
                 embed = discord.Embed(title="G-AI Response", description=content if len(content) < 4096 else content[:4096], color=discord.Color.blurple())
@@ -154,7 +258,7 @@ Example response format:
                 embed.set_footer(text=f"AI Response took {time.time() - start_time:.2f} seconds", icon_url="https://ollama.com/public/og.png")
                 await ctx.reply(embed=embed)
             else:
-                await ctx.reply(f"{content}\n-# AI Response took {time.time() - start_time:.2f} seconds")
+                await ctx.reply(content)
             
 
             new_history = user_history[-MAX_CONVERSATION_HISTORY_LENGTH * 2:] if user_history else []
