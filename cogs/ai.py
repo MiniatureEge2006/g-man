@@ -246,7 +246,11 @@ Example response format:
                             await ctx.reply(embed=embed)
                         else:
                             await ctx.reply(text)
-                    new_history = messages + [{"role": "assistant", "content": content}]
+                    new_history = user_history[-MAX_CONVERSATION_HISTORY_LENGTH * 2:] if user_history else []
+                    new_history.extend([
+                        {"role": "user", "content": prompt},
+                        {"role": "assistant", "content": content}
+                    ])
                     await self.save_conversation_history(conversation_key, new_history)
                     return
                 except Exception:
