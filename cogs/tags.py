@@ -5166,7 +5166,7 @@ class Tags(commands.Cog):
         @self.formatter.register('kt')
         async def _kotlin(ctx, code, **kwargs):
             """
-            ### {kt:code}
+            ### {kotlin:code}
                 * Execute Kotlin code.
             """
             return await self.execute_language(ctx, 'kotlin', code, **kwargs)
@@ -5182,7 +5182,7 @@ class Tags(commands.Cog):
         @self.formatter.register('user')
         async def _user(ctx, i, **kwargs):
             """
-            ### {user:mention/name/displayname/id}
+            ### {user:user}
                 * Returns username of mentioned user or self.
                 * Example: `{user:@MiniatureEge2006}` -> "miniatureege2006"
             """
@@ -5194,7 +5194,7 @@ class Tags(commands.Cog):
         @self.formatter.register('userid')
         async def _userid(ctx, i, **kwargs):
             """
-            ### {userid:mention/name/displayname/id}
+            ### {userid:user}
                 * Returns the user ID of an user or self.
                 * Example: `{userid:@MiniatureEge2006}` -> "576819686877036584"
             """
@@ -5204,7 +5204,7 @@ class Tags(commands.Cog):
         @self.formatter.register('nick')
         async def _nick(ctx, i, **kwargs):
             """
-            ### {nick:mention/name/displayname/id}
+            ### {nick:user}
                 * Returns server nickname of mentioned user or self. (returns display name instead if not available)
                 * Example: `{nick:@MiniatureEge2006}` -> "Mini"
             """
@@ -5216,7 +5216,7 @@ class Tags(commands.Cog):
         @self.formatter.register('userdisplay')
         async def _userdisplay(ctx, i, **kwargs):
             """
-            ### {userdisplay:mention/name/displayname/id}
+            ### {userdisplay:user}
                 * Returns display name of mentioned user or self.
                 * Example: `{userdisplay:@MiniatureEge2006}` -> "MiniatureEge2006"
             """
@@ -5226,7 +5226,7 @@ class Tags(commands.Cog):
         @self.formatter.register('mention')
         async def _mention(ctx, i, **kwargs):
             """
-            ### {mention:mention/name/displayname/id}
+            ### {mention:user}
                 * Mentions the user or self.
                 * Example: `{mention:@MiniatureEge2006}` -> "@MiniatureEge2006"
             """
@@ -5236,7 +5236,7 @@ class Tags(commands.Cog):
         @self.formatter.register('avatar')
         async def _avatar(ctx, i, **kwargs):
             """
-            ### {avatar:mention/name/displayname/id}
+            ### {avatar:user}
                 * Returns guild avatar URL, otherwise global if not available.
                 * Example: `{avatar:@MiniatureEge2006}` -> URL
             """
@@ -5246,7 +5246,7 @@ class Tags(commands.Cog):
         @self.formatter.register('avatarkey')
         async def _avatarkey(ctx, i, **kwargs):
             """
-            ### {avatarkey:mention/name/displayname/id}
+            ### {avatarkey:user}
                 * Returns guild avatar hash, otherwise global if not available.
                 * Example: `{avatarkey:@MiniatureEge2006}` -> hash
             """
@@ -5256,7 +5256,7 @@ class Tags(commands.Cog):
         @self.formatter.register('useravatar')
         async def _useravatar(ctx, i, **kwargs):
             """
-            ### {useravatar:mention/name/displayname/id}
+            ### {useravatar:user}
                 * Returns global avatar URL.
                 * Example: `{useravatar:@MiniatureEge2006}` -> URL
             """
@@ -5266,7 +5266,7 @@ class Tags(commands.Cog):
         @self.formatter.register('useravatarkey')
         async def _useravatarkey(ctx, i, **kwargs):
             """
-            ### {useravatarkey:mention/name/displayname/id}
+            ### {useravatarkey:user}
                 * Returns global avatar hash.
                 * Example: `{useravatarkey:@MiniatureEge2006}` -> hash
             """
@@ -5276,7 +5276,7 @@ class Tags(commands.Cog):
         @self.formatter.register('banner')
         async def _banner(ctx, i, **kwargs):
             """
-            ### {banner:mention/name/displayname/id}
+            ### {banner:user}
                 * Returns guild banner URL, otherwise global banner if unavailable.
                 * Example: `{banner:@MiniatureEge2006}` -> URL
             """
@@ -5287,7 +5287,7 @@ class Tags(commands.Cog):
         @self.formatter.register('bannerkey')
         async def _bannerkey(ctx, i, **kwargs):
             """
-            ### {bannerkey:mention/name/displayname/id}
+            ### {bannerkey:user}
                 * Returns guild banner hash, otherwise global banner if unavailable.
                 * Example: `{bannerkey:@MiniatureEge2006}` -> hash
             """
@@ -5298,7 +5298,7 @@ class Tags(commands.Cog):
         @self.formatter.register('userbanner')
         async def _userbanner(ctx, i, **kwargs):
             """
-            ### {userbanner:mention/name/displayname/id}
+            ### {userbanner:user}
                 * Returns global banner URL.
                 * Example: `{userbanner:@MiniatureEge2006}` -> URL
             """
@@ -5312,7 +5312,7 @@ class Tags(commands.Cog):
         @self.formatter.register('userbannerkey')
         async def _userbannerkey(ctx, i, **kwargs):
             """
-            ### {userbannerkey:mention/name/displayname/id}
+            ### {userbannerkey:user}
                 * Returns global banner hash.
                 * Example: `{userbannerkey:@MiniatureEge2006}` -> hash
             """
@@ -5326,7 +5326,7 @@ class Tags(commands.Cog):
         @self.formatter.register('usercreatedate')
         async def _usercreatedate(ctx, i, **kwargs):
             """
-            ### {usercreatedate:mention/name/displayname/id}
+            ### {usercreatedate:user}
                 * Always returns account creation date (unlike userjoindate which returns server join date when available).
                 * Example: `{usercreatedate:@MiniatureEge2006}` -> "2019-05-11 17:15:30 (May 11, 2019 at 05:15:30 PM)"
             """
@@ -5336,7 +5336,7 @@ class Tags(commands.Cog):
         @self.formatter.register('userjoindate')
         async def _userjoindate(ctx, i, **kwargs):
             """
-            ### {userjoindate:mention/name/displayname/id}
+            ### {userjoindate:user}
                 * Returns join date in server if member, otherwise account creation date.
                 * Example outputs:
                 - For server members: "2025-04-24 12:00:00 (April 24, 2025 at 12:00:00 PM)"
@@ -5355,7 +5355,7 @@ class Tags(commands.Cog):
         @self.formatter.register('userstatus')
         async def _userstatus(ctx, i, **kwargs):
             """
-            ### {userstatus:mention/name/displayname/id}
+            ### {userstatus:user}
                 * Returns user status.
                 * Example: `{userstatus:@MiniatureEge2006}` -> "Online"
             """
@@ -5367,7 +5367,7 @@ class Tags(commands.Cog):
         @self.formatter.register('usercustomstatus')
         async def _usercustomstatus(ctx, i, **kwargs):
             """
-            ### {usercustomstatus:mention/name/displayname/id}
+            ### {usercustomstatus:user}
                 * Returns custom status if set.
                 * Example: `{usercustomstatus:@MiniatureEge2006}` -> "Playing Roblox"
             """
@@ -5410,7 +5410,7 @@ class Tags(commands.Cog):
         @self.formatter.register('userbadges')
         async def _userbadges(ctx, i, **kwargs):
             """
-            ### {userbadges:mention/name/displayname/id}
+            ### {userbadges:user}
                 * Returns user badges.
                 * Example: `{userbadges:@MiniatureEge2006}` -> "Active Developer, Early Verified Bot Developer"
             """
