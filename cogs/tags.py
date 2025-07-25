@@ -3503,7 +3503,7 @@ class Tags(commands.Cog):
                             return f"[{language} error: Failed to fetch file {filename}: {str(e)}]"
 
                     if file_objs:
-                        return ("", [], None, file_objs[:10])
+                        return (output, [], None, file_objs[:10])
 
                 return output or "Code execution succeeded with no console output"
         except Exception as e:
