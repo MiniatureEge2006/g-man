@@ -4952,7 +4952,7 @@ class Tags(commands.Cog):
                     return "[choose error: no valid options]"
         
                 choice = random.choices(options, weights=weights or None, k=1)[0]
-                return await ctx.cog.formatter.format(choice, ctx, **kwargs)
+                return await self.formatter.format(choice, ctx, **kwargs)
     
             except Exception as e:
                 return f"[choose error: {str(e)}]"
@@ -5184,7 +5184,7 @@ class Tags(commands.Cog):
             """
             ### {user:user}
                 * Returns username of mentioned user or self.
-                * Example: `{user:@MiniatureEge2006}` -> "miniatureege2006"
+                * Example: `{user:MiniatureEge2006}` -> "miniatureege2006"
             """
             user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
@@ -5196,7 +5196,7 @@ class Tags(commands.Cog):
             """
             ### {userid:user}
                 * Returns the user ID of an user or self.
-                * Example: `{userid:@MiniatureEge2006}` -> "576819686877036584"
+                * Example: `{userid:MiniatureEge2006}` -> "576819686877036584"
             """
             user = await self.formatter.resolve_user(ctx, i)
             return user.id
@@ -5206,7 +5206,7 @@ class Tags(commands.Cog):
             """
             ### {nick:user}
                 * Returns server nickname of mentioned user or self. (returns display name instead if not available)
-                * Example: `{nick:@MiniatureEge2006}` -> "Mini"
+                * Example: `{nick:MiniatureEge2006}` -> "Mini"
             """
             user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
@@ -5218,7 +5218,7 @@ class Tags(commands.Cog):
             """
             ### {userdisplay:user}
                 * Returns display name of mentioned user or self.
-                * Example: `{userdisplay:@MiniatureEge2006}` -> "MiniatureEge2006"
+                * Example: `{userdisplay:MiniatureEge2006}` -> "MiniatureEge2006"
             """
             user = await self.formatter.resolve_user(ctx, i)
             return user.display_name
@@ -5228,7 +5228,7 @@ class Tags(commands.Cog):
             """
             ### {mention:user}
                 * Mentions the user or self.
-                * Example: `{mention:@MiniatureEge2006}` -> "@MiniatureEge2006"
+                * Example: `{mention:MiniatureEge2006}` -> "@MiniatureEge2006"
             """
             user = await self.formatter.resolve_user(ctx, i)
             return user.mention
@@ -5238,7 +5238,7 @@ class Tags(commands.Cog):
             """
             ### {avatar:user}
                 * Returns guild avatar URL, otherwise global if not available.
-                * Example: `{avatar:@MiniatureEge2006}` -> URL
+                * Example: `{avatar:MiniatureEge2006}` -> URL
             """
             user = await self.formatter.resolve_user(ctx, i)
             return str(user.display_avatar.url)
@@ -5248,7 +5248,7 @@ class Tags(commands.Cog):
             """
             ### {avatarkey:user}
                 * Returns guild avatar hash, otherwise global if not available.
-                * Example: `{avatarkey:@MiniatureEge2006}` -> hash
+                * Example: `{avatarkey:MiniatureEge2006}` -> hash
             """
             user = await self.formatter.resolve_user(ctx, i)
             return str(user.display_avatar.key)
@@ -5258,7 +5258,7 @@ class Tags(commands.Cog):
             """
             ### {useravatar:user}
                 * Returns global avatar URL.
-                * Example: `{useravatar:@MiniatureEge2006}` -> URL
+                * Example: `{useravatar:MiniatureEge2006}` -> URL
             """
             user = await self.formatter.resolve_user(ctx, i)
             return str(user.avatar.url) if user.avatar else None
@@ -5268,7 +5268,7 @@ class Tags(commands.Cog):
             """
             ### {useravatarkey:user}
                 * Returns global avatar hash.
-                * Example: `{useravatarkey:@MiniatureEge2006}` -> hash
+                * Example: `{useravatarkey:MiniatureEge2006}` -> hash
             """
             user = await self.formatter.resolve_user(ctx, i)
             return str(user.avatar.key) if user.avatar else None
@@ -5278,7 +5278,7 @@ class Tags(commands.Cog):
             """
             ### {banner:user}
                 * Returns guild banner URL, otherwise global banner if unavailable.
-                * Example: `{banner:@MiniatureEge2006}` -> URL
+                * Example: `{banner:MiniatureEge2006}` -> URL
             """
             user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
@@ -5289,7 +5289,7 @@ class Tags(commands.Cog):
             """
             ### {bannerkey:user}
                 * Returns guild banner hash, otherwise global banner if unavailable.
-                * Example: `{bannerkey:@MiniatureEge2006}` -> hash
+                * Example: `{bannerkey:MiniatureEge2006}` -> hash
             """
             user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
@@ -5300,7 +5300,7 @@ class Tags(commands.Cog):
             """
             ### {userbanner:user}
                 * Returns global banner URL.
-                * Example: `{userbanner:@MiniatureEge2006}` -> URL
+                * Example: `{userbanner:MiniatureEge2006}` -> URL
             """
             user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
@@ -5314,7 +5314,7 @@ class Tags(commands.Cog):
             """
             ### {userbannerkey:user}
                 * Returns global banner hash.
-                * Example: `{userbannerkey:@MiniatureEge2006}` -> hash
+                * Example: `{userbannerkey:MiniatureEge2006}` -> hash
             """
             user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
@@ -5328,7 +5328,7 @@ class Tags(commands.Cog):
             """
             ### {usercreatedate:user}
                 * Always returns account creation date (unlike userjoindate which returns server join date when available).
-                * Example: `{usercreatedate:@MiniatureEge2006}` -> "2019-05-11 17:15:30 (May 11, 2019 at 05:15:30 PM)"
+                * Example: `{usercreatedate:MiniatureEge2006}` -> "2019-05-11 17:15:30 (May 11, 2019 at 05:15:30 PM)"
             """
             user = await self.formatter.resolve_user(ctx, i)
             return user.created_at.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)') if user.created_at else None
@@ -5357,7 +5357,7 @@ class Tags(commands.Cog):
             """
             ### {userstatus:user}
                 * Returns user status.
-                * Example: `{userstatus:@MiniatureEge2006}` -> "Online"
+                * Example: `{userstatus:MiniatureEge2006}` -> "Online"
             """
             user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
@@ -5369,7 +5369,7 @@ class Tags(commands.Cog):
             """
             ### {usercustomstatus:user}
                 * Returns custom status if set.
-                * Example: `{usercustomstatus:@MiniatureEge2006}` -> "Playing Roblox"
+                * Example: `{usercustomstatus:MiniatureEge2006}` -> "Playing Roblox"
             """
             user = await self.formatter.resolve_user(ctx, i)
             if not isinstance(user, discord.Member):
@@ -5412,7 +5412,7 @@ class Tags(commands.Cog):
             """
             ### {userbadges:user}
                 * Returns user badges.
-                * Example: `{userbadges:@MiniatureEge2006}` -> "Active Developer, Early Verified Bot Developer"
+                * Example: `{userbadges:MiniatureEge2006}` -> "Active Developer, Early Verified Bot Developer"
             """
             user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
