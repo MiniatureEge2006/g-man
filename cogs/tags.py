@@ -5872,7 +5872,10 @@ class Tags(commands.Cog):
                     "attachments": [{
                         "id": str(a.id),
                         "filename": a.filename,
+                        "width": getattr(a, 'width', None),
+                        "height": getattr(a, 'height', None),
                         "url": a.url,
+                        "proxy_url": a.proxy_url,
                         "size": a.size,
                         "content_type": a.content_type
                     } for a in message.attachments],
@@ -5885,7 +5888,10 @@ class Tags(commands.Cog):
                         "attachments": [{
                             "id": str(a.id),
                             "filename": a.filename,
+                            "width": getattr(a, 'width', None),
+                            "height": getattr(a, 'height', None),
                             "url": a.url,
+                            "proxy_url": a.proxy_url,
                             "size": a.size,
                             "content_type": a.content_type
                         } for a in m.attachments],
@@ -6160,6 +6166,7 @@ class Tags(commands.Cog):
                         "id": str(a.id),
                         "filename": a.filename,
                         "url": a.url,
+                        "proxy_url": a.proxy_url,
                         "size": a.size,
                         "content_type": a.content_type,
                         "height": getattr(a, 'height', None),
@@ -6176,6 +6183,7 @@ class Tags(commands.Cog):
                             "id": str(a.id),
                             "filename": a.filename,
                             "url": a.url,
+                            "proxy_url": a.proxy_url,
                             "size": a.size,
                             "content_type": a.content_type,
                             "height": getattr(a, 'height', None),
@@ -6193,6 +6201,7 @@ class Tags(commands.Cog):
                             "id": str(a.id),
                             "filename": a.filename,
                             "url": a.url,
+                            "proxy_url": a.proxy_url,
                             "size": a.size,
                             "content_type": a.content_type,
                             "height": getattr(a, 'height', None),
