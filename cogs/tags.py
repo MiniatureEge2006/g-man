@@ -5880,13 +5880,25 @@ class Tags(commands.Cog):
                     "components": [c.to_dict() for c in message.components],
                     "mention_everyone": message.mention_everyone,
                     "mentions": [json.loads(await _json_user(ctx, str(u.id))) for u in message.mentions],
+                    "message_snapshots": [{
+                        "content": m.content,
+                        "attachments": [{
+                            "id": str(a.id),
+                            "filename": a.filename,
+                            "url": a.url,
+                            "size": a.size,
+                            "content_type": a.content_type
+                        } for a in m.attachments],
+                        "embeds": [e.to_dict() for e in m.embeds],
+                        "components": [c.to_dict() for c in m.components]
+                    } for m in message.message_snapshots],
                     "reference": {
                         "message_id": str(message.reference.message_id),
                         "channel_id": str(message.reference.channel_id),
                         "guild_id": str(message.reference.guild_id)
                     } if message.reference else None,
                     "pinned": message.pinned,
-                    "type": str(message.type)
+                    "type": str(message.type.name)
                 }
                 
                 
@@ -6134,7 +6146,7 @@ class Tags(commands.Cog):
         async def _json_attachment(ctx, attachment_ref, **kwargs):
             """
             ### {json.attachment:index}
-                * Returns the current message's specific attachment. Defaults to all attachments. 
+                * Returns the current message's specific attachment JSON object. Defaults to all attachments. 
             """
             try:
                 attachments = ctx.message.attachments
