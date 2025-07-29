@@ -2732,65 +2732,54 @@ class MediaProcessor:
         loop_media = kwargs['loop_media']
         if input_key not in self.media_cache or audio_key not in self.media_cache:
             return "Error: Missing input media"
-    
+
         media_path = Path(self.media_cache[input_key])
         audio_path = Path(self.media_cache[audio_key])
         is_image = media_path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp')
+        is_video = media_path.suffix.lower() in ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv')
 
-
-        output_ext = 'mp4' if (is_image or force_video) else media_path.suffix[1:]
+        output_ext = 'mp4' if (is_image or force_video or is_video) else media_path.suffix[1:]
         output_file = self._get_temp_path(output_ext)
-
 
         cmd = ['ffmpeg', '-hide_banner', '-y']
 
-
         if is_image:
-            cmd.extend([
-            '-loop', '1',
-            '-i', media_path.as_posix(),
-            '-i', audio_path.as_posix(),
-            '-vf', 'pad=width=ceil(iw/2)*2:height=ceil(ih/2)*2',
-            '-shortest',
-            '-vsync', '0',
-            '-copyts',
-            '-c:v', 'libx264',
-            '-preset', 'fast',
-            '-crf', '23',
-            '-pix_fmt', 'yuv420p',
-            '-movflags', '+faststart',
-            '-c:a', 'aac',
-            '-b:a', '192k',
-            output_file.as_posix()
-        ])
+            cmd.extend(['-loop', '1', '-i', media_path.as_posix()])
         else:
             if loop_media:
                 cmd.extend(['-stream_loop', '-1'])
             cmd.extend(['-i', media_path.as_posix()])
-            cmd.extend(['-i', audio_path.as_posix()])
+        
+        cmd.extend(['-i', audio_path.as_posix()])
 
+        if is_image or force_video or is_video:
+            cmd.extend([
+                '-filter_complex', 
+                '[0:v]scale=ceil(iw/2)*2:ceil(ih/2)*2[v]',
+                '-map', '[v]',
+                '-map', '1:a:0',
+                '-c:v', 'libx264',
+                '-preset', 'fast',
+                '-crf', '23',
+                '-pix_fmt', 'yuv420p',
+                '-movflags', '+faststart'
+            ])
+        else:
+            cmd.extend([
+                '-map', '0:v:0',
+                '-map', '1:a:0',
+                '-c:v', 'copy'
+            ])
 
-            if force_video or loop_media:
-                cmd.extend([
-                    '-c:v', 'libx264',
-                    '-preset', 'fast',
-                    '-crf', '23',
-                    '-pix_fmt', 'yuv420p',
-                    '-movflags', '+faststart'
-                ])
-            else:
-                cmd.extend(['-c:v', 'copy'])
+        cmd.extend([
+            '-c:a', 'aac',
+            '-b:a', '192k'
+        ])
 
+        if preserve_length:
+            cmd.append('-shortest')
 
-            cmd.extend(['-c:a', 'aac', '-b:a', '192k'])
-
-
-            if preserve_length:
-                cmd.append('-shortest')
-
-
-            cmd.append(output_file.as_posix())
-
+        cmd.append(output_file.as_posix())
 
         success, error = await self._run_ffmpeg(cmd)
         if success:
@@ -2826,10 +2815,10 @@ class MediaProcessor:
         audio_path = Path(self.media_cache[audio_key])
         is_image = media_path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp')
         is_audio = media_path.suffix.lower() in ('.mp3', '.wav', '.ogg', '.opus', '.flac', '.m4a', '.mka', '.wma')
+        is_video = media_path.suffix.lower() in ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv')
 
-        output_ext = 'mp4' if (is_image or not is_audio) else media_path.suffix[1:]
+        output_ext = 'mp4' if (is_image or is_video or not is_audio) else media_path.suffix[1:]
         output_file = self._get_temp_path(output_ext)
-
 
         audio_duration = None
         if loop_media:
@@ -2852,11 +2841,17 @@ class MediaProcessor:
         else:
             audio_input = '[1:a]'
 
-        audio_filter.extend([
-            f'[0:a]aformat=sample_fmts=fltp,volume={volume}[a0]',
-            f'{audio_input}aformat=sample_fmts=fltp,volume={volume}[a1]',
-            f'[a0][a1]amix=inputs=2:duration=longest[a]'
-        ])
+        has_audio = not is_image and not is_audio
+        if has_audio:
+            audio_filter.extend([
+                f'[0:a]aformat=sample_fmts=fltp,volume={volume}[a0]',
+                f'{audio_input}aformat=sample_fmts=fltp,volume={volume}[a1]',
+                f'[a0][a1]amix=inputs=2:duration=longest[a]'
+            ])
+        else:
+            audio_filter.extend([
+                f'{audio_input}aformat=sample_fmts=fltp,volume={volume}[a]'
+            ])
 
         filter_complex_str = ';'.join(audio_filter)
 
@@ -2873,7 +2868,9 @@ class MediaProcessor:
             '-y', output_file.as_posix()
         ])
 
-        success, error = await self._run_ffmpeg([x for x in cmd if x is not None])
+        cmd = [x for x in cmd if x is not None]
+
+        success, error = await self._run_ffmpeg(cmd)
         if success:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
