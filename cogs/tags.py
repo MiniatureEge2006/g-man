@@ -2376,8 +2376,8 @@ class MediaProcessor:
         try:
             input_key = kwargs['input_key']
             text = kwargs['text']
-            x_raw = kwargs['x']
-            y_raw = kwargs['y']
+            x_raw = kwargs.get('x', '0')
+            y_raw = kwargs.get('y', '0')
             font_size = kwargs['font_size']
             color = kwargs['color']
             output_key = kwargs['output_key']
@@ -2432,12 +2432,12 @@ class MediaProcessor:
             if str(x_raw).lower() == "center":
                 x = (base_img.width - text_width) // 2
             else:
-                x = int(x_raw)
+                x = await self._resolve_dimension(x_raw, input_key)
 
             if str(y_raw).lower() == "center":
                 y = (base_img.height - text_height_total) // 2
             else:
-                y = int(y_raw)
+                y = await self._resolve_dimension(y_raw, input_key)
 
 
             txt_layer = await asyncio.to_thread(Image.new, 'L', base_img.size, 0)
