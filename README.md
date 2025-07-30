@@ -61,9 +61,10 @@ pip3 install -r requirements.txt
 * You may not use G-Man in order to target an individual or groups of individuals.
 * You may not use G-Man if you are under the age of 13. Though it may depend on your country's laws in order to use Discord, so it can be higher than just 13.
 ## Privacy Policy
+### "We" refers to myself, because I am the only one working for this bot.
 * We do not use your personal information whatsoever.
-  * We only use these data: Guilds and their IDs (Servers), Channels and their IDs, Roles and their IDs, and Users/Members and their IDs. All of which are required for moderation purposes and for the bot to function perfectly.
+  * We log command usage to our local database. This is used for the `commandusage` command to help in moderation regarding potential bad actors. If you want your data removed from this, you'll have to contact me in discord at my support server. (my username is miniatureege2006)
   * Additionally, the command content will be included anytime you or anyone uses any commands. This is for moderation and monitoring purposes, along with debugging.
-  * I do NOT share these data with anyone at all.
+  * We do NOT share these data with anyone at all.
 * I am not responsible/liable for any media/content that is created from other users using G-Man.
-* **If you wish to opt-out of using G-Man and want your data removed completely, make sure to remove the G-Man bot from any servers you own/manage and deauthorize the bot from your account. If you however still want to use G-Man but don't want your data to be given at all, please look at the installation instructions in order to self-host G-Man.**
+* **If you wish to opt-out of using G-Man and want your data removed completely, contact me in discord at my support server and I will handle it.**
