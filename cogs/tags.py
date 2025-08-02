@@ -1103,6 +1103,8 @@ class MediaProcessor:
             output_files = []
             errors = []
             last_output_key = None
+            produced_outputs = set()
+            final_output_key = None
             i = 0
             
             while i < len(lines):
@@ -1134,7 +1136,9 @@ class MediaProcessor:
                                 end_time=end,
                                 output_key=output_key,
                                 sub_script='\n'.join(sub_script))
-                            
+                            if result.startswith("media://"):
+                                produced_outputs.add(output_key)
+                                output_files.append(result[8:])
                             if result.startswith("Error"):
                                 raise RuntimeError(result)
                                 
@@ -1164,7 +1168,10 @@ class MediaProcessor:
                             
                             if 'output_key' in parsed:
                                 last_output_key = parsed['output_key']
-                                
+                                produced_outputs.add(last_output_key)
+                                final_output_key = last_output_key
+                            if result.startswith("media://"):
+                                output_files.append(result[8:])
                             if result.startswith("Error"):
                                 raise RuntimeError(result)
                                 
@@ -1178,13 +1185,10 @@ class MediaProcessor:
                     errors.append(await self._handle_error("processing", e, f"in line: {line}"))
                     i += 1
                     continue
-            if not errors and not output_files and last_output_key:
-                try:
-                    auto_result = await self._render_media(media_key=last_output_key)
-                    if auto_result.startswith("media://"):
-                        output_files.append(auto_result[8:])
-                except Exception as e:
-                    errors.append(await self._handle_error("auto-render", e))
+            if final_output_key and not errors:
+                final_path = self.media_cache.get(final_output_key)
+                if final_path and os.path.exists(final_path):
+                    return [final_path]
 
             return errors if errors else output_files
             
@@ -1395,7 +1399,7 @@ class MediaProcessor:
                     target_width, target_height = info['width'], info['height']
                 break
 
-        scale_filter = f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2"
+        scale_filter = f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2,setsar=1:1"
 
         for idx, info in enumerate(media_info):
             path = info['path']
@@ -1406,7 +1410,7 @@ class MediaProcessor:
             if media_type == 'image':
                 ffmpeg_cmd += ['-t', str(duration), '-i', str(path)]
                 if suffix == '.gif' and all_gifs:
-                    filter_complex.append(f"[{idx}:v]setpts=PTS-STARTPTS,fps=10[v{idx}]")
+                    filter_complex.append(f"[{idx}:v]setpts=PTS-STARTPTS,fps=10,setsar=1:1[v{idx}]")
                 else:
                     filter_complex.append(f"[{idx}:v]{scale_filter},format=rgb24,fps=15[v{idx}]")
                 v_streams.append(f"[v{idx}]")
@@ -2681,8 +2685,8 @@ class MediaProcessor:
             '-i', self.media_cache[text_key],
             '-filter_complex',
             '[1:v][2:v]overlay=0:0[bgtext];'
-            f'[0:v]pad=width={width}:height={padded_height}:y={overlay_height}:color=black[padded];'
-            '[padded][bgtext]overlay=0:0[v]',
+            f'[0:v]pad=width={width}:height={padded_height}:y={overlay_height}:color=black,setsar=1:1[padded];'
+            '[padded][bgtext]overlay=0:0,setsar=1:1[v]',
             *(['-frames:v', '1'] if not is_video and not is_gif else []),
             '-map', '[v]',
             '-map', '0:a?'
