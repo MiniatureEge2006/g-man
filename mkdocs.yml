@@ -1,0 +1,173 @@
+site_name: G-Man
+repo_url: https://github.com/MiniatureEge2006/g-man/
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.tabs
+    - navigation.top
+    - toc.integrate
+    - search.suggest
+nav:
+  - Home: index.md
+  - Commands:
+    - Main:
+      - Overview: commands/main.md
+      - addguildprefix: commands/main/addguildprefix.md
+      - addpersonalprefix: commands/main/addpersonalprefix.md
+      - allow: commands/main/allow.md
+      - allowlist: commands/main/allowlist.md
+      - block: commands/main/block.md
+      - blocklist: commands/main/blocklist.md
+      - command: commands/main/command.md
+      - commandclear: commands/main/commandclear.md
+      - commandlist: commands/main/commandlist.md
+      - commandusage: commands/main/commandusage.md
+      - deny: commands/main/deny.md
+      - eval: commands/main/eval.md
+      - listguildprefixes: commands/main/listguildprefixes.md
+      - listpersonalprefixes: commands/main/listpersonalprefixes.md
+      - ping: commands/main/ping.md
+      - reload: commands/main/reload.md
+      - removeguildprefix: commands/main/removeguildprefix.md
+      - removepersonalprefix: commands/main/removepersonalprefix.md
+      - sudo: commands/main/sudo.md
+      - sync: commands/main/sync.md
+      - unblock: commands/main/unblock.md
+    - AI:
+      - Overview: commands/ai.md
+      - ai: commands/ai/ai.md
+      - setsystemprompt: commands/ai/setsystemprompt.md
+      - resetsystemprompt: commands/ai/resetsystemprompt.md
+      - exportchat: commands/ai/exportchat.md
+      - importchat: commands/ai/importchat.md
+      - resetai: commands/ai/resetai.md
+    - Audio:
+      - Overview: commands/audio.md
+      - join: commands/audio/join.md
+      - leave: commands/audio/leave.md
+      - play: commands/audio/play.md
+      - stream: commands/audio/stream.md
+      - seek: commands/audio/seek.md
+      - goto: commands/audio/goto.md
+      - move: commands/audio/move.md
+      - remove: commands/audio/remove.md
+      - volume: commands/audio/volume.md
+      - nowplaying: commands/audio/nowplaying.md
+      - shuffle: commands/audio/shuffle.md
+      - repeat: commands/audio/repeat.md
+      - queue: commands/audio/queue.md
+      - skip: commands/audio/skip.md
+      - stop: commands/audio/stop.md
+      - clear: commands/audio/clear.md
+      - pause: commands/audio/pause.md
+      - resume: commands/audio/resume.md
+    - Code:
+      - Overview: commands/code.md
+      - code: commands/code/code.md
+    - Exif:
+      - Overview: commands/exif.md
+      - exif: commands/exif/exif.md
+    - Help:
+      - Overview: commands/help.md
+      - help: commands/help/help.md
+    - Info:
+      - Overview: commands/info.md
+      - userinfo: commands/info/userinfo.md
+      - serverinfo: commands/info/serverinfo.md
+      - channelinfo: commands/info/channelinfo.md
+      - voiceinfo: commands/info/voiceinfo.md
+      - threadinfo: commands/info/threadinfo.md
+      - messageinfo: commands/info/messageinfo.md
+      - emojiinfo: commands/info/emojiinfo.md
+      - stickerinfo: commands/info/stickerinfo.md
+      - inviteinfo: commands/info/inviteinfo.md
+      - permissions: commands/info/permissions.md
+      - roleinfo: commands/info/roleinfo.md
+      - baninfo: commands/info/baninfo.md
+      - botinfo: commands/info/botinfo.md
+      - weatherinfo: commands/info/weatherinfo.md
+      - colorinfo: commands/info/colorinfo.md
+      - gradientinfo: commands/info/gradientinfo.md
+    - Tags:
+      - Overview: commands/tags.md
+      - tag: commands/tags/tag.md
+      - Manage:
+          - create: commands/tags/tag/create.md
+          - edit: commands/tags/tag/edit.md
+          - remove: commands/tags/tag/remove.md
+          - rename: commands/tags/tag/rename.md
+          - transfer: commands/tags/tag/transfer.md
+      - View:
+          - list: commands/tags/tag/list.md
+          - random: commands/tags/tag/random.md
+          - raw: commands/tags/tag/raw.md
+          - info: commands/tags/tag/info.md
+          - show: commands/tags/tag/show.md
+      - Search:
+          - search: commands/tags/tag/search.md
+      - Aliases:
+          - alias: commands/tags/tag/alias.md
+          - add: commands/tags/tag/alias/add.md
+          - remove: commands/tags/tag/alias/remove.md
+          - list: commands/tags/tag/alias/list.md
+    - Media:
+      - Overview: commands/media.md
+      - Any Media:
+        - audioputreplace: commands/media/media/audioputreplace.md
+        - audioputmix: commands/media/media/audioputmix.md
+        - convert: commands/media/media/convert.md
+        - speed: commands/media/media/speed.md
+        - trim: commands/media/media/trim.md
+        - reverse: commands/media/media/reverse.md
+      - Audio/Video:
+        - volume: commands/media/av/volume.md
+        - vibrato: commands/media/av/vibrato.md
+        - tremolo: commands/media/av/tremolo.md
+      - Image:
+        - text: commands/media/image/text.md
+      - Image/Video:
+        - caption: commands/media/iv/caption.md
+        - grayscale: commands/media/iv/grayscale.md
+        - sepia: commands/media/iv/sepia.md
+        - contrast: commands/media/iv/contrast.md
+        - fadeout: commands/media/iv/fadeout.md
+        - fadein: commands/media/iv/fadein.md
+        - opacity: commands/media/iv/opacity.md
+        - overlay: commands/media/iv/overlay.md
+        - resize: commands/media/iv/resize.md
+        - rotate: commands/media/iv/rotate.md
+        - brightness: commands/media/iv/brightness.md
+        - colorkey: commands/media/iv/colorkey.md
+        - chromakey: commands/media/iv/chromakey.md
+        - gamma: commands/media/iv/gamma.md
+        - saturate: commands/media/iv/saturate.md
+        - crop: commands/media/iv/crop.md
+        - hue: commands/media/iv/hue.md
+        - invert: commands/media/iv/invert.md
+        - fps: commands/media/iv/fps.md
+    - Moderation:
+      - Overview: commands/moderation.md
+      - ban: commands/moderation/ban.md
+      - kick: commands/moderation/kick.md
+    - Reminder:
+      - Overview: commands/reminder.md
+      - remind: commands/reminder/remind.md
+      - reminders: commands/reminder/reminders.md
+      - serverreminders: commands/reminder/serverreminders.md
+      - deletereminder: commands/reminder/deletereminder.md
+      - clearreminders: commands/reminder/clearreminders.md
+    - Roblox:
+      - Overview: commands/roblox.md
+      - ruserinfo: commands/roblox/ruserinfo.md
+      - rgameinfo: commands/roblox/rgameinfo.md
+    - Search:
+      - Overview: commands/search.md
+      - search: commands/search/search.md
+    - Ytdlp:
+      - Overview: commands/ytdlp.md
+      - yt-dlp: commands/ytdlp/yt-dlp.md
+
+docs_dir: docs
