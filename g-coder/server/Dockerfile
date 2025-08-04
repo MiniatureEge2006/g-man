@@ -60,10 +60,13 @@ RUN mkdir -p /app && \
     chmod -R 555 /home/gcoder/bgutil-ytdlp-pot-provider
 COPY --chown=gcoder:gcoder . /app
 
-
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
 USER gcoder
 EXPOSE 8000
 
-CMD ["/entrypoint.sh"]
+CMD ["bash", "-c", \
+     "set -m; \
+      (cd /home/gcoder/bgutil-ytdlp-pot-provider/server/ && node build/main.js) & \
+      (cd /home/gcoder/executions && uvicorn --app-dir /app app:app --host 0.0.0.0 --port 8000) & \
+      fg %1 || fg %2 || wait -n; \
+      kill 0; \
+      exit 1"]
