@@ -5007,7 +5007,7 @@ class Tags(commands.Cog):
             name, value = parts[0].strip(), parts[1].strip()
             
 
-            ctx.cog._variables.setdefault(ctx.message.id, {})[name] = value
+            self._variables.setdefault(ctx.message.id, {})[name] = value
             return ""
             
         @self.formatter.register('get')
@@ -5017,7 +5017,7 @@ class Tags(commands.Cog):
                 * Retrieves a previously set variable in the tag.
                 * Example: `Hello {get:name}!`
             """
-            variables = ctx.cog._variables.get(ctx.message.id, {})
+            variables = self._variables.get(ctx.message.id, {})
             return str(variables.get(name.strip(), ""))
             
         @self.formatter.register('math')
