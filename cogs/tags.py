@@ -119,6 +119,105 @@ class JumpToPageModal(discord.ui.Modal, title="Jump to Page"):
         except ValueError:
             await interaction.response.send_message("Please enter a valid number.", ephemeral=True)
 
+class Paginator(discord.ui.View):
+    def __init__(self, pages: list, author: discord.User):
+        super().__init__(timeout=60)
+        self.pages = pages
+        self.current_page = 0
+        self.author = author
+        self.message = None
+
+    async def interaction_check(self, interaction: discord.Interaction):
+        if interaction.user != self.author:
+            await interaction.response.send_message("You can't control this pagination.", ephemeral=True)
+            return False
+        return True
+
+    async def on_timeout(self):
+        if self.message:
+            await self.message.edit(view=None)
+
+    async def show_page(self, page_index: int):
+        self.current_page = page_index
+        content, embeds, files_metadata = self.pages[page_index]
+
+        files = [
+            discord.File(BytesIO(meta["data"]), filename=meta["filename"])
+            for meta in files_metadata
+        ] if files_metadata else []
+        
+        return content, embeds, files
+
+    @discord.ui.button(label="⏮️", style=discord.ButtonStyle.blurple)
+    async def first_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.show_page(0)
+        content, embeds, files = await self.show_page(0)
+        await interaction.response.edit_message(content=content, embeds=embeds, view=self, attachments=files)
+
+    @discord.ui.button(label="⬅️", style=discord.ButtonStyle.blurple)
+    async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page > 0:
+            content, embeds, files = await self.show_page(self.current_page - 1)
+            await interaction.response.edit_message(content=content, embeds=embeds, view=self, attachments=files)
+
+    @discord.ui.button(label="➡️", style=discord.ButtonStyle.blurple)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page < len(self.pages) - 1:
+            content, embeds, files = await self.show_page(self.current_page + 1)
+            await interaction.response.edit_message(content=content, embeds=embeds, view=self, attachments=files)
+
+    @discord.ui.button(label="⏭️", style=discord.ButtonStyle.blurple)
+    async def last_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        content, embeds, files = await self.show_page(len(self.pages) - 1)
+        await interaction.response.edit_message(content=content, embeds=embeds, view=self, attachments=files)
+
+    @discord.ui.button(label="🔢", style=discord.ButtonStyle.green)
+    async def jump_to_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = JumpToPageModal2(paginator_view=self)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="🗑️", style=discord.ButtonStyle.red)
+    async def delete_message(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.message.delete()
+        self.stop()
+
+    @discord.ui.button(label="⏹️", style=discord.ButtonStyle.gray)
+    async def hide_components(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.message.edit(view=None)
+        self.stop()
+
+class JumpToPageModal2(discord.ui.Modal, title="Jump to Page"):
+    def __init__(self, paginator_view: Paginator):
+        super().__init__()
+        self.paginator_view = paginator_view
+
+        self.page = discord.ui.TextInput(
+            label="Page Number",
+            placeholder=f"Enter page number (1-{len(self.paginator_view.pages)})",
+            min_length=1,
+            max_length=5
+        )
+        self.add_item(self.page)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            page_num = int(self.page.value) - 1
+            if 0 <= page_num < len(self.paginator_view.pages):
+                content, embeds, files = await self.paginator_view.show_page(page_num)
+                await interaction.response.edit_message(
+                    content=content,
+                    embeds=embeds,
+                    view=self.paginator_view,
+                    attachments=files
+                )
+            else:
+                await interaction.response.send_message(
+                    f"Invalid page number. Must be between 1 and {len(self.paginator_view.pages)}",
+                    ephemeral=True
+                )
+        except ValueError:
+            await interaction.response.send_message("Please enter a valid number.", ephemeral=True)
+
 
 class DiscordGenerator:
     @staticmethod
@@ -5729,6 +5828,101 @@ class Tags(commands.Cog):
             
             except Exception as e:
                 return (f"[select error: {str(e)}]", [], None, [])
+        
+        @self.formatter.register('paginator')
+        @self.formatter.register('page')
+        @self.formatter.register('paginatorjson')
+        @self.formatter.register('pagejson')
+        @self.formatter.register('json.paginator')
+        @self.formatter.register('json.page')
+        async def _paginator(ctx, content, **kwargs):
+            """
+            ### {paginator:json_content}
+                * Creates a paginated message with multiple pages of content, embeds, and files.
+                * JSON structure:
+                    [
+                        {
+                            "content": "Page text",
+                            "embeds": [embed_data],
+                            "files": [file_index_or_name]
+                        },
+                        ...
+                    ]
+                * Example:
+                    {paginator:[
+                        {
+                            "content": "Page 1",
+                            "embeds": [{"title": "Embed 1"}],
+                            "files": [0] or ["file1.png"]
+                        },
+                        {
+                            "content": "Page 2",
+                            "embeds": [{"title": "Embed 2"}],
+                            "files": [1] or ["file2.png"]
+                        }
+                    ]}
+            """
+            try:
+                text, _, _, nested_files = await self.formatter.format(content, ctx, **kwargs)
+                all_files = {}
+                for attachment in ctx.message.attachments:
+                    if attachment.filename not in all_files:
+                        all_files[attachment.filename] = await attachment.read()
+                
+                for file in nested_files:
+                    if file.filename not in all_files:
+                        all_files[file.filename] = await file.read()
+                
+                pages_data = json.loads(text)
+                if not isinstance(pages_data, list):
+                    pages_data = [pages_data]
+                
+                pages = []
+                for page_data in pages_data:
+                    page_content = page_data.get("content", "")
+                    embeds_data = page_data.get("embeds", [])
+                    file_refs = page_data.get("files", [])
+                    
+                    embeds = [DiscordGenerator._build_embed(**e) for e in embeds_data]
+                    
+                    file_metadata = []
+                    for ref in file_refs:
+                        filename = None
+                        
+                        if isinstance(ref, int):
+                            if 0 <= ref < len(all_files):
+                                filename = list(all_files.keys())[ref]
+                        elif isinstance(ref, str):
+                            ref_lower = ref.lower()
+                            for fn in all_files:
+                                if fn.lower() == ref_lower:
+                                    filename = fn
+                                    break
+                        
+                        if filename:
+                            file_metadata.append({
+                                "filename": filename,
+                                "data": all_files[filename]
+                            })
+                    
+                    pages.append((page_content, embeds, file_metadata))
+                
+                if not pages:
+                    return "No pages provided for paginator.", [], None, []
+                
+                view = Paginator(pages, ctx.author)
+                
+                first_page_files = [
+                    discord.File(BytesIO(meta["data"]), filename=meta["filename"])
+                    for meta in pages[0][2]
+                ]
+                
+                return (pages[0][0], pages[0][1], view, first_page_files)
+            
+            except json.JSONDecodeError:
+                return "[paginator error: Invalid JSON]", [], None, []
+            except Exception as e:
+                return f"[paginator error: {str(e)}]", [], None, []
         
         @self.formatter.register('json.user')
         @self.formatter.register('userjson')
