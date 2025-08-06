@@ -3620,8 +3620,9 @@ class Tags(commands.Cog):
             ### {gmanscript:...}
                 * Uses G-Man Script to manipulate media.
                 * Works with both keyword and positional arguments. (though if a keyword argument is specified, it must be a keyword argument at that point.)
-                * Example: `{gscript:load url=https://example.com/video.mp4 media_key=video{newline}convert input_key=video format=mov output_key=converted{newline}render converted}`
-                * Another example: `{gscript:load url=https://example.com/video.mp4 media_key=video{newline}dobetween video 5 10 segment_key=segment output_key=proc{newline}caption segment text="testing"{newline}end{newline}render proc dobetween.mp4}`
+                * Example to convert media: `{gscript:load url=https://example.com/video.mp4 media_key=video{newline}convert input_key=video format=mov output_key=converted{newline}render converted}`
+                * Another example to do effects between timestamps: `{gscript:load url=https://example.com/video.mp4 media_key=video{newline}dobetween video 5 10 segment_key=segment output_key=proc{newline}caption segment text="testing"{newline}end{newline}render proc dobetween.mp4}`
+                * Yet another example that trims media: `{gscript:load url=https://example.com/video.mp4 media_key=video{newline}trim input_key=video start_time=0 end_time=10 output_key=trimmed{newline}render trimmed}`
                 * Available GScript commands:
                     - load [url] [media_key]
                     - reverse [input_key] [output_key]
