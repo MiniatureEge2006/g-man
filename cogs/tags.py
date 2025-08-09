@@ -120,7 +120,7 @@ class JumpToPageModal(discord.ui.Modal, title="Jump to Page"):
             await interaction.response.send_message("Please enter a valid number.", ephemeral=True)
 
 class Paginator(discord.ui.View):
-    def __init__(self, pages: list, author: discord.User):
+    def __init__(self, pages: list, author):
         super().__init__(timeout=60)
         self.pages = pages
         self.current_page = 0
@@ -5885,8 +5885,12 @@ class Tags(commands.Cog):
                     page_content = page_data.get("content", "")
                     embeds_data = page_data.get("embeds", [])
                     file_refs = page_data.get("files", [])
-                    
-                    embeds = [DiscordGenerator._build_embed(**e) for e in embeds_data]
+                    formatted_content, _, _, _ = await self.formatter.format(str(page_content), ctx, **kwargs)
+                    formatted_embeds = []
+                    for embed_data in embeds_data:
+                        resolved_embed_data = await resolve_json_tags(ctx, embed_data)
+                        embed = DiscordGenerator._build_embed(**resolved_embed_data)
+                        formatted_embeds.append(embed)
                     
                     file_metadata = []
                     for ref in file_refs:
@@ -5908,7 +5912,7 @@ class Tags(commands.Cog):
                                 "data": all_files[filename]
                             })
                     
-                    pages.append((page_content, embeds, file_metadata))
+                    pages.append((formatted_content, formatted_embeds, file_metadata))
                 
                 if not pages:
                     return "No pages provided for paginator.", [], None, []
