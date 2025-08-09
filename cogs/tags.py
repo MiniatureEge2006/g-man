@@ -5772,9 +5772,19 @@ class Tags(commands.Cog):
 
         async def resolve_json_tags(ctx, data):
             if isinstance(data, dict):
-                return {k: await resolve_json_tags(ctx, v) for k, v in data.items()}
+                new_data = {}
+                for k, v in data.items():
+                    if k in ("custom_id", "command", "tag"):
+                        new_data[k] = v
+                    else:
+                        new_data[k] = await resolve_json_tags(ctx, v)
+                return new_data
             elif isinstance(data, list):
-                return [await resolve_json_tags(ctx, item) for item in data]
+                result = []
+                for item in data:
+                    resolved = await resolve_json_tags(ctx, item)
+                    result.append(resolved)
+                return result
             elif isinstance(data, str):
                 processed, _, _, _ = await self.formatter.format(data, ctx)
                 return processed
@@ -5786,8 +5796,10 @@ class Tags(commands.Cog):
         async def _button(ctx, args_str, **kwargs):
             """
             ### {button:JSON}
-                * Builds a button component from JSON data.
+                * Builds a button component from JSON data with support to execute tags and commands.
                 * Example: `{button:{"label":"Click","style":"primary"}}`
+                * Example 2: `{button:{"label":"Ping!","command":"ping"}}`
+                * Example 3: `{button:{"label":"Tag!","tag":"test hi"}}`
             """
             try:
                 params = await parse_component_input(ctx, args_str)
@@ -5818,17 +5830,26 @@ class Tags(commands.Cog):
         async def _select(ctx, args_str, **kwargs):
             """
             ### {select:JSON}
-                * Builds a select menu component from JSON data.
-                * Example: `{select:{"placeholder": "Choose","min": 1,"options": [{"label":"A","value":"a"},{"label":"B","value":"b"}]}}`
+                * Builds a select menu component from JSON data with support to execute tags or commands.
+                * Example: `{select:{"placeholder": "Choose","min": 1,"options": [{"label":"A","tag":"test hi"},{"label":"B","command":"ping"}]}}`
             """
             try:
                 data = await parse_component_input(ctx, args_str)
 
+                if 'options' in data:
+                    for opt in data['options']:
+                        if 'command' in opt:
+                            cmd = opt.pop('command').strip()
+                            opt['value'] = f"cmd:{cmd}"
+                        elif 'tag' in opt:
+                            tag = opt.pop('tag').strip()
+                            opt['value'] = f"tag:{tag}"
+                        elif 'value' not in opt:
+                            opt['value'] = opt['label']
+                
                 select = DiscordGenerator.create_select(data)
-
                 view = discord.ui.View().add_item(select)
                 return ("", [], view, [])
-            
             except Exception as e:
                 return (f"[select error: {str(e)}]", [], None, [])
         
@@ -6666,56 +6687,71 @@ class Tags(commands.Cog):
                 await interaction.channel.send(f"Interaction failed: {str(e)}")
     
     async def handle_button(self, interaction: discord.Interaction, custom_id: str):
-        if not custom_id:
-            return await interaction.followup.send("This button has no action configured.", ephemeral=True)
+        ctx = await self.bot.get_context(interaction.message)
+        ctx.author = interaction.user
+        ctx.guild = interaction.guild
+        ctx.channel = interaction.channel
 
+        if custom_id.startswith("tag:"):
+            raw_tag = custom_id[4:]
+            formatted_tag, _, _, _ = await self.formatter.format(raw_tag, ctx)
+            await self.execute_tag(interaction, formatted_tag)
 
-        if custom_id.startswith("cmd:"):
-            await self.execute_command(interaction, custom_id[4:])
-        elif custom_id.startswith("tag:"):
-            await self.execute_tag(interaction, custom_id[4:])
-        else:
-            pass
+        elif custom_id.startswith("cmd:"):
+            raw_cmd = custom_id[4:]
+            formatted_cmd, _, _, _ = await self.formatter.format(raw_cmd, ctx)
+            await self.execute_command(interaction, formatted_cmd)
 
     async def handle_select(self, interaction: discord.Interaction, selected: str):
+        ctx = await self.bot.get_context(interaction.message)
+        ctx.author = interaction.user
+        ctx.guild = interaction.guild
+        ctx.channel = interaction.channel
 
-        if selected.startswith("cmd:"):
-            await self.execute_command(interaction, selected[4:])
-        elif selected.startswith("tag:"):
-            await self.execute_tag(interaction, selected[4:])
-        else:
-            pass
+        if selected.startswith("tag:"):
+            raw_tag = selected[4:]
+            formatted_tag, _, _, _ = await self.formatter.format(raw_tag, ctx)
+            await self.execute_tag(interaction, formatted_tag)
+        
+        elif selected.startswith("cmd:"):
+            raw_cmd = selected[4:]
+            formatted_cmd, _, _, _ = await self.formatter.format(raw_cmd, ctx)
+            await self.execute_command(interaction, formatted_cmd)
 
     async def execute_command(self, interaction: discord.Interaction, command_str: str):
-        command_name, *args = command_str.split()
-        command = self.bot.get_command(command_name)
-        
-        if not command:
-            return await interaction.followup.send(
-                f"Command not found: {command_name}",
-                ephemeral=True
-            )
+        ctx = await self.bot.get_context(interaction.message)
+        ctx.author = interaction.user
+        ctx.guild = interaction.guild
+        ctx.channel = interaction.channel
+        ctx.interaction = interaction
 
+        formatted_str, _, _, _ = await self.formatter.format(command_str, ctx)
+        formatted_str = formatted_str.strip()
+
+        if not formatted_str:
+            return await interaction.followup.send("Empty command after processing.", ephemeral=True)
+
+
+        parts = formatted_str.split()
+        command_name = parts[0]
+        args = " ".join(parts[1:])
+
+        command = self.bot.get_command(command_name)
+        if not command:
+            return await interaction.followup.send(f"Command not found: `{command_name}`", ephemeral=True)
 
         fake_message = interaction.message
         fake_message.author = interaction.user
-
-
         prefix = await self.bot.get_prefix(fake_message)
         if isinstance(prefix, list):
             prefix = prefix[0]
+        fake_message.content = prefix + formatted_str
 
-        fake_message.content = prefix + command_str
-
-        ctx = await self.bot.get_context(fake_message)
-
+        cmd_ctx = await self.bot.get_context(fake_message)
         try:
-            await self.bot.invoke(ctx)
+            await self.bot.invoke(cmd_ctx)
         except Exception as e:
-            await interaction.followup.send(
-                f"Command failed: {str(e)}",
-                ephemeral=True
-            )
+            await interaction.followup.send(f"Command failed: {str(e)}", ephemeral=True)
 
 
     async def execute_tag(self, interaction: discord.Interaction, tag_str: str):
@@ -6739,11 +6775,11 @@ class Tags(commands.Cog):
         args = tag_str[len(tag_name):].strip()
 
 
-        fake_message = interaction.message
-        fake_message.author = interaction.user
-        fake_message.content = ""
 
-        ctx = await self.bot.get_context(fake_message)
+        ctx = await self.bot.get_context(interaction.message)
+        ctx.author = interaction.user
+        ctx.guild = interaction.guild
+        ctx.channel = interaction.channel
 
 
         text, embeds, view, files = await self.formatter.format(tag['content'], ctx, args=args)
