@@ -227,7 +227,7 @@ class Info(commands.Cog):
         embed.add_field(name="Bot?", value=member.bot, inline=True)
         embed.add_field(name="Joined Discord", value=member.created_at.strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)") if member.created_at else "Unknown", inline=True)
         if isinstance(member, discord.Member) and ctx.guild:
-            embed.add_field(name="Display Name", value=member.display_name, inline=True)
+            embed.add_field(name="Display Name", value=member.global_name, inline=True)
             embed.add_field(name="Nickname", value=member.nick if member.nick else "None", inline=True)
             embed.add_field(name="Mention", value=member.mention, inline=True)
             embed.add_field(name="Joined Server", value=member.joined_at.strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)") if member.joined_at else "Unknown", inline=True)

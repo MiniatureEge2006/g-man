@@ -5324,7 +5324,7 @@ class Tags(commands.Cog):
                 * Example: `{userdisplay:MiniatureEge2006}` -> "MiniatureEge2006"
             """
             user = await self.formatter.resolve_user(ctx, i)
-            return user.display_name
+            return user.global_name
         
         @self.formatter.register('mention')
         async def _mention(ctx, i, **kwargs):
