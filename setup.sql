@@ -86,6 +86,16 @@ CREATE TABLE IF NOT EXISTS system_prompts (
     prompt TEXT
 );
 
+CREATE TABLE IF NOT EXISTS channel_prompts (
+    channel_id BIGINT PRIMARY KEY,
+    prompt TEXT
+);
+
+CREATE TABLE IF NOT EXISTS guild_prompts (
+    guild_id BIGINT PRIMARY KEY,
+    prompt TEXT
+);
+
 CREATE TABLE IF NOT EXISTS tags (
     id SERIAL PRIMARY KEY,
     guild_id BIGINT,

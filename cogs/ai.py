@@ -90,15 +90,29 @@ class AI(commands.Cog):
             self.conversations[key] = history
 
     async def create_system_prompt(self, ctx: commands.Context, content: str = "") -> str:
-        custom_prompt = None
+        base_prompt = """You are G-Man from the Half-Life series. You are speaking with Dr. Gordon Freeman."""
         if self.db:
-            row = await self.db.fetchrow("SELECT prompt FROM system_prompts WHERE user_id = $1", ctx.author.id)
-            if row and row['prompt']:
-                custom_prompt = row['prompt']
-        if custom_prompt:
-            base_prompt = custom_prompt
-        else:
-            base_prompt = """You are G-Man from the Half-Life series. You are speaking with Dr. Gordon Freeman."""
+            if ctx.guild:
+                server_row = await self.db.fetchrow(
+                    "SELECT prompt FROM guild_prompts WHERE guild_id = $1",
+                    ctx.guild.id
+                )
+                if server_row and server_row['prompt']:
+                    base_prompt = server_row['prompt']
+            
+            channel_row = await self.db.fetchrow(
+                "SELECT prompt FROM channel_prompts WHERE channel_id = $1",
+                ctx.channel.id
+            )
+            if channel_row and channel_row['prompt']:
+                base_prompt = channel_row['prompt']
+            
+            user_row = await self.db.fetchrow(
+                "SELECT prompt FROM system_prompts WHERE user_id = $1",
+                ctx.author.id
+            )
+            if user_row and user_row['prompt']:
+                base_prompt = user_row['prompt']
 
         formatted_docs = ""
         if content:
@@ -227,7 +241,7 @@ class AI(commands.Cog):
             await self.save_conversation_history(conversation_key, new_history)
                 
         except Exception as e:
-            await ctx.send(f"An error occurred: {e}")
+            raise commands.CommandError(str(e))
 
 
     async def get_ai_response(self, messages: list, think_mode: bool = False, show_thinking: bool = False):
@@ -249,7 +263,7 @@ class AI(commands.Cog):
             raise RuntimeError(f"AI request failed: {e}")
     
 
-    @commands.hybrid_command(name="setsystemprompt", description="Set a custom system prompt for G-AI.")
+    @commands.hybrid_command(name="setsystemprompt", description="Set a custom system prompt for yourself in G-AI.", aliases=["setuserprompt"])
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     @app_commands.describe(prompt="The custom system prompt.")
@@ -260,21 +274,108 @@ class AI(commands.Cog):
                 INSERT INTO system_prompts (user_id, prompt) VALUES ($1, $2)
                 ON CONFLICT (user_id) DO UPDATE SET prompt = EXCLUDED.prompt
                 """, ctx.author.id, prompt)
-            await ctx.send("Custom system prompt has been successfully set.")
+            await ctx.send(f"Custom system prompt for yourself has been set to:\n```{prompt}```")
         else:
             await ctx.send("Database not initialized.")
     
 
-    @commands.hybrid_command(name="resetsystemprompt", description="Reset your system prompt back to default.")
+    @commands.hybrid_command(name="resetsystemprompt", description="Reset your custom system prompt in G-AI back to default.", aliases=["resetuserprompt"])
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def resetsystemprompt(self, ctx: commands.Context):
         await ctx.typing()
         if self.db:
             await self.db.execute("DELETE FROM system_prompts WHERE user_id = $1", ctx.author.id)
-            await ctx.send("Your system prompt has successfully been reset.")
+            await ctx.send("Your system prompt has been reset.")
         else:
             await ctx.send("Database not initialized")
+    
+    @commands.hybrid_command(name="setchannelprompt", description="Set a custom system prompt for G-AI in this channel.")
+    @app_commands.allowed_installs(guilds=True, users=True)
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    @app_commands.describe(prompt="The custom system prompt for this channel.")
+    async def setchannelprompt(self, ctx: commands.Context, *, prompt: str):
+        await ctx.typing()
+        if self.db:
+            if ctx.guild:
+                if ctx.author.guild_permissions.manage_channels:
+                    await self.db.execute("""
+                        INSERT INTO channel_prompts (channel_id, prompt) VALUES ($1, $2)
+                        ON CONFLICT (channel_id) DO UPDATE SET prompt = EXCLUDED.prompt
+                        """, ctx.channel.id, prompt)
+                    await ctx.send(f"Custom channel system prompt has been set to:\n```{prompt}```")
+                else:
+                    await ctx.send("You don't have permission to change this channel's system prompt.")
+                    return
+            else:
+                await self.db.execute("""
+                    INSERT INTO channel_prompts (channel_id, prompt) VALUES ($1, $2)
+                    ON CONFLICT (channel_id) DO UPDATE SET prompt = EXCLUDED.prompt
+                    """, ctx.channel.id, prompt)
+                await ctx.send(f"Custom channel system prompt has been set to:\n```{prompt}```")
+        else:
+            await ctx.send("Database not initialized.")
+    
+    @commands.hybrid_command(name="resetchannelprompt", description="Reset the current channel's custom system prompt in G-AI back to default.")
+    @app_commands.allowed_installs(guilds=True, users=True)
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    async def resetchannelprompt(self, ctx: commands.Context):
+        await ctx.typing()
+        if self.db:
+            if ctx.guild:
+                if ctx.author.guild_permissions.manage_channels:
+                    await self.db.execute("DELETE FROM channel_prompts WHERE channel_id = $1", ctx.channel.id)
+                    await ctx.send("Custom channel system prompt has been reset.")
+                else:
+                    await ctx.send("You don't have permission to reset this channel's custom system prompt.")
+                    return
+            else:
+                await self.db.execute("DELETE FROM channel_prompts WHERE channel_id = $1", ctx.channel.id)
+                await ctx.send("Custom channel system prompt has been reset.")
+        else:
+            await ctx.send("Database not initialized.")
+    
+    @commands.hybrid_command(name="setserverprompt", description="Set a custom system prompt for G-AI in this server.", aliases=["setguildprompt"])
+    @app_commands.allowed_installs(guilds=True, users=True)
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    @app_commands.describe(prompt="The custom system prompt for this server.")
+    async def setserverprompt(self, ctx: commands.Context, *, prompt: str):
+        await ctx.typing()
+        if self.db:
+            if ctx.guild:
+                if ctx.author.guild_permissions.manage_guild:
+                    await self.db.execute("""
+                        INSERT INTO guild_prompts (guild_id, prompt) VALUES ($1, $2)
+                        ON CONFLICT (guild_id) DO UPDATE SET prompt = EXCLUDED.prompt
+                        """, ctx.guild.id, prompt)
+                    await ctx.send(f"Custom server system prompt has been set to:\n```{prompt}```")
+                else:
+                    await ctx.send("You don't have permission to change this server's system prompt.")
+                    return
+            else:
+                await ctx.send("You can only set the server system prompt in a server.")
+                return
+        else:
+            await ctx.send("Database not initialized.")
+    
+    @commands.hybrid_command(name="resetserverprompt", description="Reset the current server's custom system prompt in G-AI back to default.", aliases=["resetguildprompt"])
+    @app_commands.allowed_installs(guilds=True, users=True)
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    async def resetserverprompt(self, ctx: commands.Context):
+        await ctx.typing()
+        if self.db:
+            if ctx.guild:
+                if ctx.author.guild_permissions.manage_guild:
+                    await self.db.execute("DELETE FROM guild_prompts WHERE guild_id = $1", ctx.guild.id)
+                    await ctx.send("Custom server system prompt has been reset.")
+                else:
+                    await ctx.send("You don't have permission to reset this server's custom system prompt.")
+                    return
+            else:
+                await ctx.send("You can only reset the server system prompt in a server.")
+                return
+        else:
+            await ctx.send("Database not initialized.")
     
     @commands.hybrid_command(name="exportchat", description="Export your conversation history with G-AI.")
     @app_commands.allowed_installs(guilds=True, users=True)
@@ -304,7 +405,7 @@ class AI(commands.Cog):
             
             await ctx.send(
                 "Here is your conversation history:", 
-                file=discord.File(buffer, filename=f"gai_conversation_{ctx.author.id}.json")
+                file=discord.File(buffer, filename=f"g-ai_conversation_{ctx.author.id}.json")
             )
         except Exception as e:
             await ctx.send(f"Failed to export conversation: {e}")
