@@ -176,3 +176,47 @@ CREATE TABLE IF NOT EXISTS command_usage (
     timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     content TEXT
 );
+
+CREATE TABLE IF NOT EXISTS chat_filters (
+    id SERIAL PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    filter_type TEXT NOT NULL CHECK (filter_type IN ('regex', 'word', 'link')),
+    pattern TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('warn', 'delete', 'mute', 'kick', 'ban')),
+    target_type TEXT NOT NULL CHECK (target_type IN ('server', 'channel', 'user', 'role')),
+    target_id BIGINT,
+    custom_message TEXT,
+    duration_minutes INTEGER DEFAULT 60,
+    added_by BIGINT,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (guild_id, filter_type, pattern, target_type, target_id)
+);
+
+CREATE TABLE IF NOT EXISTS manual_slowmodes (
+    id SERIAL PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    channel_id BIGINT,
+    user_id BIGINT,
+    role_id BIGINT,
+    delay_seconds INTEGER NOT NULL,
+    enabled BOOLEAN DEFAULT TRUE,
+    added_by BIGINT,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_manual_slowmode_target
+        UNIQUE (guild_id, channel_id, user_id, role_id),
+    CONSTRAINT valid_target CHECK (
+        (channel_id IS NOT NULL AND user_id IS NULL AND role_id IS NULL) OR
+        (user_id IS NOT NULL AND channel_id IS NULL AND role_id IS NULL) OR
+        (role_id IS NOT NULL AND channel_id IS NULL AND user_id IS NULL) OR
+        (channel_id IS NULL AND user_id IS NULL AND role_id IS NULL)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_manual_slowmodes_guild_enabled 
+ON manual_slowmodes (guild_id) WHERE enabled;
+CREATE INDEX IF NOT EXISTS idx_manual_slowmodes_channel_enabled 
+ON manual_slowmodes (guild_id, channel_id) WHERE enabled AND channel_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_manual_slowmodes_user_enabled 
+ON manual_slowmodes (guild_id, user_id) WHERE enabled AND user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_manual_slowmodes_role_enabled 
+ON manual_slowmodes (guild_id, role_id) WHERE enabled AND role_id IS NOT NULL;
