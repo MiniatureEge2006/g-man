@@ -41,16 +41,16 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install numpy requests pillow bgutil-ytdlp-pot-provider typed-ffmpeg
 RUN pip install --pre -U "yt-dlp[default]"
-RUN npm install -g typescript ts-node @types/node yarn mathjs
+RUN npm install -g typescript node ts-node @types/node mathjs
 USER gcoder
 RUN mkdir -p /home/gcoder/executions && \
     mkdir -p /home/gcoder/executions/input && \
     mkdir -p /home/gcoder/executions/output && \
     chmod 775 /home/gcoder/executions && \
     cd /home/gcoder && \
-    git clone --single-branch --branch 1.1.0 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git && \
+    git clone --single-branch --branch 1.2.1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git && \
     cd bgutil-ytdlp-pot-provider/server/ && \
-    yarn install --frozen-lockfile && \
+    npm install && \
     npx tsc
 
 USER root
