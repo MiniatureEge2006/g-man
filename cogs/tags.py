@@ -558,6 +558,11 @@ class MediaProcessor:
                 'end_time': {'required': True, 'type': str},
                 'output_key': {'required': True, 'type': str},
                 'segment_key': {'default': 'segment', 'type': str}
+            },
+            'setframecount': {
+                'input_key': {'required': True, 'type': str},
+                'frame_count': {'required': True, 'type': int},
+                'output_key': {'required': True, 'type': str}
             }
         }
         self.gscript_commands = {
@@ -595,7 +600,8 @@ class MediaProcessor:
             'fadeout': self._fadeout_media,
             'colorkey': self._colorkey,
             'chromakey': self._chromakey,
-            'dobetween': self._dobetween_media
+            'dobetween': self._dobetween_media,
+            'setframecount': self._setframecount
         }
     
     async def _handle_error(self, operation: str, error: Exception, details: str = "") -> str:
@@ -3412,8 +3418,114 @@ class MediaProcessor:
         )
         
         return concat_result
+    
+    async def _setframecount(self, **kwargs) -> str:
+        try:
+            if 'input_key' not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if 'output_key' not in kwargs:
+                raise ValueError("Missing 'output_key' parameter")
+            if 'frame_count' not in kwargs:
+                raise ValueError("Missing 'frame_count' parameter")
+            return await self._setframecount_impl(**kwargs)
+        except Exception as e:
+            return await self._handle_error("setframecount", e)
+    
+    async def _setframecount_impl(self, **kwargs) -> str:
+        input_key = kwargs['input_key']
+        output_key = kwargs['output_key']
+        try:
+            target_count = int(kwargs['frame_count'])
+            if target_count <= 0:
+                return "Error: frame_count must be a positive integer"
+        except (ValueError, TypeError):
+            return "Error: frame_count must be a valid integer"
+        
+        if input_key not in self.media_cache:
+            return f"Error: {input_key} not found"
+        
+        input_path = Path(self.media_cache[input_key])
+        suffix = input_path.suffix.lower()
+        output_file = self._get_temp_path(suffix[1:])
 
+        is_image = suffix in ('.png', '.jpg', '.jpeg', '.webp')
+        is_gif = suffix == '.gif'
+        is_audio = suffix in ('.mp3', '.wav', '.ogg', '.opus', '.flac', '.m4a', '.wma', '.mka')
+        is_video = suffix in ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv')
 
+        if is_image and target_count > 1:
+            duration = target_count / 30.0
+            output_file = self._get_temp_path('mp4')
+            cmd = [
+                'ffmpeg', '-hide_banner',
+                '-loop', '1', '-i', input_path.as_posix(),
+                '-t', str(duration),
+                '-vf', 'pad=width=ceil(iw/2)*2:height=ceil(ih/2)*2',
+                '-pix_fmt', 'yuv420p',
+                '-r', '30',
+                '-y', output_file.as_posix()
+            ]
+            success, error = await self._run_ffmpeg(cmd)
+            if success:
+                self.media_cache[output_key] = str(output_file)
+                return f"media://{output_file.as_posix()}"
+            return error
+        
+        if is_image and target_count == 1:
+            output_file = self._get_temp_path(suffix[1:])
+            cmd = [
+                'ffmpeg', '-hide_banner',
+                '-i', input_path.as_posix(),
+                '-frames:v', '1',
+                '-y', output_file.as_posix()
+            ]
+            success, error = await self._run_ffmpeg(cmd)
+            if success:
+                self.media_cache[output_key] = str(output_file)
+                return f"media://{output_file.as_posix()}"
+            return error
+        
+        if is_gif:
+            cmd = [
+                'ffmpeg', '-hide_banner',
+                '-i', input_path.as_posix(),
+                '-vf', f'select=lt(n\\,{target_count}),setpts=PTS-STARTPTS',
+                '-y', output_file.as_posix()
+            ]
+            success, error = await self._run_ffmpeg(cmd)
+            if success:
+                self.media_cache[output_key] = str(output_file)
+                return f"media://{output_file.as_posix()}"
+            return error
+        
+        if is_audio:
+            target_duration = target_count / 30.0
+            cmd = [
+                'ffmpeg', '-hide_banner',
+                '-i', input_path.as_posix(),
+                '-t', str(target_duration),
+                '-y', output_file.as_posix()
+            ]
+            success, error = await self._run_ffmpeg(cmd)
+            if success:
+                self.media_cache[output_key] = str(output_file)
+                return f"media://{output_file.as_posix()}"
+            return error
+        
+        if is_video:
+            duration = target_count / 30.0
+            cmd = [
+                'ffmpeg', '-hide_banner',
+                '-i', input_path.as_posix(),
+                '-t', str(duration),
+                '-pix_fmt', 'yuv420p',
+                '-y', output_file.as_posix()
+            ]
+            success, error = await self._run_ffmpeg(cmd)
+            if success:
+                self.media_cache[output_key] = str(output_file)
+                return f"media://{output_file.as_posix()}"
+            return error
 
 
 class TagFormatter:
