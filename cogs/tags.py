@@ -3771,6 +3771,7 @@ class Tags(commands.Cog):
                     - colorkey [input_key] [color] [similarity] [blend] [output_key]
                     - chromakey [input_key] [color] [similarity] [blend] [output_key]
                     - dobetween [input_key] [start_time] [end_time] [segment_key] [gmanscript]
+                    - setframecount [input_key] [frame_count] [output_key]
             """
             try:
                 results = await self.processor.execute_media_script(script)
