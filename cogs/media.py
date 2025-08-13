@@ -14,6 +14,9 @@ class Media(commands.Cog):
         self.tags_cog = bot.get_cog('Tags')
     
     async def process_media_input(self, ctx: commands.Context, input_value: str = None, attachment: discord.Attachment = None):
+        if ctx.interaction is None and attachment is not None:
+            input_value = None
+
         if not input_value and not attachment:
             return None, None, "No input provided."
         
@@ -555,7 +558,10 @@ class Media(commands.Cog):
         overlay_url="Overlay URL/Emoji/User.",
         overlay_attachment="Overlay image/video file.",
         x="X position. (pixels or expression)",
-        y="Y position. (pixels or expression)"
+        y="Y position. (pixels or expression)",
+        loop_media="Loop base if shorter than overlay?",
+        loop_overlay="Loop overlay if shorter than base?",
+        preserve_length="Keep original length?"
     )
     async def overlay(self, ctx: commands.Context, 
                         base_url: Optional[str] = None, 
@@ -563,7 +569,10 @@ class Media(commands.Cog):
                         overlay_url: Optional[str] = None,
                         overlay_attachment: Optional[discord.Attachment] = None,
                         x: str = "0",
-                        y: str = "0"):
+                        y: str = "0",
+                        loop_media: bool = False,
+                        loop_overlay: bool = False,
+                        preserve_length: bool = True):
         await ctx.typing()
         base_key = f"base_{ctx.message.id}"
         base_parsed = await self.process_media_input(ctx, base_url, base_attachment)
@@ -585,9 +594,13 @@ class Media(commands.Cog):
             ctx, 
             "overlay", 
             input_key=base_key,
+            base_key=base_key,
             overlay_key=overlay_key,
             x=x,
-            y=y
+            y=y,
+            loop_media=loop_media,
+            loop_overlay=loop_overlay,
+            preserve_length=preserve_length
         )
     
     @iv.command(name="colorkey", description="RGB colorspace key an image or video.")

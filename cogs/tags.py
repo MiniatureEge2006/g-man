@@ -452,7 +452,10 @@ class MediaProcessor:
                 'overlay_key': {'required': True, 'type': str},
                 'x': {'required': True, 'type': str},
                 'y': {'required': True, 'type': str},
-                'output_key': {'required': True, 'type': str}
+                'output_key': {'required': True, 'type': str},
+                'loop_media': {'default': False, 'type': bool},
+                'loop_overlay': {'default': False, 'type': bool},
+                'preserve_length': {'default': True, 'type': bool}
             },
             'text': {
                 'input_key': {'required': True, 'type': str},
@@ -2357,46 +2360,128 @@ class MediaProcessor:
             return await self._handle_error("overlay", e)
     
     async def _overlay_media_impl(self, **kwargs) -> str:
-        base_key = kwargs.get('base_key') or kwargs['input_key']
+        base_key = kwargs['base_key']
         overlay_key = kwargs['overlay_key']
         x = kwargs['x']
         y = kwargs['y']
         output_key = kwargs['output_key']
+        loop_media = kwargs.get('loop_media', False)
+        loop_overlay = kwargs.get('loop_overlay', False)
+        preserve_length = kwargs.get('preserve_length', True)
+
         if base_key not in self.media_cache or overlay_key not in self.media_cache:
-            return f"Error: One of the keys not found"
+            return f"Error: One of the media keys not found"
 
         base_path = Path(self.media_cache[base_key])
         overlay_path = Path(self.media_cache[overlay_key])
-        is_base_image = base_path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp')
-        is_overlay_image = overlay_path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp')
-        output_file = self._get_temp_path(base_path.suffix[1:])
 
-        x = await self._resolve_dimension(x, base_key, overlay_key)
-        y = await self._resolve_dimension(y, base_key, overlay_key)
+        is_base_gif = base_path.suffix.lower() == '.gif'
+        is_overlay_gif = overlay_path.suffix.lower() == '.gif'
+        is_base_static_image = base_path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp') and not is_base_gif
+        is_overlay_static_image = overlay_path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp') and not is_overlay_gif
 
-        cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', base_path.as_posix(),
-            '-i', overlay_path.as_posix(),
-            '-filter_complex', f'overlay={x}:{y}',
-            '-y', output_file.as_posix()
-        ]
+        base_dims = await self._get_media_dimensions(base_key)
+        if not base_dims:
+            return "Error: Could not get base dimensions"
+        width, height = base_dims
 
+        animated_exts = ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv')
+        base_is_animated = base_path.as_posix().endswith(animated_exts)
+        overlay_is_animated = overlay_path.as_posix().endswith(animated_exts)
 
-        if is_base_image and is_overlay_image:
-            cmd = [
-                'ffmpeg', '-hide_banner',
-                '-i', base_path.as_posix(),
-                '-i', overlay_path.as_posix(),
-                '-filter_complex', f'overlay={x}:{y}',
-                '-frames:v', '1',
-                '-y', output_file.as_posix()
-            ]
+        if is_base_gif and is_overlay_gif:
+            out_ext = 'gif'
+        elif base_is_animated:
+            out_ext = base_path.suffix.lower()[1:]
+        elif overlay_is_animated:
+            out_ext = overlay_path.suffix.lower()[1:]
+        else:
+            out_ext = base_path.suffix.lower()[1:]
 
+        output_file = self._get_temp_path(out_ext)
 
-        elif not is_base_image and is_overlay_image:
-            cmd[4:4] = ['-stream_loop', '-1']
-            cmd.insert(cmd.index('-y'), '-shortest')
+        cmd = ['ffmpeg', '-hide_banner', '-y']
+
+        if is_base_static_image:
+            cmd += ['-loop', '1', '-framerate', '30']
+        elif loop_media:
+            cmd += ['-stream_loop', '-1']
+        cmd += ['-i', base_path.as_posix()]
+
+        if is_overlay_static_image:
+            cmd += ['-loop', '1', '-framerate', '30']
+        elif loop_overlay:
+            cmd += ['-stream_loop', '-1']
+        cmd += ['-i', overlay_path.as_posix()]
+
+        _, _, base_duration, has_audio_base = await self._probe_media_info(base_path) or (None, None, 0.0, False)
+        _, _, overlay_duration, has_audio_overlay = await self._probe_media_info(overlay_path) or (None, None, 0.0, False)
+
+        base_duration = float(base_duration) if base_duration else 0.0
+        overlay_duration = float(overlay_duration) if overlay_duration else 0.0
+
+        duration = None
+        if preserve_length and not (loop_media or loop_overlay):
+            if is_base_static_image and not is_overlay_static_image and overlay_duration > 0:
+                duration = overlay_duration
+            elif not is_base_static_image and is_overlay_static_image and base_duration > 0:
+                duration = base_duration
+            elif is_base_static_image and is_overlay_static_image:
+                duration = 1.0
+        should_apply_shortest = False
+
+        if loop_media or loop_overlay:
+            if preserve_length and base_duration > 0:
+                duration = base_duration
+            else:
+                duration = overlay_duration if overlay_duration > 0 else 3.0
+        else:
+            should_apply_shortest = True
+
+        filters = []
+        input_format = 'rgba' if out_ext == 'gif' else 'yuva420p'
+
+        filters.append(f"[1:v]format={input_format}[ov]")
+        filters.append(f"[0:v][ov]overlay=x={x}:y={y}[tmp]")
+
+        if out_ext in ('mp4', 'mkv', 'mov', 'webm', 'avi', 'wmv'):
+            out_w = (width + 1) // 2 * 2
+            out_h = (height + 1) // 2 * 2
+            pad_color = "black@0" if base_path.suffix.lower() in ('.png', '.webp', '.gif') else "black"
+            filters.append(f"[tmp]pad=width={out_w}:height={out_h}:x=(ow-iw)/2:y=(oh-ih)/2:color={pad_color}[v]")
+        else:
+            filters.append(f"[tmp]format=rgba[v]")
+
+        if has_audio_base and has_audio_overlay:
+            filters.append(f"[0:a][1:a]amix=inputs=2:duration=longest[a]")
+            cmd += ['-filter_complex', ';'.join(filters)]
+            cmd += ['-map', '[v]', '-map', '[a]']
+        else:
+            cmd += ['-filter_complex', ';'.join(filters)]
+            cmd += ['-map', '[v]']
+            if has_audio_base and out_ext not in ('gif', 'png', 'webp', 'jpg', 'jpeg'):
+                cmd += ['-map', '0:a']
+            elif has_audio_overlay and out_ext not in ('gif', 'png', 'webp', 'jpg', 'jpeg'):
+                cmd += ['-map', '1:a']
+            else:
+                cmd += ['-an']
+
+        if out_ext == 'gif':
+            cmd += ['-f', 'gif', '-gifflags', '+transdiff']
+        elif out_ext == 'png':
+            cmd += ['-f', 'image2', '-update', '1', '-frames:v', '1']
+        elif out_ext == 'webp':
+            cmd += ['-f', 'webp', '-loop', '0']
+        elif out_ext == 'mp4':
+            cmd += ['-movflags', '+faststart']
+
+        if duration > 0:
+            cmd += ['-t', str(duration)]
+        elif should_apply_shortest:
+            cmd += ['-shortest']
+
+        cmd.append(output_file.as_posix())
+
         success, error = await self._run_ffmpeg(cmd)
         if success:
             self.media_cache[output_key] = str(output_file)
@@ -3758,7 +3843,7 @@ class Tags(commands.Cog):
                     - trim [input_key] [start_time] [end_time] [output_key]
                     - speed [input_key] [speed] [output_key]
                     - volume [input_key] [volume_level] [output_key]
-                    - overlay [base_key] [overlay_key] [x] [y] [output_key]
+                    - overlay [base_key] [overlay_key] [x] [y] [output_key] [loop_media] [loop_overlay] [preserve_length]
                     - text [input_key] [text] [x] [y] [color] [output_key] [font_size] [font] [outline_color] [outline_width] [shadow_color] [shadow_offset] [shadow_blur] [wrap_width] [line_spacing]
                     - caption [input_key] [text] [output_key] [font_size] [font] [color] [background_color] [padding] [outline_color] [outline_width] [shadow_color] [shadow_offset] [shadow_blur] [wrap_width] [line_spacing]
                     - audioputreplace [media_key] [audio_key] [output_key] [preserve_length] [force_video] [loop_media]
