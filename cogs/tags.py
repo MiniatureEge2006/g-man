@@ -3983,6 +3983,7 @@ class Tags(commands.Cog):
                 * Example: `{ai:hello}`
             """
             try:
+                MAX_CONVERSATION_HISTORY_LENGTH = 5
                 ai = ctx.bot.get_cog('AI')
                 if not ai:
                     return "[AI error: AI cog not loaded]"
@@ -4027,7 +4028,7 @@ class Tags(commands.Cog):
                 history = await ai.get_conversation_history(conv_key)
                 
                 if history:
-                    messages.extend(history[-ai.MAX_CONVERSATION_HISTORY_LENGTH:])
+                    messages.extend(history[-MAX_CONVERSATION_HISTORY_LENGTH:])
                 
                 messages.append({"role": "user", "content": prompt})
                 
@@ -4044,7 +4045,7 @@ class Tags(commands.Cog):
                     content = f"**Thinking...**\n{response.message.thinking}**...done thinking**\n{content}"
                 
 
-                new_history = (history[-ai.MAX_CONVERSATION_HISTORY_LENGTH * 2:] if history else []) + [
+                new_history = (history[-MAX_CONVERSATION_HISTORY_LENGTH * 2:] if history else []) + [
                     {"role": "user", "content": prompt},
                     {"role": "assistant", "content": content}
                 ]
