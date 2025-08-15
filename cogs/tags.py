@@ -6103,13 +6103,27 @@ class Tags(commands.Cog):
                         
                         elif component_type == 12:
                             gallery = discord.ui.MediaGallery()
-                            for media_data in component_data.get('media', []):
-                                media_item = discord.MediaGalleryItem(
-                                    media=media_data.get('url'),
-                                    description=media_data.get('description'),
-                                    spoiler=media_data.get('spoiler')
+                            items = component_data.get('items', [])
+                            for item_data in items:
+                                media_data = item_data.get('media', {})
+                                if isinstance(media_data, str):
+                                    media_data = {'url': media_data}
+                                
+                                url = media_data.get('url')
+                                if url:
+                                    processed_url = await self.formatter.format(url, ctx, **kwargs)
+                                    if isinstance(processed_url, tuple):
+                                        processed_url = processed_url[0]
+                                    media_data['url'] = processed_url
+                                
+                                media_item = discord.UnfurledMediaItem(
+                                    url=media_data.get('url')
                                 )
-                                gallery.add_item(media=media_item)
+                                gallery.add_item(
+                                    media=media_item,
+                                    description=item_data.get('description'),
+                                    spoiler=item_data.get('spoiler')
+                                )
                             return gallery
                         
                         elif component_type == 13:
@@ -6121,9 +6135,18 @@ class Tags(commands.Cog):
                             return file
                         
                         elif component_type == 14:
+                            spacing = component_data.get('spacing')
+                            if isinstance(spacing, str):
+                                spacing = spacing.lower()
+                                if spacing == 'small':
+                                    spacing = discord.SeparatorSpacing.small
+                                elif spacing == 'large':
+                                    spacing = discord.SeparatorSpacing.large
+                                else:
+                                    spacing = None
                             separator = discord.ui.Separator(
                                 visible=component_data.get('visible'),
-                                spacing=component_data.get('spacing'),
+                                spacing=spacing,
                                 id=component_data.get('id')
                             )
                             return separator
