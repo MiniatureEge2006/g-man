@@ -3616,7 +3616,7 @@ class MediaProcessor:
 class TagFormatter:
     def __init__(self):
         self.functions: Dict[str, Callable] = {}
-        self._component_tags = {'embed', 'button', 'view', 'select'}
+        self._component_tags = {'embed', 'button', 'select'}
     
     def register(self, name: str):
         def decorator(func: Callable):
@@ -3626,7 +3626,7 @@ class TagFormatter:
             return func
         return decorator
     
-    async def format(self, content: str, ctx: commands.Context, **kwargs) -> tuple[str, list[discord.Embed], discord.ui.View | None, list[discord.File]]:
+    async def format(self, content: str, ctx: commands.Context, **kwargs) -> tuple[str, list[discord.Embed], discord.ui.View | discord.ui.LayoutView | None, list[discord.File]]:
         text_parts = []
         embeds = []
         view = None
@@ -3640,9 +3640,17 @@ class TagFormatter:
                 text_parts.append(str(text))
                 embeds.extend(new_embeds)
                 if new_view:
-                    view = view or discord.ui.View(timeout=None)
-                    for item in new_view.children:
-                        view.add_item(item)
+                    if isinstance(new_view, discord.ui.LayoutView):
+                        if view is None:
+                            view = new_view
+                        else:
+                            for item in new_view.children:
+                                view.add_item(item)
+                    elif isinstance(new_view, discord.ui.View):
+                        if view is None:
+                            view = discord.ui.View(timeout=None)
+                        for item in new_view.children:
+                            view.add_item(item)
                 files.extend(new_files)
             else:
                 text_parts.append(chunk)
@@ -3679,7 +3687,7 @@ class TagFormatter:
         except Exception as e:
             return f"[Tag Error: {str(e)}]"
     @staticmethod
-    def _normalize_result(result) -> tuple[str, list[discord.Embed], discord.ui.View | None, list[discord.File]]:
+    def _normalize_result(result) -> tuple[str, list[discord.Embed], discord.ui.View | discord.ui.LayoutView | None, list[discord.File]]:
         if result is None or result is discord.utils.MISSING:
             return ("", [], None, [])
         if isinstance(result, discord.Embed):
@@ -3689,6 +3697,8 @@ class TagFormatter:
             view.add_item(result)
             return ("", [], view, [])
         elif isinstance(result, discord.ui.View):
+            return ("", [], result, [])
+        elif isinstance(result, discord.ui.LayoutView):
             return ("", [], result, [])
         elif isinstance(result, tuple):
             if len(result) == 3:
@@ -5942,6 +5952,216 @@ class Tags(commands.Cog):
             if ctx.guild and ctx.guild.banner:
                 return ctx.guild.banner.url
             return None
+        
+        @self.formatter.register('component')
+        @self.formatter.register('componentjson')
+        @self.formatter.register('json.component')
+        @self.formatter.register('cv2')
+        async def _component(ctx, args_str, **kwargs):
+            """
+            ### {component:JSON}
+                * Builds a Discord Component V2 LayoutView from JSON using numerical types.
+                * You can NOT use normal content outside this tag function. This is a Discord limitation.
+                    - This means you cannot use embeds or normal message content when a component tag function is used.
+                * Supports:
+                    - Numerical component types (required by Discord API).
+                    - TagScript parsing in all string fields.
+                    - Auto-wrapping bare/single components.
+                    - Merges multiple {component} tags.
+                * Component Types (Numerical):
+                    1: Action Row, 2: Button, 3: Select Menu, 9: Section, 10: Text Display, 11: Thumbnail, 12: Media Gallery, 13: File, 14: Separator, 17: Container.
+                """
+            try:
+                processed_args = await self.formatter.format(args_str, ctx, **kwargs)
+                processed_args = processed_args[0] if isinstance(processed_args, tuple) else processed_args
+                
+                try:
+                    data = json.loads(processed_args)
+                except json.JSONDecodeError as e:
+                    return f"[ComponentV2 error: Invalid JSON - {str(e)}]"
+
+                view = discord.ui.LayoutView(timeout=None)
+
+                async def process_component(component_data):
+                    if isinstance(component_data, str):
+                        processed = await self.formatter.format(component_data, ctx, **kwargs)
+                        return processed[0] if isinstance(processed, tuple) else processed
+                        
+                    if isinstance(component_data, dict):
+                        component_data = component_data.copy()
+                        component_type = component_data.get('type')
+                        
+                        for key, value in component_data.items():
+                            if isinstance(value, str):
+                                if key not in {'tag', 'command'}:
+                                    processed = await self.formatter.format(value, ctx, **kwargs)
+                                    component_data[key] = processed[0] if isinstance(processed, tuple) else processed
+                                else:
+                                    component_data[key] = value
+                        
+                        if component_type == 1:
+                            row = discord.ui.ActionRow()
+                            for item_data in component_data.get('components', []):
+                                item = await process_component(item_data)
+                                if item:
+                                    row.add_item(item)
+                            return row
+                        
+                        elif component_type == 2:
+                            if 'command' in component_data:
+                                cmd = component_data.pop('command').strip()
+                                component_data['custom_id'] = f"cmd:{cmd}"
+                            elif 'tag' in component_data:
+                                tag = component_data.pop('tag').strip()
+                                component_data['custom_id'] = f"tag:{tag}"
+                            elif 'custom_id' not in component_data and 'url' not in component_data:
+                                component_data['custom_id'] = f"btn_{uuid.uuid4().hex[:8]}"
+                            style_map = {
+                                'primary': discord.ButtonStyle.primary,
+                                'secondary': discord.ButtonStyle.secondary,
+                                'success': discord.ButtonStyle.success,
+                                'danger': discord.ButtonStyle.danger,
+                                'link': discord.ButtonStyle.link
+                            }
+                            style = component_data.get('style', 'primary')
+                            if isinstance(style, str):
+                                style = style_map.get(style.lower(), discord.ButtonStyle.primary)
+                            
+                            return discord.ui.Button(
+                                style=style,
+                                label=component_data.get('label'),
+                                disabled=component_data.get('disabled'),
+                                url=component_data.get('url'),
+                                emoji=component_data.get('emoji'),
+                                custom_id=component_data.get('custom_id'),
+                                row=component_data.get('row')
+                            )
+                        
+                        elif component_type == 3:
+                            options = []
+                            for opt in component_data.get('options', []):
+                                opt = opt.copy()
+                                if 'command' in opt:
+                                    cmd = opt.pop('command').strip()
+                                    opt['value'] = f"cmd:{cmd}"
+                                elif 'tag' in opt:
+                                    tag = opt.pop('tag').strip()
+                                    opt['value'] = f"tag:{tag}"
+                                elif 'value' not in opt:
+                                    opt['value'] = opt.get('label', '')
+                                options.append(discord.SelectOption(
+                                    label=opt.get('label'),
+                                    value=opt.get('value'),
+                                    description=opt.get('description'),
+                                    emoji=opt.get('emoji'),
+                                    default=opt.get('default')
+                                ))
+                            
+                            return discord.ui.Select(
+                                placeholder=component_data.get('placeholder'),
+                                min_values=component_data.get('min_values'),
+                                max_values=component_data.get('max_values'),
+                                options=options,
+                                disabled=component_data.get('disabled'),
+                                custom_id=component_data.get('custom_id', f"sel_{uuid.uuid4().hex[:8]}"),
+                                row=component_data.get('row')
+                            )
+
+                        elif component_type == 9:
+                            accessory_data = component_data.get('accessory')
+                            accessory = None
+                            if accessory_data and isinstance(accessory_data, dict):
+                                accessory = await process_component(accessory_data)
+                            section = discord.ui.Section(
+                                accessory=accessory,
+                                id=component_data.get('id')
+                            )
+                            for section_data in component_data.get('components', []):
+                                section_item = discord.ui.TextDisplay(
+                                    content=section_data.get('content'),
+                                    row=section_data.get('row'),
+                                    id=section_data.get('id')
+                                )
+                                section.add_item(section_item)
+                            return section
+                            
+                        elif component_type == 10:
+                            text_display = discord.ui.TextDisplay(
+                                content=component_data.get('content'),
+                                row=component_data.get('row'),
+                                id=component_data.get('id')
+                            )
+                            return text_display
+                        
+                        elif component_type == 11:
+                            thumbnail = discord.ui.Thumbnail(
+                                media=component_data.get('url'),
+                                description=component_data.get('description'),
+                                spoiler=component_data.get('spoiler')
+                            )
+                            return thumbnail
+                        
+                        elif component_type == 12:
+                            gallery = discord.ui.MediaGallery()
+                            for media_data in component_data.get('media', []):
+                                media_item = discord.MediaGalleryItem(
+                                    media=media_data.get('url'),
+                                    description=media_data.get('description'),
+                                    spoiler=media_data.get('spoiler')
+                                )
+                                gallery.add_item(media=media_item)
+                            return gallery
+                        
+                        elif component_type == 13:
+                            file = discord.ui.File(
+                                media=component_data.get('url'),
+                                spoiler=component_data.get('spoiler'),
+                                id=component_data.get('id')
+                            )
+                            return file
+                        
+                        elif component_type == 14:
+                            separator = discord.ui.Separator(
+                                visible=component_data.get('visible'),
+                                spacing=component_data.get('spacing'),
+                                id=component_data.get('id')
+                            )
+                            return separator
+                        
+                        elif component_type == 17:
+                            color = component_data.get('accent_color')
+                            if isinstance(color, str):
+                                try:
+                                    color = int(color.strip('#'), 16)
+                                except ValueError:
+                                    color = None
+                            container = discord.ui.Container(
+                                accent_color=color,
+                                spoiler=component_data.get('spoiler'),
+                                id=component_data.get('id')
+                            )
+                            for item_data in component_data.get('components', []):
+                                item = await process_component(item_data)
+                                if item:
+                                    container.add_item(item)
+                            return container
+                        
+                    return None
+
+                if isinstance(data, list):
+                    for component_data in data:
+                        component = await process_component(component_data)
+                        if component:
+                            view.add_item(component)
+                else:
+                    component = await process_component(data)
+                    if component:
+                        view.add_item(component)
+
+                return ("", [], view, [])
+
+            except Exception as e:
+                return f"[ComponentV2 error: {str(e)}]"
 
         @self.formatter.register('embed')
         @self.formatter.register('embedjson')
