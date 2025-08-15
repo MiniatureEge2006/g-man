@@ -5639,20 +5639,16 @@ class Tags(commands.Cog):
         async def _usercreatedate(ctx, i, **kwargs):
             """
             ### {usercreatedate:user}
-                * Always returns account creation date (unlike userjoindate which returns server join date when available).
-                * Example: `{usercreatedate:MiniatureEge2006}` -> "2019-05-11 17:15:30 (May 11, 2019 at 05:15:30 PM)"
+                * Returns user creation date in ISO format.
             """
             user = await self.formatter.resolve_user(ctx, i)
-            return user.created_at.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)') if user.created_at else None
+            return user.created_at.isoformat()
         
         @self.formatter.register('userjoindate')
         async def _userjoindate(ctx, i, **kwargs):
             """
             ### {userjoindate:user}
-                * Returns join date in server if member, otherwise account creation date.
-                * Example outputs:
-                - For server members: "2025-04-24 12:00:00 (April 24, 2025 at 12:00:00 PM)"
-                - For non-members: "2019-05-11 17:15:30 (May 11, 2019 at 05:15:30 PM)"
+                * Returns user creation date in ISO format. Will return server join date if available in server.
             """
             user = await self.formatter.resolve_user(ctx, i)
             date_to_use = None
@@ -5662,7 +5658,7 @@ class Tags(commands.Cog):
             else:
                 date_to_use = user.created_at
             
-            return date_to_use.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)') if date_to_use else None
+            return date_to_use.isoformat()
         
         @self.formatter.register('userstatus')
         async def _userstatus(ctx, i, **kwargs):
@@ -6078,8 +6074,12 @@ class Tags(commands.Cog):
                                 id=component_data.get('id')
                             )
                             for section_data in component_data.get('components', []):
+                                content = section_data.get('content')
+                                processed_content = await self.formatter.format(content, ctx, **kwargs)
+                                if isinstance(processed_content, tuple):
+                                    processed_content = processed_content[0]
                                 section_item = discord.ui.TextDisplay(
-                                    content=section_data.get('content'),
+                                    content=processed_content,
                                     row=section_data.get('row'),
                                     id=section_data.get('id')
                                 )
@@ -6095,8 +6095,13 @@ class Tags(commands.Cog):
                             return text_display
                         
                         elif component_type == 11:
+                            media_data = component_data['media']
+                            url = media_data['url']
+                            processed_url = await self.formatter.format(url, ctx, **kwargs)
+                            if isinstance(processed_url, tuple):
+                                processed_url = processed_url[0]
                             thumbnail = discord.ui.Thumbnail(
-                                media=component_data.get('url'),
+                                media=processed_url,
                                 description=component_data.get('description'),
                                 spoiler=component_data.get('spoiler')
                             )
@@ -6128,8 +6133,13 @@ class Tags(commands.Cog):
                             return gallery
                         
                         elif component_type == 13:
+                            file_data = component_data['file']
+                            url = file_data['url']
+                            processed_url = await self.formatter.format(url, ctx, **kwargs)
+                            if isinstance(processed_url, tuple):
+                                processed_url = processed_url[0]
                             file = discord.ui.File(
-                                media=component_data.get('url'),
+                                media=processed_url,
                                 spoiler=component_data.get('spoiler'),
                                 id=component_data.get('id')
                             )
