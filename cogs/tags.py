@@ -5997,7 +5997,9 @@ class Tags(commands.Cog):
                                     component_data[key] = value
                         
                         if component_type == 1:
-                            row = discord.ui.ActionRow()
+                            row = discord.ui.ActionRow(
+                                id=component_data.get('id')
+                            )
                             for item_data in component_data.get('components', []):
                                 item = await process_component(item_data)
                                 if item:
@@ -6031,7 +6033,8 @@ class Tags(commands.Cog):
                                 url=component_data.get('url'),
                                 emoji=component_data.get('emoji'),
                                 custom_id=component_data.get('custom_id'),
-                                row=component_data.get('row')
+                                row=component_data.get('row'),
+                                id=component_data.get('id')
                             )
                         
                         elif component_type == 3:
@@ -6061,7 +6064,8 @@ class Tags(commands.Cog):
                                 options=options,
                                 disabled=component_data.get('disabled'),
                                 custom_id=component_data.get('custom_id', f"sel_{uuid.uuid4().hex[:8]}"),
-                                row=component_data.get('row')
+                                row=component_data.get('row'),
+                                id=component_data.get('id')
                             )
 
                         elif component_type == 9:
@@ -6080,7 +6084,6 @@ class Tags(commands.Cog):
                                     processed_content = processed_content[0]
                                 section_item = discord.ui.TextDisplay(
                                     content=processed_content,
-                                    row=section_data.get('row'),
                                     id=section_data.get('id')
                                 )
                                 section.add_item(section_item)
@@ -6089,7 +6092,6 @@ class Tags(commands.Cog):
                         elif component_type == 10:
                             text_display = discord.ui.TextDisplay(
                                 content=component_data.get('content'),
-                                row=component_data.get('row'),
                                 id=component_data.get('id')
                             )
                             return text_display
@@ -6103,12 +6105,15 @@ class Tags(commands.Cog):
                             thumbnail = discord.ui.Thumbnail(
                                 media=processed_url,
                                 description=component_data.get('description'),
-                                spoiler=component_data.get('spoiler')
+                                spoiler=component_data.get('spoiler'),
+                                id=component_data.get('id')
                             )
                             return thumbnail
                         
                         elif component_type == 12:
-                            gallery = discord.ui.MediaGallery()
+                            gallery = discord.ui.MediaGallery(
+                                id=component_data.get('id')
+                            )
                             items = component_data.get('items', [])
                             for item_data in items:
                                 media_data = item_data.get('media', {})
