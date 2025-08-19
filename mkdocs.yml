@@ -41,6 +41,10 @@ nav:
       - ai: commands/ai/ai.md
       - setsystemprompt: commands/ai/setsystemprompt.md
       - resetsystemprompt: commands/ai/resetsystemprompt.md
+      - setchannelprompt: commands/ai/setchannelprompt.md
+      - resetchannelprompt: commands/ai/resetchannelprompt.md
+      - setserverprompt: commands/ai/setserverprompt.md
+      - resetserverprompt: commands/ai/resetserverprompt.md
       - exportchat: commands/ai/exportchat.md
       - importchat: commands/ai/importchat.md
       - resetai: commands/ai/resetai.md

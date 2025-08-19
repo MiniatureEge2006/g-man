@@ -1,7 +1,10 @@
 # Hybrid Command: resetsystemprompt
 
 ## Description:
-Reset your system prompt back to default.
+Reset your custom system prompt in G-AI back to default.
+
+## Aliases:
+    resetuserprompt
 
 ## Usage:
     g-resetsystemprompt

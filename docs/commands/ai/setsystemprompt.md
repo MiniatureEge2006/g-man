@@ -1,7 +1,10 @@
 # Hybrid Command: setsystemprompt
 
 ## Description:
-Set a custom system prompt for G-AI.
+Set a custom system prompt for yourself in G-AI.
+
+## Aliases:
+    setuserprompt
 
 ## Usage:
     g-setsystemprompt <prompt>
