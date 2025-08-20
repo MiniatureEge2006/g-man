@@ -90,7 +90,7 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
             return stdout.decode('utf-8', errors='replace') + stderr.decode('utf-8', errors='replace'), proc.returncode
         except asyncio.TimeoutError:
             proc.kill()
-            await proc.communicate()
+            await proc.wait()
             return "Code execution took longer than 60 seconds", 1
 
     try:
