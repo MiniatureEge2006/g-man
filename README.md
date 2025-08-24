@@ -27,6 +27,7 @@ You can now just type `g-help` in a channel to see all the commands.
 * The FFMPEG binary/executable, and YT-DLP package from pip (remember, not the executable for yt-dlp)
 * Ollama
 * Docker
+* LibreTranslate (use docker or another python installation for this)
 * A PostgreSQL database
   * see the `setup.sql` file and run the query. This is required for the prefix, command/bot block/allowlisting system, reminder system, and tags.
 * All the Python packages in requirements.txt

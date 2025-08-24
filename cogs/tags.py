@@ -4055,8 +4055,40 @@ class Tags(commands.Cog):
                 
             except Exception as e:
                 return f"[AI error: {str(e)}]"
+        
+        @self.formatter.register('translate')
+        async def _translate(ctx, val, **kwargs):
+            """
+            ### {translate:text|from_lang|to_lang}
+                * Translates text to another language via LibreTranslate.
+                * Example: `{translate:hello world|auto|tr}`
+            """
+            parts = val.split('|', 2)
 
-            
+            text = parts[0].strip()
+            from_lang = parts[1].strip() or "auto"
+            to_lang = parts[2].strip() if len(parts) > 2 else "en"
+
+            url = "http://localhost:5000/translate"
+            payload = {
+                "q": text,
+                "source": from_lang,
+                "target": to_lang
+            }
+            headers = {"Content-Type": "application/json"}
+
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(url, json=payload, headers=headers) as response:
+                        if response.status != 200:
+                            return f"[translate error: HTTP Exception: {response.status}]"
+                        data = await response.json()
+                        translated_text = data.get("translatedText", "").strip()
+                        return translated_text
+            except Exception as e:
+                return f"[translate error: {str(e)}]"
+
+
         @self.formatter.register('args')
         def args(ctx, _, **kwargs):
             """
