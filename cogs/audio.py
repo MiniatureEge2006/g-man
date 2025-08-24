@@ -557,6 +557,8 @@ class Audio(commands.Cog):
             title = await self.get_title(source_url)
             queue.append((source_url, filters_list, True, title))
             await ctx.send(f"Added {url} to the queue.")
+            if self.loop_mode.get(ctx.guild.id) == "queue":
+                self.original_queues[ctx.guild.id] = list(queue)
         elif ctx.voice_client and ctx.voice_client.is_playing() and (ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel):
             await ctx.send("You must be in the same voice channel as me to play audio.")
             return
@@ -1032,8 +1034,10 @@ class Audio(commands.Cog):
             await ctx.send("Stopped playback and cleared the queue.")
         elif ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
             await ctx.send("You must be in the same voice channel as me to stop the audio.")
-        else:
+        elif not (ctx.voice_client and ctx.voice_client.channel):
             await ctx.send("I am not connected to a voice channel.")
+        else:
+            await ctx.send("I am not playing anything.")
 
     @commands.hybrid_command(name="clear", description="Clear the queue.")
     @app_commands.allowed_installs(guilds=True, users=False)
