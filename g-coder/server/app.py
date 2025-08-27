@@ -255,9 +255,11 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
         print(f"Code execution Error: {traceback.format_exc()}")
         raise HTTPException(500, detail=f"Code execution failed: {str(e)}")
     finally:
-        for file_path in INPUT_DIR.iterdir():
-            if file_path.is_file():
-                safe_delete(file_path)
+        for item in INPUT_DIR.iterdir():
+            safe_delete(item)
+        for item in OUTPUT_DIR.iterdir():
+            if item.is_dir():
+                safe_delete(item)
         ensure_dirs()
 
 
