@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import ollama
+import aiohttp
 import asyncio
 import time
 import asyncpg
@@ -153,20 +153,11 @@ class AI(commands.Cog):
         await ctx.typing()
         await self.process_ai_response(ctx, prompt)
     
-    async def process_ai_response(self, ctx: commands.Context, prompt: str, think_mode: bool = False, show_thinking: bool = False):
+    async def process_ai_response(self, ctx: commands.Context, prompt: str):
         start_time = time.time()
         try:
-            think_mode = re.search(r'(^|\s)--think($|\s)', prompt) is not None
-            if think_mode:
-                prompt = re.sub(r'(^|\s)--think($|\s)', ' ', prompt).strip()
-            show_thinking = re.search(r'(^|\s)--show-thinking($|\s)', prompt) is not None
-            if show_thinking:
-                prompt = re.sub(r'(^|\s)--show-thinking($|\s)', ' ', prompt).strip()
             conversation_key = self.get_conversation(ctx)
-            
-
             user_history = await self.get_conversation_history(conversation_key)
-            
             system_prompt = await self.create_system_prompt(ctx, prompt)
             messages = [{"role": "system", "content": system_prompt}]
             
@@ -175,17 +166,19 @@ class AI(commands.Cog):
             if user_history:
                 messages[1:1] = user_history[-MAX_CONVERSATION_HISTORY_LENGTH:]
             
-            response = await self.get_ai_response(messages, think_mode, show_thinking)
-            content = response.message.content
+            content = await self.get_ai_response(messages)
             
             if not content:
                 await ctx.reply("Command returned no content.")
                 return
             
+            final_content = re.sub(r'<think>.*?</think>\s*', '', content, flags=re.DOTALL).strip()
+            final_content = re.sub(r'\n{3,}', '\n\n', final_content)
+            
             tags = ctx.bot.get_cog('Tags')
             if tags and hasattr(tags, 'formatter'):
                 try:
-                    text, embeds, view, files = await tags.formatter.format(content, ctx)
+                    text, embeds, view, files = await tags.formatter.format(final_content, ctx)
 
                     if embeds or (view and view.childen) or files:
                         message_content = text[:2000] if text else None
@@ -208,8 +201,7 @@ class AI(commands.Cog):
                                 url=f"https://discord.com/users/{ctx.author.id}"
                             )
                             embed.set_footer(
-                                text=f"AI Response took {time.time() - start_time:.2f} seconds",
-                                icon_url="https://ollama.com/public/og.png"
+                                text=f"AI Response took {time.time() - start_time:.2f} seconds"
                             )
                             await ctx.reply(embed=embed)
                         else:
@@ -224,13 +216,13 @@ class AI(commands.Cog):
                 except Exception:
                     pass
                 
-            if len(content) > 2000:
-                embed = discord.Embed(title="G-AI Response", description=content if len(content) < 4096 else content[:4096], color=discord.Color.blurple())
+            if len(final_content) > 2000:
+                embed = discord.Embed(title="G-AI Response", description=final_content[:4096], color=discord.Color.blurple())
                 embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
-                embed.set_footer(text=f"AI Response took {time.time() - start_time:.2f} seconds", icon_url="https://ollama.com/public/og.png")
+                embed.set_footer(text=f"AI Response took {time.time() - start_time:.2f} seconds")
                 await ctx.reply(embed=embed)
             else:
-                await ctx.reply(content)
+                await ctx.reply(final_content)
             
 
             new_history = user_history[-MAX_CONVERSATION_HISTORY_LENGTH * 2:] if user_history else []
@@ -244,23 +236,35 @@ class AI(commands.Cog):
             raise commands.CommandError(str(e))
 
 
-    async def get_ai_response(self, messages: list, think_mode: bool = False, show_thinking: bool = False):
+    async def get_ai_response(self, messages: list):
+        payload = {
+            "messages": messages,
+            "stream": False
+        }
+
+        headers = {"Content-Type": "application/json"}
+
         try:
-            response = await asyncio.to_thread(
-                ollama.chat,
-                model=bot_info.data['ollama_model'],
-                messages=messages,
-                think=think_mode
-            )
-            content = response.message.content
-            if not show_thinking:
-                content = content
-            elif show_thinking:
-                content = f"**Thinking...**\n{response.message.thinking}\n**...done thinking.**" + '\n' + content
-            response.message.content = content
-            return response
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{bot_info.data['llama_cpp_url']}/v1/chat/completions",
+                    json=payload,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=180)
+                ) as resp:
+                    if resp.status != 200:
+                        text = await resp.text()
+                        raise RuntimeError(f"llama.cpp server returned {resp.status}: {text}")
+                    
+                    data = await resp.json()
+
+                    content = data["choices"][0]["message"]["content"].strip()
+                    return content
+        
+        except asyncio.TimeoutError:
+            raise RuntimeError("AI request timed out after 180 seconds.")
         except Exception as e:
-            raise RuntimeError(f"AI request failed: {e}")
+            raise RuntimeError(f"AI request failed: {str(e)}")
     
 
     @commands.hybrid_command(name="setsystemprompt", description="Set a custom system prompt for yourself in G-AI.", aliases=["setuserprompt"])

@@ -8,7 +8,6 @@ colorlog
 asyncpg
 spotipy
 dateparser
-ollama
 PyNaCl
 yt-dlp
 matplotlib

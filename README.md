@@ -16,7 +16,7 @@ A Discord multi-purpose bot.
 * A YouTube search command.
 * Music commands with FFMPEG audio filters support along with a queue system.
 * A prefix changing system.
-* An AI chatbot command via Ollama that supports executing TagScript.
+* An AI chatbot command via llama.cpp that supports executing TagScript.
 * Code execution server and command that includes custom packages like yt-dlp, ffmpeg, etc.
 * And lastly, a tag system with tagscripting support.
 
@@ -25,7 +25,7 @@ You can now just type `g-help` in a channel to see all the commands.
 
 ## Requirements
 * The FFMPEG binary/executable, and YT-DLP package from pip (remember, not the executable for yt-dlp)
-* Ollama
+* llama.cpp
 * Docker
 * LibreTranslate (use docker or another python installation for this)
 * A PostgreSQL database
