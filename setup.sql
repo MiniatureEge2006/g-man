@@ -220,3 +220,15 @@ CREATE INDEX IF NOT EXISTS idx_manual_slowmodes_user_enabled
 ON manual_slowmodes (guild_id, user_id) WHERE enabled AND user_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_manual_slowmodes_role_enabled 
 ON manual_slowmodes (guild_id, role_id) WHERE enabled AND role_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS logging_rules (
+    id SERIAL PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    log_channel_id BIGINT NOT NULL,
+    event_category TEXT NOT NULL CHECK (event_category IN ('message', 'user', 'member', 'role', 'channel', 'guild', 'voice', 'moderation', 'all_events')),
+    include_channel_ids BIGINT[],
+    exclude_channel_ids BIGINT[],
+    added_by BIGINT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(guild_id, log_channel_id, event_category)
+);
