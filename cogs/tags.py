@@ -4174,7 +4174,7 @@ class Tags(commands.Cog):
                     else:
                         return f"[JSON traverse error: cannot traverse into '{key}' of non-container type]"
                 
-                return str(result) if result is not None else ""
+                return json.dumps(result) if result is not None else ""
             except json.JSONDecodeError:
                 return "[JSON traverse error: malformed JSON]"
             except Exception as e:
