@@ -4148,37 +4148,102 @@ class Tags(commands.Cog):
         def _traversejson(ctx, val, **kwargs):
             """
             ### {traversejson:path|json}
-                * Traverses a JSON object using dot notation path and returns the value.
-                * Example: `{traversejson:user.name|{"user":{"name":"John"}}}` -> "John"
-                * Example: `{traversejson:1.id|[{}, {"id":42}]}` -> "42"
-                * Returns "[JSON traverse error]" if path is invalid or JSON is malformed
+                * Extracts values from JSON using JSONPath.
+                * Example: `{traversejson:user.name|{"user":{"name":"Alice"}}}`
             """
             try:
-                parts = str(val).split('|', 1)
-                if len(parts) < 2:
-                    return "[JSON traverse error: missing path or JSON]"
-                
-                path, json_str = parts[0].strip(), parts[1].strip()
-                data = json.loads(json_str)
-                
-                keys = path.split('.')
-                result = data
-                for key in keys:
-                    if isinstance(result, dict):
-                        result = result.get(key)
-                    elif isinstance(result, list):
-                        try:
-                            result = result[int(key)]
-                        except (ValueError, IndexError):
-                            return f"[JSON traverse error: invalid list index '{key}']"
+                parts = str(val).strip().split('|', 1)
+                if len(parts) != 2:
+                    return '[JSON traverse error: invalid syntax]'
+
+                path_expr, json_str = parts[0].strip(), parts[1].strip()
+
+                try:
+                    data = json.loads(json_str)
+                except json.JSONDecodeError:
+                    return '[JSON traverse error: invalid JSON]'
+
+                path_expr = path_expr.strip()
+                if path_expr.startswith('$'):
+                    path_expr = path_expr[1:].lstrip('. ')
+                if not path_expr:
+                    return json.dumps(data)
+
+                tokens = []
+                for part in re.findall(r'\.{1,2}|(?:\[[^\]]+\])+|[^\.\[\]]+', path_expr):
+                    part = part.strip()
+                    if part.startswith('[') and part.endswith(']'):
+                        tokens.append(('index', part))
+                    elif part == '.':
+                        continue
                     else:
-                        return f"[JSON traverse error: cannot traverse into '{key}' of non-container type]"
-                
-                return json.dumps(result) if result is not None else ""
-            except json.JSONDecodeError:
-                return "[JSON traverse error: malformed JSON]"
+                        tokens.append(('key', part))
+
+                result = [data]
+                i = 0
+                while i < len(tokens):
+                    token_type, token = tokens[i]
+                    next_results = []
+
+                    for item in result:
+                        if token_type == 'key' and token == '..':
+                            stack = [item]
+                            found = []
+                            while stack:
+                                current = stack.pop()
+                                if isinstance(current, dict):
+                                    for k, v in current.items():
+                                        if k == tokens[i + 1][1]:
+                                            found.append(v)
+                                        stack.append(v)
+                                elif isinstance(current, list):
+                                    stack.extend(current)
+                            next_results.extend(found)
+                            i += 1
+                            break
+
+                        elif isinstance(item, dict):
+                            if token_type == 'key':
+                                if token == '*':
+                                    next_results.extend(item.values())
+                                elif token in item:
+                                    next_results.append(item[token])
+                            elif token_type == 'index':
+                                indices = re.findall(r'\[(\*|\d+)\]', token)
+                                for idx in indices:
+                                    if idx == '*':
+                                        next_results.extend(item.values())
+                                    else:
+                                        n = int(idx)
+                                        vals = list(item.values())
+                                        if 0 <= n < len(vals):
+                                            next_results.append(vals[n])
+
+                        elif isinstance(item, list):
+                            if token_type == 'key':
+                                if token == '*':
+                                    next_results.extend(item)
+                                else:
+                                    for elem in item:
+                                        if isinstance(elem, dict) and token in elem:
+                                            next_results.append(elem[token])
+                            elif token_type == 'index':
+                                indices = re.findall(r'\[(\*|\d+)\]', token)
+                                for idx in indices:
+                                    if idx == '*':
+                                        next_results.extend(item)
+                                    else:
+                                        n = int(idx)
+                                        if 0 <= n < len(item):
+                                            next_results.append(item[n])
+
+                    result = next_results
+                    i += 1
+
+                return json.dumps(result[0]) if len(result) == 1 else json.dumps(result)
+
             except Exception as e:
-                return f"[JSON traverse error: {str(e)}]"
+                return f'[JSON traverse error: {str(e)}]'
         
         @self.formatter.register('repeat')
         def _repeat(ctx, val, **kwargs):
@@ -4327,7 +4392,10 @@ class Tags(commands.Cog):
             ### {replace:text|find|replace|flags}
                 * Replaces text with various options.
                 * Flags: i (case insensitive), r (regex), w (whole words), g (global), c (count)
+                * Without 'g', only first occurrence is replaced.
                 * Example: `{replace:Hello|e|a}` -> "Hallo"
+                * Example: `{replace:Hello hello|e|a|i}` -> "Hallo hello" (only first 'e' if no 'g')
+                * Example: `{replace:Hello hello|e|a|ig}` -> "Hallo hallo"
             """
             try:
                 processed_input = str(args_str)
@@ -4358,16 +4426,27 @@ class Tags(commands.Cog):
                         except re.error:
                             return text
                     else:
-                        if 'i' in flags:
-                            return str(text.lower().count(find.lower()))
+                        search_text = text.lower() if 'i' in flags else text
+                        find_str = find.lower() if 'i' in flags else find
                         if 'w' in flags:
-                            words = text.split()
-                            find_lower = find.lower() if 'i' in flags else find
-                            count = sum(1 for word in words
-                                        if (word.lower() == find_lower.lower() if 'i' in flags 
-                                        else word == find))
+                            words = search_text.split()
+                            count = 0
+                            for word in words:
+                                if word == find_str:
+                                    count += 1
                             return str(count)
-                        return str(text.count(find))
+                        count = 0
+                        start = 0
+                        while True:
+                            if 'i' in flags:
+                                idx = search_text.find(find_str, start)
+                            else:
+                                idx = text.find(find, start)
+                            if idx == -1:
+                                break
+                            count += 1
+                            start = idx + len(find)
+                        return str(count)
                 
                 if 'r' in flags:
                     re_flags = re.IGNORECASE if 'i' in flags else 0
@@ -4375,25 +4454,49 @@ class Tags(commands.Cog):
                         find = r'\b' + find + r'\b'
                     try:
                         pattern = re.compile(find, flags=re_flags)
-                        return pattern.sub(replace, text)
+                        count = 0 if 'g' in flags else 1
+                        return pattern.sub(replace, text, count=count)
                     except re.error:
                         return text
-                else:
-                    if 'w' in flags:
-                        words = text.split()
-                        find_lower = find.lower()
-                        replaced = []
-                        for word in words:
-                            if ('i' in flags and word.lower() == find_lower) or word == find:
-                                replaced.append(replace)
-                            else:
-                                replaced.append(word)
-                        return ' '.join(replaced)
-                    elif 'i' in flags:
-                        return re.sub(re.escape(find), replace, text, flags=re.IGNORECASE)
+                
+                if 'w' in flags:
+                    words = text.split()
+                    replaced = []
+                    find_lower = find.lower() if 'i' in flags else find
+                    for word in words:
+                        word_comp = word.lower() if 'i' in flags else word
+                        if word_comp == find_lower:
+                            replaced.append(replace)
+                            if 'g' not in flags:
+                                idx = len(replaced)
+                                return ' '.join(replaced + words[idx:])
+                        else:
+                            replaced.append(word)
+                    return ' '.join(replaced)
+                
+                if 'i' in flags:
+                    find_lower = find.lower()
+                    text_lower = text.lower()
+                    idx = text_lower.find(find_lower)
+                    if idx == -1:
+                        return text
+                    if 'g' in flags:
+                        result = ''
+                        last = 0
+                        while idx != -1:
+                            result += text[last:idx] + replace
+                            last = idx + len(find)
+                            idx = text_lower.find(find_lower, last)
+                        result += text[last:]
+                        return result
                     else:
-                        return text.replace(find, replace)
-    
+                        return text[:idx] + replace + text[idx + len(find):]
+                
+                if 'g' in flags:
+                    return text.replace(find, replace)
+                else:
+                    return text.replace(find, replace, 1)
+
             except Exception:
                 return args_str
             
@@ -6660,8 +6763,39 @@ class Tags(commands.Cog):
                         "permissions": r.permissions.value,
                         "mentionable": r.mentionable
                     } for r in ctx.guild.roles],
-                    "channels": [json.loads(await _json_channel(ctx, str(c))) for c in ctx.guild.channels],
-                    "members": [json.loads(await _json_member(ctx, str(u))) for u in ctx.guild.members]
+                    "channels": [{
+                        "id": str(c.id),
+                        "name": c.name,
+                        "type": str(c.type),
+                        "created_at": c.created_at.isoformat(),
+                        "position": c.position,
+                        "topic": getattr(c, 'topic', None),
+                        "nsfw": c.nsfw,
+                        "bitrate": getattr(c, 'bitrate', None),
+                        "user_limit": getattr(c, 'user_limit', None),
+                        "slowmode_delay": getattr(c, 'slowmode_delay', None),
+                        "category": {
+                            "id": str(c.category.id),
+                            "name": c.category.name
+                        } if getattr(c, 'category', None) else None,
+                        "mention": c.mention
+                    } for c in ctx.guild.channels],
+                    "members": [{
+                        "id": str(m.id),
+                        "name": m.name,
+                        "display_name": m.display_name,
+                        "nick": m.nick,
+                        "mention": m.mention,
+                        "joined_at": m.joined_at.isoformat(),
+                        "avatar": str(m.display_avatar.key) if m.display_avatar else None,
+                        "avatar_url": str(m.display_avatar.url) if m.display_avatar else None,
+                        "banner": str(m.guild_banner.key) if m.guild_banner else None,
+                        "banner_url": str(m.guild_banner.url) if m.guild_banner else None,
+                        "roles": [{"id": str(r.id), "name": r.name} for r in m.roles],
+                        "top_role": {"id": str(m.top_role.id), "name": m.top_role.name},
+                        "guild_permissions": list(m.guild_permissions),
+                        "timed_out_until": m.timed_out_until.isoformat() if m.timed_out_until else None
+                    } for m in ctx.guild.members]
                 }
                 
                 return json.dumps(guild_data)
