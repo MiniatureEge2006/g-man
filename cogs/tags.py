@@ -43,13 +43,13 @@ class TagPaginator(discord.ui.View):
         self.original_author = original_author
         self.message = None
         self.interaction = interaction
-    
+
     async def interaction_check(self, interaction: discord.Interaction):
         if interaction.user != self.original_author:
             await interaction.response.send_message("You can't control this pagination.", ephemeral=True)
             return False
         return True
-    
+
     async def on_timeout(self):
         await self.message.edit(view=None)
 
@@ -144,7 +144,7 @@ class Paginator(discord.ui.View):
             discord.File(BytesIO(meta["data"]), filename=meta["filename"])
             for meta in files_metadata
         ] if files_metadata else []
-        
+
         return content, embeds, files
 
     @discord.ui.button(label="⏮️", style=discord.ButtonStyle.blurple)
@@ -232,7 +232,7 @@ class DiscordGenerator:
             description=kwargs.get('description'),
             color=color
         )
-        
+
 
         if 'fields' in kwargs:
             for field in kwargs['fields']:
@@ -265,7 +265,7 @@ class DiscordGenerator:
         if 'image' in kwargs:
             embed.set_image(url=kwargs['image'].get('url'))
         return embed
-    
+
     @staticmethod
     def create_select(source: Union[str, dict], **kwargs) -> discord.ui.Select:
         if isinstance(source, str):
@@ -276,7 +276,7 @@ class DiscordGenerator:
         else:
             data = source.copy()
         data.update(kwargs)
-        
+
         options = []
         for opt in data.get('options', []):
             options.append(discord.SelectOption(
@@ -286,7 +286,7 @@ class DiscordGenerator:
                 emoji=opt.get('emoji'),
                 default=opt.get('default', False)
             ))
-        
+
         return discord.ui.Select(
             custom_id=data.get('custom_id'),
             placeholder=data.get('placeholder'),
@@ -307,7 +307,7 @@ class DiscordGenerator:
         else:
             data = source.copy()
         data.update(kwargs)
-        
+
         return discord.ui.Button(
             label=data.get('label'),
             style=DiscordGenerator.parse_button_style(data.get('style', 'primary')),
@@ -316,8 +316,8 @@ class DiscordGenerator:
             disabled=data.get('disabled', False),
             emoji=data.get('emoji')
         )
-    
-    
+
+
     @staticmethod
     def parse_button_style(style):
         styles = {
@@ -605,11 +605,11 @@ class MediaProcessor:
             'dobetween': self._dobetween_media,
             'setframecount': self._setframecount
         }
-    
+
     async def _handle_error(self, operation: str, error: Exception, details: str = "") -> str:
         error_type = type(error).__name__
         error_msg = str(error) or "No error details available"
-        
+
         if isinstance(error, KeyError):
             return f"Media Error [{operation}]: Missing required key '{error_msg}'"
         elif isinstance(error, ValueError):
@@ -620,12 +620,12 @@ class MediaProcessor:
             return f"Media Error [{operation}]: Processing failed - {error_msg}"
         else:
             return f"Media Error [{operation}]: Unexpected error ({error_type}) - {error_msg} {details}"
-    
+
     async def ensure_session(self):
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession()
 
-    
+
     async def cleanup(self):
         if self.session and not self.session.closed:
             await self.session.close()
@@ -651,7 +651,7 @@ class MediaProcessor:
                     os.unlink(file_path)
             except Exception:
                 pass
-        
+
         try:
             for item in self.temp_dir.glob('*'):
                 try:
@@ -663,25 +663,25 @@ class MediaProcessor:
                     pass
         except Exception:
             pass
-        
+
         self.media_cache.clear()
         self.active_processes.clear()
         self.temp_files.clear()
-    
-    
+
+
     def _get_temp_path(self, extension: str = '') -> Path:
         path = self.temp_dir / f"{uuid.uuid4()}{f'.{extension}' if extension else ''}"
         self.temp_files.add(str(path))
         path.touch(exist_ok=True)
         return path
-    
-    
+
+
     async def _get_media_dimensions(self, media_key: str) -> tuple[int, int]:
         if media_key not in self.media_cache:
             return (0, 0)
-        
+
         file_path = self.media_cache[media_key]
-        
+
 
         cmd = [
             'ffprobe', '-v', 'error',
@@ -690,7 +690,7 @@ class MediaProcessor:
             '-of', 'json',
             file_path
         ]
-        
+
         success, output = await self._run_ffprobe(cmd)
         if success and output:
             try:
@@ -727,7 +727,7 @@ class MediaProcessor:
                 if len(parts) >= 2 and parts[-1] in ['w', 'h']:
                     media_key = '_'.join(parts[:-1]) if '_' in dim_str else dim_str[:-1]
                     dimension = parts[-1]
-                    
+
                     if media_key in self.media_cache:
                         media_w, media_h = await self._get_media_dimensions(media_key) or (0, 0)
                         if dimension == 'w':
@@ -751,10 +751,10 @@ class MediaProcessor:
             if '(' in dim_str:
                 mode, args_str = dim_str.split('(')[0].lower(), dim_str.split(')')[0].split('(')[1]
                 args = [await self._resolve_dimension(arg.strip(), context_key, overlay_key) for arg in args_str.split(',')]
-                
+
                 if mode == 'fill': return max(args)
                 if mode == 'contain': return min(args)
-                if mode == 'cover': 
+                if mode == 'cover':
                     scale = max(args[0]/ctx_w, args[1]/ctx_h) if ctx_w and ctx_h else 1
                     return int(scale * ctx_w)
                 if mode == 'stretch': return args[0]
@@ -768,11 +768,11 @@ class MediaProcessor:
 
 
             return int(float(eval(dim_str, {'__builtins__': None}, {}))) if any(op in dim_str for op in '+-*/') else int(float(dim_str))
-        
+
         except Exception:
             return 0
-    
-    
+
+
     async def _resolve_timestamp(self, input_key: str, time_val: Union[str, float]) -> str:
         if not isinstance(time_val, str) or not time_val.endswith('%'):
             return str(time_val)
@@ -790,7 +790,7 @@ class MediaProcessor:
             return "0"
 
 
-    
+
     def _parse_color(self, color_str: str, size: tuple = None) -> Union[tuple, Image.Image]:
         if color_str.lower() in ('random', 'rand'):
             if size is None:
@@ -798,10 +798,10 @@ class MediaProcessor:
             else:
                 angle = random.randint(0, 359)
                 color_str = f'linear-gradient({angle}deg, random, random)'
-        
+
         if color_str.startswith('#'):
             return self._hex_to_rgb(color_str)
-        
+
         if not color_str.startswith(('linear-gradient(', 'radial-gradient(')):
             return self._parse_single_color(color_str)
 
@@ -858,51 +858,51 @@ class MediaProcessor:
                     for i in range(len(colors_and_stops)-1):
                         start_pos = colors_and_stops[i][1]
                         end_pos = colors_and_stops[i+1][1]
-                        
+
                         if start_pos <= pos <= end_pos:
                             if end_pos == start_pos:
                                 t = 0
                             else:
                                 t = (pos - start_pos) / (end_pos - start_pos)
-                            
+
                             c1 = self._parse_single_color(colors_and_stops[i][0])
                             c2 = self._parse_single_color(colors_and_stops[i+1][0])
-                            
+
                             r = int(c1[0] + (c2[0] - c1[0]) * t)
                             g = int(c1[1] + (c2[1] - c1[1]) * t)
                             b = int(c1[2] + (c2[2] - c1[2]) * t)
                             a = int(c1[3] + (c2[3] - c1[3]) * t)
-                            
+
                             draw.point((x_pos, y_pos), fill=(r, g, b, a))
                             break
 
         elif base_str.startswith('radial-gradient('):
             center_x, center_y = width // 2, height // 2
             max_radius = math.sqrt(center_x**2 + center_y**2)
-            
+
             for y_pos in range(height):
                 for x_pos in range(width):
                     dist = math.sqrt((x_pos-center_x)**2 + (y_pos-center_y)**2) / max_radius
                     dist = max(0, min(1, dist))
-                    
+
                     for i in range(len(colors_and_stops)-1):
                         start_pos = colors_and_stops[i][1]
                         end_pos = colors_and_stops[i+1][1]
-                        
+
                         if start_pos <= dist <= end_pos:
                             if end_pos == start_pos:
                                 t = 0
                             else:
                                 t = (dist - start_pos) / (end_pos - start_pos)
-                            
+
                             c1 = self._parse_single_color(colors_and_stops[i][0])
                             c2 = self._parse_single_color(colors_and_stops[i+1][0])
-                            
+
                             r = int(c1[0] + (c2[0] - c1[0]) * t)
                             g = int(c1[1] + (c2[1] - c1[1]) * t)
                             b = int(c1[2] + (c2[2] - c1[2]) * t)
                             a = int(c1[3] + (c2[3] - c1[3]) * t)
-                            
+
                             draw.point((x_pos, y_pos), fill=(r, g, b, a))
                             break
 
@@ -912,7 +912,7 @@ class MediaProcessor:
         parts = gradient_str.split('(')
         prefix = parts[0]
         body = '('.join(parts[1:])
-        
+
         color_parts = []
         current_part = []
         in_quotes = False
@@ -926,13 +926,13 @@ class MediaProcessor:
                 current_part.append(char)
         if current_part:
             color_parts.append(''.join(current_part).strip().rstrip(')'))
-        
+
         processed_parts = []
         for part in color_parts:
             if part.endswith('deg'):
                 processed_parts.append(part)
                 continue
-            
+
             if '%' in part:
                 color_part, percent_part = part.rsplit('%', 1)
                 color_part = color_part.strip()
@@ -943,7 +943,7 @@ class MediaProcessor:
                 if part.lower() in ('random', 'rand'):
                     part = self._rgb_to_hex(self._generate_random_color())
                 processed_parts.append(part)
-        
+
         return f"{prefix}({', '.join(processed_parts)})"
 
     def _generate_random_color(self, alpha: int = None) -> tuple:
@@ -974,25 +974,25 @@ class MediaProcessor:
 
     def _parse_single_color(self, color_str: str) -> tuple:
         color_str = color_str.strip().lower()
-        
+
         if color_str in ('none', 'transparent'):
             return (0, 0, 0, 0)
-        
+
         if color_str in ('random', 'rand'):
             return self._generate_random_color()
-        
+
         if color_str.startswith('#'):
             return self._hex_to_rgb(color_str)
-        
+
         if color_str.startswith(('rgb(', 'rgba(')):
             try:
                 values_str = color_str.split('(')[1].split(')')[0]
                 values = [v.strip() for v in values_str.split(',')]
-                
+
                 r = int(values[0])
                 g = int(values[1])
                 b = int(values[2])
-                
+
                 a = 255
                 if len(values) > 3:
                     alpha = float(values[3])
@@ -1000,11 +1000,11 @@ class MediaProcessor:
                         a = int(alpha * 255)
                     else:
                         a = int(alpha)
-                
+
                 return (r, g, b, a)
             except (ValueError, IndexError):
                 pass
-        
+
         if ',' in color_str or ' ' in color_str:
             separators = ',' if ',' in color_str else ' '
             try:
@@ -1017,7 +1017,7 @@ class MediaProcessor:
                     return (r, g, b, a)
             except (ValueError, IndexError):
                 pass
-        
+
         return {
             'white': (255, 255, 255, 255),
             'black': (0, 0, 0, 255),
@@ -1065,15 +1065,15 @@ class MediaProcessor:
             for param, param_spec in spec.items():
                 if param in ('input_keys', 'extra_args'):
                     continue
-                    
+
                 if not remaining_args and param_spec.get('required', False):
                     raise ValueError(f"Missing required argument: '{param}'")
                 if not remaining_args:
                     continue
-                    
+
                 if '=' in remaining_args[0] and not remaining_args[0].startswith(('http://', 'https://')):
                     break
-                    
+
                 value = remaining_args.pop(0)
                 try:
                     parsed[param] = convert(value, param_spec['type'])
@@ -1109,15 +1109,15 @@ class MediaProcessor:
                     raise ValueError(f"Missing required argument: '{param}'")
 
             return parsed
-            
+
         except Exception as e:
             raise ValueError(f"{cmd} command error: {str(e)}")
 
-    
+
     async def _run_ffmpeg(self, cmd: list) -> tuple:
         if platform.system() == 'Windows':
             cmd[0] = 'ffmpeg.exe'
-        
+
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -1146,11 +1146,11 @@ class MediaProcessor:
             return False, f"Error: {str(e)}"
         finally:
             self.active_processes.discard(proc)
-    
+
     async def _run_ffprobe(self, cmd: list) -> tuple:
         if platform.system() == 'Windows':
             cmd[0] = 'ffprobe.exe'
-        
+
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -1166,7 +1166,7 @@ class MediaProcessor:
             return True, stdout.decode('utf-8', errors='replace').strip()
         except Exception as e:
             return False, f"Error: {str(e)}"
-    
+
     async def _probe_media_info(self, path: Path) -> tuple:
         cmd = [
             'ffprobe', '-v', 'error',
@@ -1175,7 +1175,7 @@ class MediaProcessor:
             '-of', 'json',
             str(path)
         ]
-        
+
         success, output = await self._run_ffprobe(cmd)
         if not success:
             return (1, 1, 0.0, False)
@@ -1184,7 +1184,7 @@ class MediaProcessor:
             data = json.loads(output)
             streams = data.get('streams', [])
             format_info = data.get('format', {})
-            
+
 
             width, height = 1, 1
             for stream in streams:
@@ -1192,18 +1192,18 @@ class MediaProcessor:
                     width = max(int(stream.get('width', 1)), 1)
                     height = max(int(stream.get('height', 1)), 1)
                     break
-                    
+
 
             duration = max(float(format_info.get('duration', 0)), 0.0)
-            
+
 
             has_audio = any(s.get('codec_type') == 'audio' for s in streams)
-            
+
             return (width, height, duration, has_audio)
-            
+
         except Exception as e:
             return (1, 1, 0.0, False)
-    
+
     async def execute_media_script(self, script):
         try:
             lines = [line.strip() for line in script.splitlines() if line.strip()]
@@ -1213,7 +1213,7 @@ class MediaProcessor:
             produced_outputs = set()
             final_output_key = None
             i = 0
-            
+
             while i < len(lines):
                 line = lines[i]
                 try:
@@ -1222,21 +1222,21 @@ class MediaProcessor:
                             parts = line.split()
                             if len(parts) < 5:
                                 raise ValueError("dobetween requires input_key, start_time, end_time, output_key")
-                                
+
                             input_key = parts[1]
                             start = parts[2]
                             end = parts[3]
                             output_key = parts[4]
                             sub_script = []
                             i += 1
-                            
+
                             while i < len(lines) and not lines[i].lower() == 'end':
                                 sub_script.append(lines[i])
                                 i += 1
-                                
+
                             if i >= len(lines):
                                 raise ValueError("Missing 'end' for dobetween")
-                                
+
                             result = await self._dobetween_media(
                                 input_key=input_key,
                                 start_time=start,
@@ -1248,7 +1248,7 @@ class MediaProcessor:
                                 output_files.append(result[8:])
                             if result.startswith("Error"):
                                 raise RuntimeError(result)
-                                
+
                             last_output_key = output_key
                             i += 1
                         except Exception as e:
@@ -1261,18 +1261,18 @@ class MediaProcessor:
                             if not parts:
                                 i += 1
                                 continue
-                                
+
                             cmd = parts[0].lower()
                             args = parts[1:]
-                            
+
                             if cmd not in self.gscript_commands:
                                 raise ValueError(f"Unknown command: '{cmd}'")
-                            
+
                             parsed = await self._parse_command_args(cmd, args)
                             func = self.gscript_commands[cmd]
-                            
+
                             result = await func(**parsed)
-                            
+
                             if 'output_key' in parsed:
                                 last_output_key = parsed['output_key']
                                 produced_outputs.add(last_output_key)
@@ -1281,13 +1281,13 @@ class MediaProcessor:
                                 output_files.append(result[8:])
                             if result.startswith("Error"):
                                 raise RuntimeError(result)
-                                
+
                             i += 1
                         except Exception as e:
                             errors.append(await self._handle_error("command", e, f"in line: {line}"))
                             i += 1
                             continue
-                            
+
                 except Exception as e:
                     errors.append(await self._handle_error("processing", e, f"in line: {line}"))
                     i += 1
@@ -1298,11 +1298,11 @@ class MediaProcessor:
                     return [final_path]
 
             return errors if errors else output_files
-            
+
         except Exception as e:
             await self.cleanup()
             return [await self._handle_error("script execution", e)]
-    
+
     async def _load_media(self, **kwargs) -> str:
         try:
             if 'url' not in kwargs:
@@ -1313,7 +1313,7 @@ class MediaProcessor:
         except Exception as e:
             return await self._handle_error("load", e)
 
-    
+
     async def _load_media_impl(self, **kwargs) -> str:
         url = kwargs['url']
         media_key = kwargs['media_key']
@@ -1340,14 +1340,14 @@ class MediaProcessor:
 
             ext = downloaded_path.suffix[1:]
             final_temp_file = self._get_temp_path(ext)
-            
+
 
             shutil.move(str(downloaded_path), final_temp_file)
             downloaded_path.unlink(missing_ok=True)
 
             self.media_cache[media_key] = str(final_temp_file)
             return f"Loaded {media_key} via yt-dlp"
-        
+
         except Exception:
             try:
                 await self.ensure_session()
@@ -1365,10 +1365,10 @@ class MediaProcessor:
 
                     self.media_cache[media_key] = str(temp_file)
                     return f"Loaded {media_key}"
-            
+
             except Exception as http_error:
                 return f"Download error: {str(http_error)}"
-    
+
     async def _reverse_media(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -1378,7 +1378,7 @@ class MediaProcessor:
             return await self._reverse_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("reverse", e)
-    
+
     async def _reverse_media_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
         output_key = kwargs['output_key']
@@ -1409,13 +1409,13 @@ class MediaProcessor:
                 '-af', 'areverse',
                 '-y', output_file.as_posix()
             ]
-        
+
         success, error = await self._run_ffmpeg(cmd)
         if success:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def _concat_media(self, **kwargs) -> str:
         try:
             if 'input_keys' not in kwargs:
@@ -1425,18 +1425,18 @@ class MediaProcessor:
             return await self._concat_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("concat", e)
-    
+
     async def _concat_media_impl(self, **kwargs) -> str:
         input_keys = kwargs.get('input_keys')
         output_key = kwargs['output_key']
 
         if not input_keys or not isinstance(input_keys, list):
             return "Error: No input files specified"
-        
+
         missing = [k for k in input_keys if k not in self.media_cache]
         if missing:
             return f"Missing input keys: {', '.join(missing)}"
-        
+
         input_paths = [Path(self.media_cache[k]) for k in input_keys]
 
         is_video = lambda p: p.suffix.lower() in ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv')
@@ -1575,7 +1575,7 @@ class MediaProcessor:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def _render_media(self, **kwargs) -> str:
         try:
             if 'media_key' not in kwargs:
@@ -1583,14 +1583,14 @@ class MediaProcessor:
             return await self._render_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("render", e)
-    
+
     async def _render_media_impl(self, **kwargs) -> str:
         media_key = kwargs['media_key']
         extra_args = kwargs.get('extra_args', [])
         path = Path(self.media_cache[media_key])
         if not path.exists():
             return f"Error: File for {media_key} missing"
-        
+
         output_format = None
         output_filename = None
 
@@ -1599,7 +1599,7 @@ class MediaProcessor:
                 output_format = arg
             else:
                 output_filename = arg
-        
+
         if output_format:
             new_ext = {
                 'video/mp4': 'mp4',
@@ -1622,20 +1622,20 @@ class MediaProcessor:
                 'audio/x-ms-wma': 'wma',
                 'audio/x-matroska': 'mka'
             }.get(output_format, output_format.split('/')[-1] if '/' in output_format else output_format)
-        
+
             new_path = self._get_temp_path(new_ext)
             cmd = [
                 'ffmpeg', '-hide_banner',
                 '-i', path.as_posix(),
                 '-y', new_path.as_posix()
             ]
-            
+
             success, error = await self._run_ffmpeg(cmd)
             if not success:
                 return error
-            
+
             path = new_path
-        
+
         if output_filename:
             final_path = self._get_temp_path(path.suffix[1:])
             final_path = final_path.with_name(output_filename)
@@ -1643,11 +1643,11 @@ class MediaProcessor:
                 final_path = final_path.with_suffix(path.suffix)
             path.rename(final_path)
             path = final_path
-        
+
         self.media_cache[media_key] = str(path)
-        
+
         return f"media://{path.as_posix()}"
-    
+
     async def _convert_media(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -1667,12 +1667,12 @@ class MediaProcessor:
 
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
-        
+
         input_path = Path(self.media_cache[input_key])
         output_file = self._get_temp_path(output_format)
-        
+
         cmd = ['ffmpeg', '-hide_banner', '-i', input_path.as_posix()]
-        
+
 
         format_filters = {
             'gif': ['-vf', 'split[o],palettegen,[o]paletteuse'],
@@ -1681,20 +1681,20 @@ class MediaProcessor:
             'jpeg': ['-vframes', '1'],
             'webp': ['-vframes', '1']
         }
-        
+
         if output_format in format_filters:
             cmd.extend(format_filters[output_format])
-        
+
 
         cmd.extend(['-y', output_file.as_posix()])
-        
+
         success, error = await self._run_ffmpeg(cmd)
-        
+
         if success:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def _adjust_contrast(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -1706,7 +1706,7 @@ class MediaProcessor:
             return await self._adjust_contrast_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("contrast", e)
-    
+
     async def _adjust_contrast_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
         contrast_level = kwargs['contrast_level']
@@ -1732,7 +1732,7 @@ class MediaProcessor:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def _adjust_opacity(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -1749,7 +1749,7 @@ class MediaProcessor:
         input_key = kwargs['input_key']
         opacity_level = max(0.0, min(1.0, float(kwargs['opacity_level'])))
         output_key = kwargs['output_key']
-        
+
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
@@ -1762,7 +1762,7 @@ class MediaProcessor:
             '-vf', f'format=rgba,colorchannelmixer=aa={opacity_level}',
             '-y', output_file.as_posix()
         ]
-        
+
 
         if input_path.suffix.lower() in ('.jpg', '.jpeg'):
             output_file = output_file.with_suffix('.png')
@@ -1773,7 +1773,7 @@ class MediaProcessor:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def _adjust_saturation(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -1790,7 +1790,7 @@ class MediaProcessor:
         input_key = kwargs['input_key']
         saturation_level = kwargs['saturation_level']
         output_key = kwargs['output_key']
-        
+
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
@@ -1803,13 +1803,13 @@ class MediaProcessor:
             '-vf', f'eq=saturation={saturation_level}',
             '-y', output_file.as_posix()
         ]
-        
+
         success, error = await self._run_ffmpeg(cmd)
         if success:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def _adjust_hue(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -1826,7 +1826,7 @@ class MediaProcessor:
         input_key = kwargs['input_key']
         hue_shift = kwargs['hue_shift']
         output_key = kwargs['output_key']
-        
+
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
@@ -1839,13 +1839,13 @@ class MediaProcessor:
             '-vf', f'hue=h={hue_shift}',
             '-y', output_file.as_posix()
         ]
-        
+
         success, error = await self._run_ffmpeg(cmd)
         if success:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def _adjust_brightness(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -1862,7 +1862,7 @@ class MediaProcessor:
         input_key = kwargs['input_key']
         brightness_level = kwargs['brightness_level']
         output_key = kwargs['output_key']
-        
+
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
@@ -1875,13 +1875,13 @@ class MediaProcessor:
             '-vf', f'eq=brightness={brightness_level}',
             '-y', output_file.as_posix()
         ]
-        
+
         success, error = await self._run_ffmpeg(cmd)
         if success:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def _adjust_gamma(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -1898,7 +1898,7 @@ class MediaProcessor:
         input_key = kwargs['input_key']
         gamma_level = kwargs['gamma_level']
         output_key = kwargs['output_key']
-        
+
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
@@ -1911,13 +1911,13 @@ class MediaProcessor:
             '-vf', f'eq=gamma={gamma_level}',
             '-y', output_file.as_posix()
         ]
-        
+
         success, error = await self._run_ffmpeg(cmd)
         if success:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def _clone_media(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -1931,19 +1931,19 @@ class MediaProcessor:
     async def _clone_media_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
         output_key = kwargs['output_key']
-        
+
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
         input_path = Path(self.media_cache[input_key])
         output_file = self._get_temp_path(input_path.suffix[1:])
-        
+
 
         shutil.copy(input_path, output_file)
-        
+
         self.media_cache[output_key] = str(output_file)
         return f"media://{output_file.as_posix()}"
-    
+
     async def _change_fps(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -1960,7 +1960,7 @@ class MediaProcessor:
         input_key = kwargs['input_key']
         fps_value = kwargs['fps_value']
         output_key = kwargs['output_key']
-        
+
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
@@ -1973,7 +1973,7 @@ class MediaProcessor:
             '-vf', f'fps={fps_value}',
             '-y', output_file.as_posix()
         ]
-        
+
         success, error = await self._run_ffmpeg(cmd)
         if success:
             self.media_cache[output_key] = str(output_file)
@@ -1993,7 +1993,7 @@ class MediaProcessor:
     async def _apply_grayscale_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
         output_key = kwargs['output_key']
-        
+
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
@@ -2006,7 +2006,7 @@ class MediaProcessor:
             '-vf', 'format=gray',
             '-y', output_file.as_posix()
         ]
-        
+
         success, error = await self._run_ffmpeg(cmd)
         if success:
             self.media_cache[output_key] = str(output_file)
@@ -2026,7 +2026,7 @@ class MediaProcessor:
     async def _apply_sepia_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
         output_key = kwargs['output_key']
-        
+
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
@@ -2039,13 +2039,13 @@ class MediaProcessor:
             '-vf', 'colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131',
             '-y', output_file.as_posix()
         ]
-        
+
         success, error = await self._run_ffmpeg(cmd)
         if success:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def _invert_media(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -2059,7 +2059,7 @@ class MediaProcessor:
     async def _invert_media_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
         output_key = kwargs['output_key']
-        
+
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
@@ -2072,13 +2072,13 @@ class MediaProcessor:
             '-vf', 'negate',
             '-y', output_file.as_posix()
         ]
-        
+
         success, error = await self._run_ffmpeg(cmd)
         if success:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def _resize_media(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -2092,7 +2092,7 @@ class MediaProcessor:
             return await self._resize_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("resize", e)
-    
+
     async def _resize_media_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
         width_expr = kwargs.get('width', 0)
@@ -2109,7 +2109,7 @@ class MediaProcessor:
         if suffix not in allowed_suffixes:
             return f"Error: {input_key} is not a video or image file."
         output_file = self._get_temp_path(input_path.suffix[1:])
-        
+
         width = await self._resolve_dimension(width_expr, input_key)
         height = await self._resolve_dimension(height_expr, input_key)
 
@@ -2124,7 +2124,7 @@ class MediaProcessor:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def _crop_media(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -2142,7 +2142,7 @@ class MediaProcessor:
             return await self._crop_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("crop", e)
-    
+
     async def _crop_media_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
         x = kwargs['x']
@@ -2171,7 +2171,7 @@ class MediaProcessor:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def _rotate_media(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -2183,7 +2183,7 @@ class MediaProcessor:
             return await self._rotate_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("rotate", e)
-    
+
     async def _rotate_media_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
         angle = kwargs['angle']
@@ -2209,8 +2209,8 @@ class MediaProcessor:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
-    
+
+
     async def _trim_media(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -2224,7 +2224,7 @@ class MediaProcessor:
             return await self._trim_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("trim", e)
-    
+
     async def _trim_media_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
         start_time = await self._resolve_timestamp(kwargs['input_key'], kwargs['start_time'])
@@ -2248,7 +2248,7 @@ class MediaProcessor:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def _change_speed(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -2260,7 +2260,7 @@ class MediaProcessor:
             return await self._change_speed_impl(**kwargs)
         except ValueError as e:
             return f"Speed error: {str(e)}"
-    
+
     async def _change_speed_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
         speed = kwargs['speed']
@@ -2303,7 +2303,7 @@ class MediaProcessor:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def _adjust_volume(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -2315,7 +2315,7 @@ class MediaProcessor:
             return await self._adjust_volume_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("volume", e)
-    
+
     async def _adjust_volume_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
         volume_level = kwargs['volume_level']
@@ -2341,7 +2341,7 @@ class MediaProcessor:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def _overlay_media(self, **kwargs) -> str:
         try:
             if 'base_key' not in kwargs:
@@ -2357,7 +2357,7 @@ class MediaProcessor:
             return await self._overlay_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("overlay", e)
-    
+
     async def _overlay_media_impl(self, **kwargs) -> str:
         base_key = kwargs['base_key']
         overlay_key = kwargs['overlay_key']
@@ -2486,7 +2486,7 @@ class MediaProcessor:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def load_font(self, font_name: str, font_size: int) -> ImageFont.FreeTypeFont:
             try:
                 font = await asyncio.to_thread(ImageFont.truetype, font=font_name, size=font_size)
@@ -2514,6 +2514,8 @@ class MediaProcessor:
                 f"/Library/Fonts/{font_name}.otf",
                 f"/usr/share/fonts/truetype/{font_name.replace(' ', '')}.ttf",
                 f"/usr/local/share/fonts/{font_name.replace(' ', '')}.ttf",
+                f"/usr/share/fonts/custom{font_name.replace(' ', '')}.ttf",
+                f"/usr/share/fonts/custom{font_name.replace(' ', '')}.otf"
             ]
             for path in system_paths:
                 try:
@@ -2523,7 +2525,7 @@ class MediaProcessor:
                     pass
 
             return await asyncio.to_thread(ImageFont.load_default)
-    
+
     async def _text(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -2535,14 +2537,14 @@ class MediaProcessor:
             return await self._text_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("text", e)
-        
+
     async def _text_impl(self, **kwargs) -> str:
         def get_text_size(font, text):
             bbox = font.getbbox(text)
             width = bbox[2] - bbox[0]
             height = bbox[3] - bbox[1]
             return width, height
-        
+
         async def download_twemoji(emoji_unicode):
             try:
                 codepoints = []
@@ -2550,13 +2552,13 @@ class MediaProcessor:
                     if 0xFE00 <= ord(c) <= 0xFE0F or 0x1F3FB <= ord(c) <= 0x1F3FF:
                         continue
                     codepoints.append(f"{ord(c):x}")
-                
+
                 if not codepoints:
                     return None
-                    
+
                 codepoint = '-'.join(codepoints)
                 url = f"https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/72x72/{codepoint}.png"
-                
+
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url) as resp:
                         if resp.status == 200:
@@ -2681,7 +2683,7 @@ class MediaProcessor:
 
                 shadow_img = await asyncio.to_thread(Image.new, 'RGBA', base_img.size, (0,0,0,0))
                 shadow_color_parsed = await asyncio.to_thread(self._parse_color, shadow_color, base_img.size)
-                
+
                 if isinstance(shadow_color_parsed, tuple):
                     await asyncio.to_thread(shadow_img.paste, shadow_color_parsed, (0, 0), mask=shadow_layer)
                 else:
@@ -2709,7 +2711,7 @@ class MediaProcessor:
 
                 outline_img = await asyncio.to_thread(Image.new, 'RGBA', base_img.size, (0,0,0,0))
                 outline_color_parsed = await asyncio.to_thread(self._parse_color, outline_color, base_img.size)
-                
+
                 if isinstance(outline_color_parsed, tuple):
                     await asyncio.to_thread(outline_img.paste, outline_color_parsed, (0, 0), mask=outline_layer)
                 else:
@@ -2725,7 +2727,7 @@ class MediaProcessor:
 
             gradient_img = await asyncio.to_thread(self._parse_color, color, (bbox[2]-bbox[0], bbox[3]-bbox[1]))
             result = await asyncio.to_thread(base_img.copy)
-            
+
             if isinstance(gradient_img, Image.Image):
                 gradient_layer = await asyncio.to_thread(Image.new, 'RGBA', base_img.size, (0,0,0,0))
                 gradient_crop = await asyncio.to_thread(gradient_img.crop, (0, 0, bbox[2]-bbox[0], bbox[3]-bbox[1]))
@@ -2754,7 +2756,7 @@ class MediaProcessor:
             return await self._apply_caption_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("caption", e)
-    
+
     async def _apply_caption_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
         text = kwargs['text']
@@ -2786,7 +2788,7 @@ class MediaProcessor:
         width, height, _, _ = await self._probe_media_info(input_path)
         if width == 0 or height == 0:
             return "Error: could not determine input media dimensions"
-        
+
         if auto_font_size or auto_padding or auto_wrap_width:
             base_font_scale = 0.07
             reference_dimension = min(width, height)
@@ -2915,7 +2917,7 @@ class MediaProcessor:
             return await self._replace_audio_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("audioputreplace", e)
-    
+
     async def _replace_audio_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
         audio_key = kwargs['audio_key']
@@ -2942,12 +2944,12 @@ class MediaProcessor:
             if loop_media:
                 cmd.extend(['-stream_loop', '-1'])
             cmd.extend(['-i', media_path.as_posix()])
-        
+
         cmd.extend(['-i', audio_path.as_posix()])
 
         if is_image or force_video or is_video:
             cmd.extend([
-                '-filter_complex', 
+                '-filter_complex',
                 '[0:v]scale=ceil(iw/2)*2:ceil(ih/2)*2[v]',
                 '-map', '[v]',
                 '-map', '1:a:0',
@@ -2979,7 +2981,7 @@ class MediaProcessor:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def _mix_audio(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -2991,7 +2993,7 @@ class MediaProcessor:
             return await self._mix_audio_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("audioputmix", e)
-    
+
     async def _mix_audio_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
         audio_key = kwargs['audio_key']
@@ -3000,7 +3002,7 @@ class MediaProcessor:
         loop_audio = kwargs['loop_audio']
         preserve_length = kwargs['preserve_length']
         loop_media = kwargs['loop_media']
-        
+
         if input_key not in self.media_cache or audio_key not in self.media_cache:
             return "Error: Missing input media"
 
@@ -3052,7 +3054,7 @@ class MediaProcessor:
 
         cmd.extend([
             '-filter_complex', filter_complex_str,
-            *(['-c:v', 'libx264', '-pix_fmt', 'yuv420p'] if is_image else 
+            *(['-c:v', 'libx264', '-pix_fmt', 'yuv420p'] if is_image else
             ['-c:v', 'copy'] if not is_audio else []),
             '-map', '0:v:0' if not is_audio else None,
             '-map', '[a]',
@@ -3068,7 +3070,7 @@ class MediaProcessor:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def _tremolo(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -3078,7 +3080,7 @@ class MediaProcessor:
             return await self._tremolo_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("tremolo", e)
-    
+
     async def _tremolo_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
         frequency = kwargs['frequency']
@@ -3102,7 +3104,7 @@ class MediaProcessor:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def _vibrato(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -3112,7 +3114,7 @@ class MediaProcessor:
             return await self._vibrato_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("vibrato", e)
-    
+
     async def _vibrato_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
         frequency = kwargs['frequency']
@@ -3136,7 +3138,7 @@ class MediaProcessor:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def _create_image(self, **kwargs) -> str:
         try:
             if 'media_key' not in kwargs:
@@ -3148,7 +3150,7 @@ class MediaProcessor:
             return await self._create_image_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("create", e)
-    
+
     async def _create_image_impl(self, **kwargs) -> str:
         try:
             width = await self._resolve_dimension(kwargs['width'])
@@ -3167,7 +3169,7 @@ class MediaProcessor:
             return f"media://{output_file.as_posix()}"
         except Exception as e:
            return f"Create error: {str(e)}"
-    
+
     async def _fadein_media(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -3177,7 +3179,7 @@ class MediaProcessor:
             return await self._fadein_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("fadein", e)
-    
+
     async def _fadein_media_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
         duration = float(kwargs['duration'])
@@ -3213,7 +3215,7 @@ class MediaProcessor:
                 f"[0:v]format=yuva420p,fade=t=in:st=0:d={duration}:alpha=1[fg];",
                 f"[1:v][fg]overlay=format=auto,pad=width=ceil(iw/2)*2:height=ceil(ih/2)*2[v]"
             ]
-            
+
         if has_audio:
             if audio_fade:
                 filter_parts.append(f";[0:a]afade=t=in:st=0:d={duration}[a]")
@@ -3249,7 +3251,7 @@ class MediaProcessor:
             return f"media://{output_file.as_posix()}"
         else:
             return error
-    
+
     async def _fadeout_media(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -3259,7 +3261,7 @@ class MediaProcessor:
             return await self._fadeout_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("fadeout", e)
-    
+
     async def _fadeout_media_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
         duration = float(kwargs['duration'])
@@ -3294,7 +3296,7 @@ class MediaProcessor:
             f"[0:v]format=yuva420p,fade=t=out:st={start_time}:d={duration}:alpha=1[fg];",
             f"[1:v][fg]overlay=format=auto,pad=width=ceil(iw/2)*2:height=ceil(ih/2)*2[v]"
         ]
-        
+
 
         if has_audio:
             if audio_fade:
@@ -3330,7 +3332,7 @@ class MediaProcessor:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def _colorkey(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -3340,7 +3342,7 @@ class MediaProcessor:
             return await self._colorkey_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("colorkey", e)
-    
+
     async def _colorkey_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
         color = kwargs['color']
@@ -3350,7 +3352,7 @@ class MediaProcessor:
 
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
-        
+
         input_path = Path(self.media_cache[input_key])
         output_file = self._get_temp_path(input_path.suffix[1:])
 
@@ -3366,7 +3368,7 @@ class MediaProcessor:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def _chromakey(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -3376,7 +3378,7 @@ class MediaProcessor:
             return await self._chromakey_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("chromakey", e)
-    
+
     async def _chromakey_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
         color = kwargs['color']
@@ -3386,7 +3388,7 @@ class MediaProcessor:
 
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
-        
+
         input_path = Path(self.media_cache[input_key])
         output_file = self._get_temp_path(input_path.suffix[1:])
 
@@ -3402,7 +3404,7 @@ class MediaProcessor:
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
         return error
-    
+
     async def _dobetween_media(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -3416,7 +3418,7 @@ class MediaProcessor:
             return await self._dobetween_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("dobetween", e)
-    
+
     async def _dobetween_media_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
         start_time = kwargs['start_time']
@@ -3424,7 +3426,7 @@ class MediaProcessor:
         output_key = kwargs['output_key']
         segment_key = kwargs.get('segment_key', 'segment')
         sub_script = kwargs.get('sub_script', '')
-        
+
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
@@ -3459,7 +3461,7 @@ class MediaProcessor:
                 output_key=after_key
             )
         ]
-        
+
         results = await asyncio.gather(*trim_tasks)
         if any(r.startswith("Error") for r in results):
             return f"Trim error(s): {results}"
@@ -3500,9 +3502,9 @@ class MediaProcessor:
             input_keys=[before_key, segment_to_use, after_key],
             output_key=output_key
         )
-        
+
         return concat_result
-    
+
     async def _setframecount(self, **kwargs) -> str:
         try:
             if 'input_key' not in kwargs:
@@ -3514,7 +3516,7 @@ class MediaProcessor:
             return await self._setframecount_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("setframecount", e)
-    
+
     async def _setframecount_impl(self, **kwargs) -> str:
         input_key = kwargs['input_key']
         output_key = kwargs['output_key']
@@ -3524,10 +3526,10 @@ class MediaProcessor:
                 return "Error: frame_count must be a positive integer"
         except (ValueError, TypeError):
             return "Error: frame_count must be a valid integer"
-        
+
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
-        
+
         input_path = Path(self.media_cache[input_key])
         suffix = input_path.suffix.lower()
         output_file = self._get_temp_path(suffix[1:])
@@ -3554,7 +3556,7 @@ class MediaProcessor:
                 self.media_cache[output_key] = str(output_file)
                 return f"media://{output_file.as_posix()}"
             return error
-        
+
         if is_image and target_count == 1:
             output_file = self._get_temp_path(suffix[1:])
             cmd = [
@@ -3568,7 +3570,7 @@ class MediaProcessor:
                 self.media_cache[output_key] = str(output_file)
                 return f"media://{output_file.as_posix()}"
             return error
-        
+
         if is_gif:
             cmd = [
                 'ffmpeg', '-hide_banner',
@@ -3581,7 +3583,7 @@ class MediaProcessor:
                 self.media_cache[output_key] = str(output_file)
                 return f"media://{output_file.as_posix()}"
             return error
-        
+
         if is_audio:
             target_duration = target_count / 30.0
             cmd = [
@@ -3595,7 +3597,7 @@ class MediaProcessor:
                 self.media_cache[output_key] = str(output_file)
                 return f"media://{output_file.as_posix()}"
             return error
-        
+
         if is_video:
             duration = target_count / 30.0
             cmd = [
@@ -3616,7 +3618,7 @@ class TagFormatter:
     def __init__(self):
         self.functions: Dict[str, Callable] = {}
         self._component_tags = {'embed', 'button', 'select'}
-    
+
     def register(self, name: str):
         def decorator(func: Callable):
             if any(comp in func.__name__ for comp in self._component_tags):
@@ -3624,18 +3626,18 @@ class TagFormatter:
             self.functions[name] = func
             return func
         return decorator
-    
+
     async def format(self, content: str, ctx: commands.Context, **kwargs) -> tuple[str, list[discord.Embed], discord.ui.View | discord.ui.LayoutView | None, list[discord.File]]:
         text_parts = []
         embeds = []
         view = None
         files = []
-        
+
         for chunk in self._split_chunks(content):
             if chunk.startswith('{') and chunk.endswith('}'):
                 result = await self._process_tag(chunk, ctx, **kwargs)
                 text, new_embeds, new_view, new_files = self._normalize_result(result)
-                
+
                 text_parts.append(str(text))
                 embeds.extend(new_embeds)
                 if new_view:
@@ -3653,14 +3655,14 @@ class TagFormatter:
                 files.extend(new_files)
             else:
                 text_parts.append(chunk)
-        
+
         return ''.join(text_parts), embeds, view if view and view.children else None, files
 
     async def _process_tag(self, tag: str, ctx: commands.Context, **kwargs):
         inner = tag[1:-1].strip()
         parts = inner.split(':', 1)
         name = parts[0].strip()
-            
+
         if name not in self.functions:
             return tag
 
@@ -3670,19 +3672,19 @@ class TagFormatter:
 
             if name in ('note', 'comment'):
                 return await func(ctx, args, **kwargs)
-            
+
             if name == 'ignore':
                 return await func(ctx, args, **kwargs)
-                
+
 
             if name in self._component_tags:
                 result = func(ctx, args, **kwargs)
             else:
                 arg_text, _, _, _ = await self.format(args, ctx, **kwargs)
                 result = func(ctx, arg_text.strip(), **kwargs)
-                
+
             return await result if asyncio.iscoroutine(result) else result
-                
+
         except Exception as e:
             return f"[Tag Error: {str(e)}]"
     @staticmethod
@@ -3728,13 +3730,13 @@ class TagFormatter:
         if pos < len(content):
             chunks.append(content[pos:])
         return chunks
-    
+
     async def resolve_user(self, ctx, input_str: str) -> Union[discord.User, discord.Member]:
         input_str = input_str.strip()
 
         if not input_str:
             return ctx.author
-        
+
         try:
             user_id = int(input_str.strip('<@!>'))
             user = await ctx.bot.fetch_user(user_id)
@@ -3749,7 +3751,7 @@ class TagFormatter:
             )
             if member:
                 return member
-        
+
         return ctx.author
 
 class Tags(commands.Cog):
@@ -3762,7 +3764,7 @@ class Tags(commands.Cog):
         self.setup_formatters()
         self.setup_media_formatters()
         self.active_processes = set()
-    
+
     async def execute_language(self, ctx, language: str, code: str, **kwargs):
         await self.processor.ensure_session()
         url = f"http://localhost:8000/{language}/execute"
@@ -3790,12 +3792,12 @@ class Tags(commands.Cog):
                     return f"[{language} error: HTTP {response.status}]"
                 result = await response.json()
 
-            
+
                 output = result.get("output", "").replace("\r\n", "\n").strip()
                 if result.get("error") or "error" in output.lower():
                     return f"[{language} error: {output or 'Code execution failed with no output'}]"
 
-            
+
                 if result.get("files"):
                     file_objs = []
                     for filename in result["files"][:10]:
@@ -3815,9 +3817,9 @@ class Tags(commands.Cog):
         except Exception as e:
             return f"[{language} exception: {str(e)}]"
 
-        
 
-    
+
+
     def setup_media_formatters(self):
         @self.formatter.register('gmanscript')
         @self.formatter.register('gscript')
@@ -3877,7 +3879,7 @@ class Tags(commands.Cog):
                         if len(ffmpeg_errors) > 5:
                             error_msg += f"\n...and {len(ffmpeg_errors)-5} more errors."
                         return (error_msg, [], None, [])
-                    
+
                     files = []
                     for path in results:
                         if isinstance(path, str) and os.path.isfile(path):
@@ -3889,14 +3891,14 @@ class Tags(commands.Cog):
                                 os.remove(path)
                             except Exception as e:
                                 continue
-                    
+
                     if files:
                         return ("", [], None, files[:10])
-                    
+
                     other_results = [r for r in results if isinstance(r, str) and not r.startswith("media://")]
                     if other_results:
                         return ("\n".join(other_results[:5]), [], None, [])
-                    
+
                     return ("GScript executed but produced no output or files.", [], None, [])
 
                 elif isinstance(results, str):
@@ -3910,7 +3912,7 @@ class Tags(commands.Cog):
             finally:
                 await self.processor.cleanup()
 
-    
+
     def setup_formatters(self):
         @self.formatter.register('eval')
         async def _eval(ctx, val, **kwargs):
@@ -3920,7 +3922,7 @@ class Tags(commands.Cog):
                 * Example: `{eval:Hello {user}!}`
             """
             return await self.process_tags(ctx, val, kwargs.get('args', ''))
-        
+
         @self.formatter.register('ignore')
         async def _ignore(ctx, text, **kwargs):
             """
@@ -3929,7 +3931,7 @@ class Tags(commands.Cog):
                 * Example: `{ignore:{user}}` -> "{user}"
             """
             return text.replace('{', '\\{').replace('}', '\\}')
-        
+
         @self.formatter.register('note')
         @self.formatter.register('comment')
         async def _note(ctx, text, **kwargs):
@@ -3939,7 +3941,7 @@ class Tags(commands.Cog):
                 * Example: `Hello {note:This is a comment}world` -> "Hello world"
             """
             return ""
-        
+
         @self.formatter.register('text')
         async def _fetch_text(ctx, url, **kwargs):
             """
@@ -3956,7 +3958,7 @@ class Tags(commands.Cog):
                         return content
             except Exception as e:
                 return f"[text error: {str(e)}]"
-        
+
         @self.formatter.register('attachtext')
         async def _attach_text(ctx, text, **kwargs):
             """
@@ -3966,14 +3968,14 @@ class Tags(commands.Cog):
             """
             try:
                 buffer = BytesIO(text.encode('utf-8'))
-                
+
                 file = discord.File(buffer, filename="attachment.txt")
 
                 return ("", [], None, [file])
-            
+
             except Exception as e:
                 return f"[attachtext error: {str(e)}", [], None, []
-        
+
         @self.formatter.register('ai')
         async def _ai(ctx, prompt, **kwargs):
             """
@@ -3986,10 +3988,10 @@ class Tags(commands.Cog):
                 ai = ctx.bot.get_cog('AI')
                 if not ai:
                     return "[AI error: AI cog not loaded]"
-                
+
                 class AIContext:
                     __slots__ = ('bot', 'author', 'guild', 'channel', 'message', '_state')
-                    
+
                     def __init__(self, original_ctx):
                         self.bot = original_ctx.bot
                         self.author = original_ctx.author
@@ -3997,30 +3999,30 @@ class Tags(commands.Cog):
                         self.channel = original_ctx.channel
                         self.message = original_ctx.message
                         self._state = original_ctx._state
-                        
+
                     async def typing(self):
                         pass
-                        
+
                     async def reply(self, content, **kwargs):
                         return content
-                        
+
                     async def send(self, content, **kwargs):
                         return content
 
                 fake_ctx = AIContext(ctx)
-                
+
                 messages = [{
-                    "role": "system", 
+                    "role": "system",
                     "content": await ai.create_system_prompt(fake_ctx, prompt)
                 }]
-                
+
 
                 conv_key = (fake_ctx.guild.id, fake_ctx.channel.id, fake_ctx.author.id) if fake_ctx.guild else (fake_ctx.author.id, fake_ctx.channel.id)
                 history = await ai.get_conversation_history(conv_key)
-                
+
                 if history:
                     messages.extend(history[-MAX_CONVERSATION_HISTORY_LENGTH:])
-                
+
                 messages.append({"role": "user", "content": prompt})
 
                 content = await ai.get_ai_response(messages)
@@ -4032,12 +4034,12 @@ class Tags(commands.Cog):
                     {"role": "assistant", "content": content}
                 ]
                 await ai.save_conversation_history(conv_key, new_history)
-                
+
                 return final_content
-                
+
             except Exception as e:
                 return f"[AI error: {str(e)}]"
-        
+
         @self.formatter.register('translate')
         async def _translate(ctx, val, **kwargs):
             """
@@ -4079,7 +4081,7 @@ class Tags(commands.Cog):
                 * Example: `{args}`
             """
             return kwargs.get('args', '')
-            
+
         @self.formatter.register('arg')
         async def arg(ctx, i, **kwargs):
             """
@@ -4094,11 +4096,11 @@ class Tags(commands.Cog):
                 index = int(str(i).strip())
             except ValueError:
                 return f"[arg error: invalid index `{i}`]"
-            
+
             if 0 <= index < len(args_list):
                 return args_list[index]
             return ''
-            
+
         @self.formatter.register('rest')
         def rest(ctx, i, **kwargs):
             """
@@ -4108,7 +4110,7 @@ class Tags(commands.Cog):
             """
             split_args = kwargs.get('args', '').split()
             return ' '.join(split_args[int(i):]) if i.isdigit() else ''
-            
+
         @self.formatter.register('default')
         def default(ctx, val, fb, **kwargs):
             """
@@ -4119,7 +4121,7 @@ class Tags(commands.Cog):
             val_str = str(val) if val is not None else ""
             fb_str = str(fb) if fb is not None else ""
             return val_str if val_str else fb_str
-        
+
         @self.formatter.register('newline')
         def _newline(ctx, _, **kwargs):
             """
@@ -4129,7 +4131,7 @@ class Tags(commands.Cog):
                 * Can be useful inside slash commands.
             """
             return '\n'
-        
+
         @self.formatter.register('jsonify')
         def _jsonify(ctx, text, **kwargs):
             """
@@ -4143,7 +4145,7 @@ class Tags(commands.Cog):
                 return json.dumps(processed_text)
             except Exception as e:
                 return f"[JSON Error: {str(e)}]"
-        
+
         @self.formatter.register('traversejson')
         def _traversejson(ctx, val, **kwargs):
             """
@@ -4244,7 +4246,7 @@ class Tags(commands.Cog):
 
             except Exception as e:
                 return f'[JSON traverse error: {str(e)}]'
-        
+
         @self.formatter.register('repeat')
         def _repeat(ctx, val, **kwargs):
             """
@@ -4258,17 +4260,17 @@ class Tags(commands.Cog):
                 parts = str(val).split('|', 1)
                 if len(parts) < 2:
                     return str(val)
-                
+
                 count_str, text = parts[0].strip(), parts[1]
                 repeat_count = int(count_str)
-                
+
                 if repeat_count < 0:
                     repeat_count = 0
-                    
+
                 return text * repeat_count
             except ValueError:
                 return text
-        
+
         @self.formatter.register('join')
         async def _join(ctx, val, **kwargs):
             """
@@ -4281,7 +4283,7 @@ class Tags(commands.Cog):
                 return delim.join(json.loads(arr))
             except Exception as e:
                 return f"[join error: {str(e)}]"
-        
+
         @self.formatter.register('split')
         async def _split(ctx, val, **kwargs):
             """
@@ -4295,14 +4297,14 @@ class Tags(commands.Cog):
             try:
                 if not val:
                     return json.dumps([])
-                    
+
 
                 parts = val.split('|', 1)
                 if len(parts) < 2:
                     return "[split error: missing text to split]"
-                    
+
                 delim_spec, text = parts
-                
+
 
                 if delim_spec.lower() == "space":
                     delim = " "
@@ -4310,16 +4312,16 @@ class Tags(commands.Cog):
                     return json.dumps(re.split(r'\s+', text.strip()))
                 else:
                     delim = delim_spec.replace("\\n", "\n").replace("\\t", "\t")
-                
+
 
                 if delim == "" and " " in val:
                     delim = " "
-                    
+
                 return json.dumps([s.strip() for s in text.split(delim) if s.strip()])
-            
+
             except Exception as e:
                 return f"[split error: {str(e)}]"
-        
+
         @self.formatter.register('trim')
         @self.formatter.register('strip')
         async def _trim(ctx, val, **kwargs):
@@ -4329,7 +4331,7 @@ class Tags(commands.Cog):
                 * Example: `{trim:  test  }` -> "test"
             """
             return val.strip()
-        
+
         @self.formatter.register('substring')
         async def _substring(ctx, args_str, **kwargs):
             """
@@ -4344,13 +4346,13 @@ class Tags(commands.Cog):
                     parts = [p.strip() for p in processed_input.split('|') if p.strip()]
                 else:
                     parts = [p.strip() for p in processed_input.split(':', 2) if p.strip()]
-                
+
                 if len(parts) < 2:
                     return "[error: substring requires atleast text and start position]"
-                
+
                 text = parts[0]
                 length = len(text)
-                
+
                 try:
                     start = int(parts[1])
                     if start < 0:
@@ -4358,7 +4360,7 @@ class Tags(commands.Cog):
                     start = min(start, length)
                 except ValueError:
                     return f"[error: invalid start position `{parts[1]}`]"
-                
+
                 end = length
                 step = 1
 
@@ -4370,7 +4372,7 @@ class Tags(commands.Cog):
                         end = min(max(end, 0), length)
                     except ValueError:
                         return f"[error: invalid end position `{parts[2]}`]"
-                
+
                 if len(parts) >= 4 and [parts[3]]:
                     try:
                         step = int(parts[3])
@@ -4378,14 +4380,14 @@ class Tags(commands.Cog):
                             return "[error: step cannot be zero]"
                     except ValueError:
                         return f"[error: invalid step position `{parts[3]}]"
-                
+
                 start = min(max(start, 0), length)
                 end = min(max(end, 0), length)
 
                 return text[start:end:step]
             except Exception as e:
                 return f"[substring error: {str(e)}]"
-        
+
         @self.formatter.register('replace')
         async def _replace(ctx, args_str, **kwargs):
             """
@@ -4399,23 +4401,23 @@ class Tags(commands.Cog):
             """
             try:
                 processed_input = str(args_str)
-                
+
                 if '|' in processed_input:
                     parts = [p.strip() for p in processed_input.split('|')]
                 else:
                     parts = [p.strip() for p in processed_input.split(':')]
-                
+
                 if len(parts) < 3:
                     return processed_input
-                
+
                 text = parts[0]
                 find = parts[1]
                 replace = parts[2]
                 flags = parts[3].lower() if len(parts) > 3 else ''
-                
+
                 if not find:
                     return text
-                
+
                 if 'c' in flags:
                     if 'r' in flags:
                         re_flags = re.IGNORECASE if 'i' in flags else 0
@@ -4447,7 +4449,7 @@ class Tags(commands.Cog):
                             count += 1
                             start = idx + len(find)
                         return str(count)
-                
+
                 if 'r' in flags:
                     re_flags = re.IGNORECASE if 'i' in flags else 0
                     if 'w' in flags:
@@ -4458,7 +4460,7 @@ class Tags(commands.Cog):
                         return pattern.sub(replace, text, count=count)
                     except re.error:
                         return text
-                
+
                 if 'w' in flags:
                     words = text.split()
                     replaced = []
@@ -4473,7 +4475,7 @@ class Tags(commands.Cog):
                         else:
                             replaced.append(word)
                     return ' '.join(replaced)
-                
+
                 if 'i' in flags:
                     find_lower = find.lower()
                     text_lower = text.lower()
@@ -4491,7 +4493,7 @@ class Tags(commands.Cog):
                         return result
                     else:
                         return text[:idx] + replace + text[idx + len(find):]
-                
+
                 if 'g' in flags:
                     return text.replace(find, replace)
                 else:
@@ -4499,7 +4501,7 @@ class Tags(commands.Cog):
 
             except Exception:
                 return args_str
-            
+
 
         @self.formatter.register('timestamp')
         async def _timestamp(ctx, val, **kwargs):
@@ -4553,7 +4555,7 @@ class Tags(commands.Cog):
 
             except Exception as e:
                 return f"[timestamp error: {str(e)}]"
-        
+
         @self.formatter.register('duration')
         async def _duration(ctx, val, **kwargs):
             """
@@ -4587,7 +4589,7 @@ class Tags(commands.Cog):
                     match = re.match(r'now([+-])(\d+)([hmsd])', time_str.lower())
                     if not match:
                         return None
-                    
+
                     sign, num, unit = match.groups()
                     delta = timedelta(**{
                         'h': {'hours': int(num)},
@@ -4602,7 +4604,7 @@ class Tags(commands.Cog):
                         relative = parse_relative(time_str)
                         if relative:
                             return relative
-                    
+
 
                     if time_str.lower() == "now":
                         return datetime.now(ZoneInfo("UTC"))
@@ -4690,7 +4692,7 @@ class Tags(commands.Cog):
 
             except Exception as e:
                 return f"[duration error: {str(e)}]"
-        
+
         @self.formatter.register('businessdays')
         async def _businessdays(ctx, val, **kwargs):
             """
@@ -4703,7 +4705,7 @@ class Tags(commands.Cog):
                 parts = val.split('|', 2)
                 if len(parts) < 2:
                     return "[businessdays error: need start and end dates]"
-                    
+
                 start_str, end_str = parts[0].strip(), parts[1].strip()
                 holidays = json.loads(parts[2].replace('""', '"')) if len(parts) > 2 else []
 
@@ -4720,7 +4722,7 @@ class Tags(commands.Cog):
 
                 start_date = parse_date(start_str)
                 end_date = parse_date(end_str)
-                
+
                 if start_date > end_date:
                     start_date, end_date = end_date, start_date
 
@@ -4734,12 +4736,12 @@ class Tags(commands.Cog):
                         business_days += 1
 
                 return str(business_days)
-                
+
             except json.JSONDecodeError:
                 return "[businessdays error: invalid holidays format]"
             except Exception as e:
                 return f"[businessdays error: {str(e)}]"
-        
+
         @self.formatter.register('parsetime')
         async def _parsetime(ctx, val, **kwargs):
             """
@@ -4755,7 +4757,7 @@ class Tags(commands.Cog):
 
 
                 now = datetime.now(ZoneInfo(tz))
-                
+
 
                 settings = {
                     'TIMEZONE': tz,
@@ -4788,14 +4790,14 @@ class Tags(commands.Cog):
 
             except Exception as e:
                 return f"[parsetime error: {str(e)}]"
-        
-        
+
+
         @self.formatter.register('jsonpretty')
         async def _jsonpretty(ctx, val, **kwargs):
             """
                 ### {jsonpretty:json}
                     * Formats JSON with indentation.
-                    * Example: `{jsonpretty:{"a":1}}` -> 
+                    * Example: `{jsonpretty:{"a":1}}` ->
                 {
                     "a": 1
                 }
@@ -4805,7 +4807,7 @@ class Tags(commands.Cog):
                 return json.dumps(data, indent=2)
             except Exception as e:
                 return f"[jsonpretty error: {str(e)}]"
-        
+
         @self.formatter.register('jsonschema')
         async def _jsonschema(ctx, val, **kwargs):
             """
@@ -4818,18 +4820,18 @@ class Tags(commands.Cog):
                 parts = str(val).split("|", 1)
                 if len(parts) < 2:
                     return "[jsonschema error: missing json or schema]"
-                    
+
                 json_str, schema_str = parts
                 instance = json.loads(json_str)
                 schema = json.loads(schema_str)
-                
+
                 validate(instance=instance, schema=schema)
                 return "valid"
             except ValidationError as e:
                 return f"validation error: {str(e)}"
             except Exception as e:
                 return f"[jsonschema error: {str(e)}]"
-        
+
         @self.formatter.register('type')
         async def _type(ctx, val, **kwargs):
             """
@@ -4843,7 +4845,7 @@ class Tags(commands.Cog):
             except:
                 evaluated_val = val
             return type(evaluated_val).__name__
-        
+
         @self.formatter.register('hash')
         async def _hash(ctx, val, **kwargs):
             """
@@ -4857,7 +4859,7 @@ class Tags(commands.Cog):
                 return hashlib.new(algo.strip(), text.encode()).hexdigest()
             except Exception as e:
                 return f"[Hash error: {str(e)}]"
-        
+
         @self.formatter.register('urlencode')
         async def _urlencode(ctx, text, **kwargs):
             """
@@ -4870,7 +4872,7 @@ class Tags(commands.Cog):
                 return quote(processed)
             except Exception:
                 return text
-        
+
         @self.formatter.register('urldecode')
         async def _urldecode(ctx, text, **kwargs):
             """
@@ -4883,7 +4885,7 @@ class Tags(commands.Cog):
                 return unquote(processed)
             except Exception:
                 return text
-        
+
         @self.formatter.register('base64encode')
         async def _base64encode(ctx, text, **kwargs):
             """
@@ -4896,7 +4898,7 @@ class Tags(commands.Cog):
                 return base64.b64encode(processed.encode()).decode()
             except Exception:
                 return "[base64 error]"
-        
+
         @self.formatter.register('base64decode')
         async def _base64decode(ctx, text, **kwargs):
             """
@@ -4909,7 +4911,7 @@ class Tags(commands.Cog):
                 return base64.b64decode(processed.encode()).decode()
             except Exception:
                 return "[base64 error]"
-        
+
         @self.formatter.register('hex')
         async def _hex(ctx, args_str, **kwargs):
             """
@@ -4922,7 +4924,7 @@ class Tags(commands.Cog):
                 processed = str(args_str)
                 mode, text = processed.split("|", 1)
                 mode = mode.strip().lower()
-                
+
                 if mode == "encode":
                     return text.encode().hex()
                 elif mode == "decode":
@@ -4931,7 +4933,7 @@ class Tags(commands.Cog):
                     return "[hex error: invalid mode]"
             except Exception:
                 return "[hex error]"
-        
+
         @self.formatter.register('countdown')
         async def _countdown(ctx, val, **kwargs):
             """
@@ -4969,7 +4971,7 @@ class Tags(commands.Cog):
                             time_str,
                             settings={'TIMEZONE': tz, 'RETURN_AS_TIMEZONE_AWARE': True}
                         )
-                        
+
                     if not target:
                         return "[countdown error: invalid time format]"
                 except Exception as e:
@@ -4996,7 +4998,7 @@ class Tags(commands.Cog):
                         ('minute', 60),
                         ('second', 1)
                     ]
-                    
+
                     parts = []
                     for name, count in intervals:
                         value = int(seconds // count)
@@ -5008,7 +5010,7 @@ class Tags(commands.Cog):
                     return ", ".join(parts) if parts else "0 seconds"
 
                 total_seconds = delta.total_seconds()
-                
+
                 if fmt == "human":
                     return format_duration(total_seconds)
                 elif fmt == "precise":
@@ -5024,7 +5026,7 @@ class Tags(commands.Cog):
 
             except Exception as e:
                 return f"[countdown error: {str(e)}]"
-        
+
         @self.formatter.register('reverse')
         async def _reverse(ctx, text, **kwargs):
             """
@@ -5037,7 +5039,7 @@ class Tags(commands.Cog):
                 return processed_text[::-1]
             except Exception:
                 return text
-            
+
         @self.formatter.register('if')
         async def _if(ctx, args_str, **kwargs):
             """
@@ -5155,7 +5157,7 @@ class Tags(commands.Cog):
                 return text.strip()
 
             return None
-        
+
         @self.formatter.register('and')
         async def _and(ctx, args_str, **kwargs):
             """
@@ -5167,14 +5169,14 @@ class Tags(commands.Cog):
             args = self.parse_args(args_str)
             if not args:
                 return None
-            
+
             last_valid = ""
             for arg in args:
                 if not arg.strip():
                     return None
                 last_valid = arg
             return last_valid
-        
+
         @self.formatter.register('or')
         async def _or(ctx, args_str, **kwargs):
             """
@@ -5186,7 +5188,7 @@ class Tags(commands.Cog):
                 if arg.strip():
                     return arg
             return None
-        
+
         @self.formatter.register('equals')
         async def _equals(ctx, args_str, **kwargs):
             """
@@ -5197,13 +5199,13 @@ class Tags(commands.Cog):
             args = self.parse_args(args_str)
             if len(args) < 2:
                 return ""
-            
+
             first = args[0]
             for val in args[1:]:
                 if val != first:
                     return False
             return True
-        
+
         @self.formatter.register('notequals')
         @self.formatter.register('unequals')
         async def _notequals(ctx, args_str, **kwargs):
@@ -5215,13 +5217,13 @@ class Tags(commands.Cog):
             args = self.parse_args(args_str)
             if len(args) < 2:
                 return None
-            
+
             first = args[0]
             for val in args[1:]:
                 if val != first:
                     return True
             return False
-        
+
         @self.formatter.register('range')
         async def _range(ctx, args_str, **kwargs):
             """
@@ -5235,17 +5237,17 @@ class Tags(commands.Cog):
                     min_val, max_val = processed.split('|', 1)
                 else:
                     min_val, max_val = '1', processed
-                
+
                 min_val = int(min_val.strip())
                 max_val = int(max_val.strip())
 
                 if min_val > max_val:
                     min_val, max_val = max_val, min_val
-                
+
                 return random.randint(min_val, max_val)
             except Exception:
                 return "[range error: invalid input]"
-        
+
         @self.formatter.register('dice')
         async def _dice(ctx, notation, **kwargs):
             """
@@ -5257,20 +5259,20 @@ class Tags(commands.Cog):
                 processed = str(notation)
                 parts = re.split(r'[d+-]', processed)
                 modifiers = re.findall(r'[+-]', processed)
-        
+
                 count = int(parts[0]) if parts[0] else 1
                 sides = int(parts[1])
-        
+
                 if count < 1 or sides < 1:
                     return "[dice error: values must be positive]"
-        
+
                 rolls = [random.randint(1, sides) for _ in range(count)]
                 total = sum(rolls)
-        
+
                 if len(modifiers) > 0 and len(parts) > 2:
                     modifier = int(modifiers[0] + parts[2])
                     total += modifier
-        
+
                 result = f"{total} ("
                 if count > 1:
                     result += f"{'+'.join(map(str, rolls))}"
@@ -5278,11 +5280,11 @@ class Tags(commands.Cog):
                         result += f"{modifiers[0]}{parts[2]}"
                     result += " = "
                 result += f"{total})"
-        
+
                 return result
             except Exception:
                 return "[dice error: invalid notation]"
-        
+
         @self.formatter.register('choose')
         async def _choose(ctx, options_str, **kwargs):
             """
@@ -5317,36 +5319,36 @@ class Tags(commands.Cog):
                     parts = processed.rsplit('sep=', 1)
                     processed = parts[0]
                     settings["sep"] = parts[1].strip().split()[0].strip("'\"")
-                
+
                 if 'group=' in processed.lower():
                     parts = processed.rsplit('group=', 1)
                     processed = parts[0]
                     settings["group"] = parts[1].strip().split()[0].strip().lower() in ('true', 'yes', '1')
-        
+
                 sep = settings.get("sep", "|")
                 group_mode = settings.get("group", False)
 
                 def process_group(match):
                     options = [opt.strip() for opt in match.group(1).split('|') if opt.strip()]
                     return random.choice(options) if options else ''
-                
+
                 if group_mode:
                     processed = re.sub(r'\{([^{}]+)\}', process_group, processed)
-        
+
                 raw_parts = re.split(rf'(?<!\\)\{sep}', processed)
                 options = []
                 weights = []
                 total_percent = 0
                 percent_entries = []
-        
+
                 for part in raw_parts:
                     part = part.replace(f'\\{sep}', sep).strip()
                     if not part:
                         continue
-            
+
                     weight = 1
                     percent = None
-            
+
                     if '%' in part:
                         opt_part, percent_part = part.rsplit('%', 1)
                         opt_part = opt_part.strip()
@@ -5357,7 +5359,7 @@ class Tags(commands.Cog):
                             part = opt_part
                         except ValueError:
                             pass
-                    
+
                     if '%' not in part and '@' in part:
                         opt_part, weight_part = part.rsplit('@', 1)
                         part = opt_part.strip()
@@ -5365,27 +5367,27 @@ class Tags(commands.Cog):
                             weight = max(1, int(weight_part.strip()))
                         except ValueError:
                             pass
-                
-            
+
+
                     options.append(part)
                     weights.append(weight)
-        
+
                 if percent_entries:
                     if total_percent > 100:
                         weights = [1] * len(options)
                     else:
                         for idx, percent in percent_entries:
                             weights[idx] = max(1, int(percent))
-        
+
                 if not options:
                     return "[choose error: no valid options]"
-        
+
                 choice = random.choices(options, weights=weights or None, k=1)[0]
                 return await self.formatter.format(choice, ctx, **kwargs)
-    
+
             except Exception as e:
                 return f"[choose error: {str(e)}]"
-            
+
         @self.formatter.register('len')
         def _len(ctx, val, **kwargs):
             """
@@ -5394,7 +5396,7 @@ class Tags(commands.Cog):
                 * Example: `{len:hello}` -> "5"
             """
             return str(len(str(val)))
-            
+
         @self.formatter.register('upper')
         def _upper(ctx, val, **kwargs):
             """
@@ -5403,7 +5405,7 @@ class Tags(commands.Cog):
                 * Example: `{upper:hello}` -> "HELLO"
             """
             return str(val).upper()
-            
+
         @self.formatter.register('lower')
         def _lower(ctx, val, **kwargs):
             """
@@ -5412,7 +5414,7 @@ class Tags(commands.Cog):
                 * Example: `{lower:HELLO}` -> "hello"
             """
             return str(val).lower()
-            
+
         @self.formatter.register('capitalize')
         def _capitalize(ctx, val, **kwargs):
             """
@@ -5421,7 +5423,7 @@ class Tags(commands.Cog):
                 * Example: `{capitalize:hello}` -> "Hello"
             """
             return str(val).capitalize()
-            
+
         @self.formatter.register('set')
         async def _set(ctx, val, **kwargs):
             """
@@ -5433,11 +5435,11 @@ class Tags(commands.Cog):
             if len(parts) < 2:
                 return "[error: format should be {set:name|value}]"
             name, value = parts[0].strip(), parts[1].strip()
-            
+
 
             self._variables.setdefault(ctx.message.id, {})[name] = value
             return ""
-            
+
         @self.formatter.register('get')
         async def _get(ctx, name, **kwargs):
             """
@@ -5447,7 +5449,7 @@ class Tags(commands.Cog):
             """
             variables = self._variables.get(ctx.message.id, {})
             return str(variables.get(name.strip(), ""))
-            
+
         @self.formatter.register('math')
         def _math(ctx, expr, **kwargs):
             """
@@ -5462,7 +5464,7 @@ class Tags(commands.Cog):
                 return str(eval(expr, {"__builtins__": None}, {}))
             except Exception as e:
                 return f'[math error: {e}]'
-        
+
         @self.formatter.register('python')
         @self.formatter.register('py')
         async def _python(ctx, code, **kwargs):
@@ -5503,7 +5505,7 @@ class Tags(commands.Cog):
                 * Example: `{ts:console.log('hi');}` -> "hi"
             """
             return await self.execute_language(ctx, 'typescript', code, **kwargs)
-        
+
         @self.formatter.register('php')
         async def _php(ctx, code, **kwargs):
             """
@@ -5511,7 +5513,7 @@ class Tags(commands.Cog):
                 * Execute PHP code.
             """
             return await self.execute_language(ctx, 'php', code, **kwargs)
-        
+
         @self.formatter.register('ruby')
         @self.formatter.register('rb')
         async def _ruby(ctx, code, **kwargs):
@@ -5521,7 +5523,7 @@ class Tags(commands.Cog):
                 * Example: `{rb:puts "hi"}` -> "hi"
             """
             return await self.execute_language(ctx, 'ruby', code, **kwargs)
-        
+
         @self.formatter.register('lua')
         async def _lua(ctx, code, **kwargs):
             """
@@ -5582,7 +5584,7 @@ class Tags(commands.Cog):
                 * Execute Zig code.
             """
             return await self.execute_language(ctx, 'zig', code, **kwargs)
-        
+
         @self.formatter.register('java')
         async def _java(ctx, code, **kwargs):
             """
@@ -5590,7 +5592,7 @@ class Tags(commands.Cog):
                 * Execute Java code.
             """
             return await self.execute_language(ctx, 'java', code, **kwargs)
-        
+
         @self.formatter.register('kotlin')
         @self.formatter.register('kt')
         async def _kotlin(ctx, code, **kwargs):
@@ -5599,7 +5601,7 @@ class Tags(commands.Cog):
                 * Execute Kotlin code.
             """
             return await self.execute_language(ctx, 'kotlin', code, **kwargs)
-        
+
         @self.formatter.register('nim')
         async def _nim(ctx, code, **kwargs):
             """
@@ -5607,7 +5609,7 @@ class Tags(commands.Cog):
                 * Execute Nim code.
             """
             return await self.execute_language(ctx, 'nim', code, **kwargs)
-        
+
         @self.formatter.register('user')
         async def _user(ctx, i, **kwargs):
             """
@@ -5619,7 +5621,7 @@ class Tags(commands.Cog):
             if isinstance(user, discord.Member):
                 return user.name
             return user.name
-        
+
         @self.formatter.register('userid')
         async def _userid(ctx, i, **kwargs):
             """
@@ -5629,7 +5631,7 @@ class Tags(commands.Cog):
             """
             user = await self.formatter.resolve_user(ctx, i)
             return user.id
-        
+
         @self.formatter.register('nick')
         async def _nick(ctx, i, **kwargs):
             """
@@ -5641,7 +5643,7 @@ class Tags(commands.Cog):
             if isinstance(user, discord.Member):
                 return user.nick
             return user.display_name
-        
+
         @self.formatter.register('userdisplay')
         async def _userdisplay(ctx, i, **kwargs):
             """
@@ -5651,7 +5653,7 @@ class Tags(commands.Cog):
             """
             user = await self.formatter.resolve_user(ctx, i)
             return user.global_name
-        
+
         @self.formatter.register('mention')
         async def _mention(ctx, i, **kwargs):
             """
@@ -5661,7 +5663,7 @@ class Tags(commands.Cog):
             """
             user = await self.formatter.resolve_user(ctx, i)
             return user.mention
-        
+
         @self.formatter.register('avatar')
         async def _avatar(ctx, i, **kwargs):
             """
@@ -5671,7 +5673,7 @@ class Tags(commands.Cog):
             """
             user = await self.formatter.resolve_user(ctx, i)
             return str(user.display_avatar.url)
-        
+
         @self.formatter.register('avatarkey')
         async def _avatarkey(ctx, i, **kwargs):
             """
@@ -5681,7 +5683,7 @@ class Tags(commands.Cog):
             """
             user = await self.formatter.resolve_user(ctx, i)
             return str(user.display_avatar.key)
-        
+
         @self.formatter.register('useravatar')
         async def _useravatar(ctx, i, **kwargs):
             """
@@ -5691,7 +5693,7 @@ class Tags(commands.Cog):
             """
             user = await self.formatter.resolve_user(ctx, i)
             return str(user.avatar.url) if user.avatar else None
-        
+
         @self.formatter.register('useravatarkey')
         async def _useravatarkey(ctx, i, **kwargs):
             """
@@ -5701,7 +5703,7 @@ class Tags(commands.Cog):
             """
             user = await self.formatter.resolve_user(ctx, i)
             return str(user.avatar.key) if user.avatar else None
-        
+
         @self.formatter.register('banner')
         async def _banner(ctx, i, **kwargs):
             """
@@ -5712,7 +5714,7 @@ class Tags(commands.Cog):
             user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
                 return str(user.guild_banner.url) if user.guild_banner else await _userbanner(ctx, i)
-        
+
         @self.formatter.register('bannerkey')
         async def _bannerkey(ctx, i, **kwargs):
             """
@@ -5723,7 +5725,7 @@ class Tags(commands.Cog):
             user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
                 return str(user.guild_banner.key) if user.guild_banner else await _userbannerkey(ctx, i)
-        
+
         @self.formatter.register('userbanner')
         async def _userbanner(ctx, i, **kwargs):
             """
@@ -5737,7 +5739,7 @@ class Tags(commands.Cog):
             if not user.banner:
                 return None
             return str(user.banner.url)
-        
+
         @self.formatter.register('userbannerkey')
         async def _userbannerkey(ctx, i, **kwargs):
             """
@@ -5751,7 +5753,7 @@ class Tags(commands.Cog):
             if not user.banner:
                 return None
             return str(user.banner.key)
-        
+
         @self.formatter.register('usercreatedate')
         async def _usercreatedate(ctx, i, **kwargs):
             """
@@ -5760,7 +5762,7 @@ class Tags(commands.Cog):
             """
             user = await self.formatter.resolve_user(ctx, i)
             return user.created_at.isoformat()
-        
+
         @self.formatter.register('userjoindate')
         async def _userjoindate(ctx, i, **kwargs):
             """
@@ -5769,14 +5771,14 @@ class Tags(commands.Cog):
             """
             user = await self.formatter.resolve_user(ctx, i)
             date_to_use = None
-            
+
             if isinstance(user, discord.Member):
                 date_to_use = user.joined_at or user.created_at
             else:
                 date_to_use = user.created_at
-            
+
             return date_to_use.isoformat()
-        
+
         @self.formatter.register('userstatus')
         async def _userstatus(ctx, i, **kwargs):
             """
@@ -5788,7 +5790,7 @@ class Tags(commands.Cog):
             if isinstance(user, discord.Member):
                 return str(user.status.value).capitalize()
             return None
-        
+
         @self.formatter.register('usercustomstatus')
         async def _usercustomstatus(ctx, i, **kwargs):
             """
@@ -5799,7 +5801,7 @@ class Tags(commands.Cog):
             user = await self.formatter.resolve_user(ctx, i)
             if not isinstance(user, discord.Member):
                 return None
-            
+
             activities = []
             for activity in user.activities:
                 if isinstance(activity, discord.CustomActivity):
@@ -5810,7 +5812,7 @@ class Tags(commands.Cog):
                         status.append(activity.name)
                     if status:
                         activities.append(" ".join(status))
-                
+
                 elif isinstance(activity, discord.Game):
                     activities.append(f"Playing {activity.name}")
                 elif isinstance(activity, discord.Spotify):
@@ -5826,12 +5828,12 @@ class Tags(commands.Cog):
                     activities.append(f"Competing in {activity.name}")
                 elif activity.type == discord.ActivityType.playing and not isinstance(activity, discord.Game):
                     activities.append(f"Playing {activity.name}")
-            
+
             if not activities:
                 return None
-            
+
             return " | ".join(activities)
-        
+
         @self.formatter.register('userbadges')
         async def _userbadges(ctx, i, **kwargs):
             """
@@ -5876,12 +5878,12 @@ class Tags(commands.Cog):
                 badge_names.append("Active Developer")
             if badges.discord_certified_moderator:
                 badge_names.append("Discord Certified Moderator")
-            
+
             if badge_names:
                 return ", ".join(badge_names)
             else:
                 return None
-        
+
         @self.formatter.register('randuser')
         async def _randuser(ctx, user, **kwargs):
             """
@@ -5893,7 +5895,7 @@ class Tags(commands.Cog):
                 random_user = random.choice(ctx.guild.members)
                 return random_user.name
             return None
-        
+
         @self.formatter.register('randonline')
         async def _randonline(ctx, user, **kwargs):
             """
@@ -5906,7 +5908,7 @@ class Tags(commands.Cog):
                 random_online_user = random.choice(online_users)
                 return random_online_user.name
             return None
-        
+
         @self.formatter.register('randonlineid')
         async def _randonlineid(ctx, user, **kwargs):
             """
@@ -5919,7 +5921,7 @@ class Tags(commands.Cog):
                 random_online_user = random.choice(online_users)
                 return random_online_user.id
             return None
-        
+
         @self.formatter.register('randuserid')
         async def _randuserid(ctx, user, **kwargs):
             """
@@ -5931,7 +5933,7 @@ class Tags(commands.Cog):
                 random_user = random.choice(ctx.guild.members)
                 return random_user.id
             return None
-        
+
         @self.formatter.register('channel')
         async def _channel(ctx, channel, **kwargs):
             """
@@ -5946,7 +5948,7 @@ class Tags(commands.Cog):
                 return channel.name
             except Exception:
                 return ctx.channel.name
-        
+
         @self.formatter.register('channelmention')
         async def _channelmention(ctx, channel, **kwargs):
             """
@@ -5961,7 +5963,7 @@ class Tags(commands.Cog):
                 return channel.mention
             except Exception:
                 return ctx.channel.mention
-        
+
         @self.formatter.register('channelid')
         async def _channelid(ctx, channel, **kwargs):
             """
@@ -5976,7 +5978,7 @@ class Tags(commands.Cog):
                 return channel.id
             except Exception:
                 return ctx.channel.id
-        
+
         @self.formatter.register('randchannel')
         async def _randchannel(ctx, channel, **kwargs):
             """
@@ -5988,7 +5990,7 @@ class Tags(commands.Cog):
                 random_channel = random.choice(ctx.guild.channels)
                 return random_channel.name
             return None
-        
+
         @self.formatter.register('randchannelmention')
         async def _randchannelmention(ctx, channel, **kwargs):
             """
@@ -6000,7 +6002,7 @@ class Tags(commands.Cog):
                 random_channel = random.choice(ctx.guild.channels)
                 return random_channel.mention
             return None
-        
+
         @self.formatter.register('randchannelid')
         async def _randchannelid(ctx, channel, **kwargs):
             """
@@ -6012,7 +6014,7 @@ class Tags(commands.Cog):
                 random_channel = random.choice(ctx.guild.channels)
                 return random_channel.id
             return None
-        
+
         @self.formatter.register('guild')
         @self.formatter.register('server')
         async def _guild(ctx, i, **kwargs):
@@ -6027,7 +6029,7 @@ class Tags(commands.Cog):
                 return "Direct Messages"
             else:
                 return "Private Channel"
-        
+
         @self.formatter.register('guildid')
         @self.formatter.register('serverid')
         async def _guildid(ctx, i, **kwargs):
@@ -6042,7 +6044,7 @@ class Tags(commands.Cog):
                 return None
             else:
                 return None
-        
+
         @self.formatter.register('guildicon')
         @self.formatter.register('servericon')
         async def _guildicon(ctx, i, **kwargs):
@@ -6054,7 +6056,7 @@ class Tags(commands.Cog):
             if ctx.guild and ctx.guild.icon:
                 return ctx.guild.icon.url
             return None
-        
+
         @self.formatter.register('guildbanner')
         @self.formatter.register('serverbanner')
         async def _guildbanner(ctx, i, **kwargs):
@@ -6066,7 +6068,7 @@ class Tags(commands.Cog):
             if ctx.guild and ctx.guild.banner:
                 return ctx.guild.banner.url
             return None
-        
+
         @self.formatter.register('component')
         @self.formatter.register('componentjson')
         @self.formatter.register('json.component')
@@ -6088,7 +6090,7 @@ class Tags(commands.Cog):
             try:
                 processed_args = await self.formatter.format(args_str, ctx, **kwargs)
                 processed_args = processed_args[0] if isinstance(processed_args, tuple) else processed_args
-                
+
                 try:
                     data = json.loads(processed_args)
                 except json.JSONDecodeError as e:
@@ -6100,11 +6102,11 @@ class Tags(commands.Cog):
                     if isinstance(component_data, str):
                         processed = await self.formatter.format(component_data, ctx, **kwargs)
                         return processed[0] if isinstance(processed, tuple) else processed
-                        
+
                     if isinstance(component_data, dict):
                         component_data = component_data.copy()
                         component_type = component_data.get('type')
-                        
+
                         for key, value in component_data.items():
                             if isinstance(value, str):
                                 if key not in {'tag', 'command'}:
@@ -6112,7 +6114,7 @@ class Tags(commands.Cog):
                                     component_data[key] = processed[0] if isinstance(processed, tuple) else processed
                                 else:
                                     component_data[key] = value
-                        
+
                         if component_type == 1:
                             row = discord.ui.ActionRow(
                                 id=component_data.get('id')
@@ -6122,7 +6124,7 @@ class Tags(commands.Cog):
                                 if item:
                                     row.add_item(item)
                             return row
-                        
+
                         elif component_type == 2:
                             if 'command' in component_data:
                                 cmd = component_data.pop('command').strip()
@@ -6142,7 +6144,7 @@ class Tags(commands.Cog):
                             style = component_data.get('style', 'primary')
                             if isinstance(style, str):
                                 style = style_map.get(style.lower(), discord.ButtonStyle.primary)
-                            
+
                             return discord.ui.Button(
                                 style=style,
                                 label=component_data.get('label'),
@@ -6153,7 +6155,7 @@ class Tags(commands.Cog):
                                 row=component_data.get('row'),
                                 id=component_data.get('id')
                             )
-                        
+
                         elif component_type == 3:
                             options = []
                             for opt in component_data.get('options', []):
@@ -6173,7 +6175,7 @@ class Tags(commands.Cog):
                                     emoji=opt.get('emoji'),
                                     default=opt.get('default')
                                 ))
-                            
+
                             return discord.ui.Select(
                                 placeholder=component_data.get('placeholder'),
                                 min_values=component_data.get('min_values'),
@@ -6205,14 +6207,14 @@ class Tags(commands.Cog):
                                 )
                                 section.add_item(section_item)
                             return section
-                            
+
                         elif component_type == 10:
                             text_display = discord.ui.TextDisplay(
                                 content=component_data.get('content'),
                                 id=component_data.get('id')
                             )
                             return text_display
-                        
+
                         elif component_type == 11:
                             media_data = component_data['media']
                             url = media_data['url']
@@ -6226,7 +6228,7 @@ class Tags(commands.Cog):
                                 id=component_data.get('id')
                             )
                             return thumbnail
-                        
+
                         elif component_type == 12:
                             gallery = discord.ui.MediaGallery(
                                 id=component_data.get('id')
@@ -6236,14 +6238,14 @@ class Tags(commands.Cog):
                                 media_data = item_data.get('media', {})
                                 if isinstance(media_data, str):
                                     media_data = {'url': media_data}
-                                
+
                                 url = media_data.get('url')
                                 if url:
                                     processed_url = await self.formatter.format(url, ctx, **kwargs)
                                     if isinstance(processed_url, tuple):
                                         processed_url = processed_url[0]
                                     media_data['url'] = processed_url
-                                
+
                                 media_item = discord.UnfurledMediaItem(
                                     url=media_data.get('url')
                                 )
@@ -6253,7 +6255,7 @@ class Tags(commands.Cog):
                                     spoiler=item_data.get('spoiler')
                                 )
                             return gallery
-                        
+
                         elif component_type == 13:
                             file_data = component_data['file']
                             url = file_data['url']
@@ -6266,7 +6268,7 @@ class Tags(commands.Cog):
                                 id=component_data.get('id')
                             )
                             return file
-                        
+
                         elif component_type == 14:
                             spacing = component_data.get('spacing')
                             if isinstance(spacing, str):
@@ -6283,7 +6285,7 @@ class Tags(commands.Cog):
                                 id=component_data.get('id')
                             )
                             return separator
-                        
+
                         elif component_type == 17:
                             color = component_data.get('accent_color')
                             if isinstance(color, str):
@@ -6301,7 +6303,7 @@ class Tags(commands.Cog):
                                 if item:
                                     container.add_item(item)
                             return container
-                        
+
                     return None
 
                 if isinstance(data, list):
@@ -6336,7 +6338,7 @@ class Tags(commands.Cog):
                 return ("", [embed], None, [])
             except json.JSONDecodeError as e:
                 return (f"[embed error: {str(e)}]", [], None, [])
-        
+
         async def parse_component_input(ctx, input_str: str):
             try:
                 data = json.loads(input_str.strip())
@@ -6363,7 +6365,7 @@ class Tags(commands.Cog):
                 processed, _, _, _ = await self.formatter.format(data, ctx)
                 return processed
             return data
-            
+
         @self.formatter.register('button')
         @self.formatter.register('buttonjson')
         @self.formatter.register('json.button')
@@ -6377,7 +6379,7 @@ class Tags(commands.Cog):
             """
             try:
                 params = await parse_component_input(ctx, args_str)
-                
+
 
                 if 'command' in params:
                     cmd = params.pop('command').strip()
@@ -6394,10 +6396,10 @@ class Tags(commands.Cog):
 
                 button = DiscordGenerator.create_button(params)
                 return ("", [], discord.ui.View().add_item(button), [])
-            
+
             except Exception as e:
                 return (f"[button error: {str(e)}]", [], None, [])
-        
+
         @self.formatter.register('select')
         @self.formatter.register('selectjson')
         @self.formatter.register('json.select')
@@ -6420,13 +6422,13 @@ class Tags(commands.Cog):
                             opt['value'] = f"tag:{tag}"
                         elif 'value' not in opt:
                             opt['value'] = opt['label']
-                
+
                 select = DiscordGenerator.create_select(data)
                 view = discord.ui.View().add_item(select)
                 return ("", [], view, [])
             except Exception as e:
                 return (f"[select error: {str(e)}]", [], None, [])
-        
+
         @self.formatter.register('paginator')
         @self.formatter.register('page')
         @self.formatter.register('paginatorjson')
@@ -6466,15 +6468,15 @@ class Tags(commands.Cog):
                 for attachment in ctx.message.attachments:
                     if attachment.filename not in all_files:
                         all_files[attachment.filename] = await attachment.read()
-                
+
                 for file in nested_files:
                     if file.filename not in all_files:
                         all_files[file.filename] = await file.read()
-                
+
                 pages_data = json.loads(text)
                 if not isinstance(pages_data, list):
                     pages_data = [pages_data]
-                
+
                 pages = []
                 for page_data in pages_data:
                     page_content = page_data.get("content", "")
@@ -6486,11 +6488,11 @@ class Tags(commands.Cog):
                         resolved_embed_data = await resolve_json_tags(ctx, embed_data)
                         embed = DiscordGenerator._build_embed(**resolved_embed_data)
                         formatted_embeds.append(embed)
-                    
+
                     file_metadata = []
                     for ref in file_refs:
                         filename = None
-                        
+
                         if isinstance(ref, int):
                             if 0 <= ref < len(all_files):
                                 filename = list(all_files.keys())[ref]
@@ -6500,32 +6502,32 @@ class Tags(commands.Cog):
                                 if fn.lower() == ref_lower:
                                     filename = fn
                                     break
-                        
+
                         if filename:
                             file_metadata.append({
                                 "filename": filename,
                                 "data": all_files[filename]
                             })
-                    
+
                     pages.append((formatted_content, formatted_embeds, file_metadata))
-                
+
                 if not pages:
                     return "No pages provided for paginator.", [], None, []
-                
+
                 view = Paginator(pages, ctx.author)
-                
+
                 first_page_files = [
                     discord.File(BytesIO(meta["data"]), filename=meta["filename"])
                     for meta in pages[0][2]
                 ]
-                
+
                 return (pages[0][0], pages[0][1], view, first_page_files)
-            
+
             except json.JSONDecodeError:
                 return "[paginator error: Invalid JSON]", [], None, []
             except Exception as e:
                 return f"[paginator error: {str(e)}]", [], None, []
-        
+
         @self.formatter.register('json.user')
         @self.formatter.register('userjson')
         async def _json_user(ctx, user_ref='', **kwargs):
@@ -6556,7 +6558,7 @@ class Tags(commands.Cog):
                 return json.dumps(user_data)
             except Exception as e:
                 return f"[JSON User Error: {str(e)}]"
-        
+
         @self.formatter.register('json.member')
         @self.formatter.register('memberjson')
         async def _json_member(ctx, user_ref='', **kwargs):
@@ -6595,7 +6597,7 @@ class Tags(commands.Cog):
                 return json.dumps(member_data)
             except Exception as e:
                 return f"[JSON Member Error: {str(e)}]"
-        
+
         @self.formatter.register('json.memberoruser')
         @self.formatter.register('memberoruserjson')
         async def _json_memberoruser(ctx, user_ref='', **kwargs):
@@ -6608,7 +6610,7 @@ class Tags(commands.Cog):
                     user = ctx.author
                 else:
                     user = await self.formatter.resolve_user(ctx, user_ref)
-                
+
                 user_data = {
                     "id": str(user.id),
                     "name": user.name,
@@ -6622,7 +6624,7 @@ class Tags(commands.Cog):
                     "banner_url": str(user.guild_banner.url) if getattr(user, "guild_banner", None) else (str((await ctx.bot.fetch_user(user.id)).banner.url) if (await ctx.bot.fetch_user(user.id)).banner else None),
                     "mention": user.mention
                 }
-                
+
                 if isinstance(user, discord.Member):
                     user_data.update({
                         "nick": user.nick,
@@ -6632,11 +6634,11 @@ class Tags(commands.Cog):
                         "guild_permissions": list(user.guild_permissions),
                         "timed_out_until": user.timed_out_until.isoformat() if user.timed_out_until else None
                     })
-                
+
                 return json.dumps(user_data)
             except Exception as e:
                 return f"[JSON MemberOrUser Error: {str(e)}]"
-        
+
         @self.formatter.register('json.message')
         @self.formatter.register('messagejson')
         async def _json_message(ctx, message_ref='', **kwargs):
@@ -6653,7 +6655,7 @@ class Tags(commands.Cog):
                 else:
                     message_id = int(message_ref.strip())
                     message = await ctx.channel.fetch_message(message_id)
-                
+
                 message_data = {
                     "id": str(message.id),
                     "content": message.content,
@@ -6703,12 +6705,12 @@ class Tags(commands.Cog):
                     "pinned": message.pinned,
                     "type": str(message.type.name)
                 }
-                
-                
+
+
                 return json.dumps(message_data)
             except Exception as e:
                 return f"[JSON Message Error: {str(e)}]"
-        
+
         @self.formatter.register('json.guild')
         @self.formatter.register('guildjson')
         async def _json_guild(ctx, guild_ref='', **kwargs):
@@ -6719,7 +6721,7 @@ class Tags(commands.Cog):
             try:
                 if not ctx.guild:
                     return "{}"
-                    
+
                 guild_data = {
                     "id": str(ctx.guild.id),
                     "name": ctx.guild.name,
@@ -6797,11 +6799,11 @@ class Tags(commands.Cog):
                         "timed_out_until": m.timed_out_until.isoformat() if m.timed_out_until else None
                     } for m in ctx.guild.members]
                 }
-                
+
                 return json.dumps(guild_data)
             except Exception as e:
                 return f"[JSON Guild Error: {str(e)}]"
-        
+
         @self.formatter.register('json.channel')
         @self.formatter.register('channeljson')
         async def _json_channel(ctx, channel_ref='', **kwargs):
@@ -6811,7 +6813,7 @@ class Tags(commands.Cog):
             """
             try:
                 channel = None
-                
+
 
                 if not channel_ref.strip():
                     channel = ctx.channel
@@ -6842,11 +6844,11 @@ class Tags(commands.Cog):
                     } if getattr(channel, 'category', None) else None,
                     "mention": channel.mention
                 }
-                
+
                 return json.dumps(channel_data)
             except Exception as e:
                 return f"[JSON Channel Error: {str(e)}]"
-        
+
         @self.formatter.register('json.role')
         @self.formatter.register('rolejson')
         async def _json_role(ctx, role_ref='', **kwargs):
@@ -6857,7 +6859,7 @@ class Tags(commands.Cog):
             try:
                 if not ctx.guild:
                     return "[]"
-                    
+
                 if not role_ref:
                     roles_data = []
                     for role in ctx.guild.roles:
@@ -6875,7 +6877,7 @@ class Tags(commands.Cog):
                         }
                         roles_data.append(role_data)
                     return json.dumps(roles_data)
-                
+
                 try:
                     role_id = int(role_ref.strip('<@&>'))
                     role = ctx.guild.get_role(role_id)
@@ -6895,7 +6897,7 @@ class Tags(commands.Cog):
                         return json.dumps(role_data)
                 except ValueError:
                     pass
-                
+
 
                 role = discord.utils.get(ctx.guild.roles, name=role_ref)
                 if role:
@@ -6912,11 +6914,11 @@ class Tags(commands.Cog):
                         "mention": role.mention
                     }
                     return json.dumps(role_data)
-                
+
                 return "[JSON Role Error: Role not found]"
             except Exception as e:
                 return f"[JSON Role Error: {str(e)}]"
-        
+
         @self.formatter.register('json.emoji')
         @self.formatter.register('emojijson')
         async def _json_emoji(ctx, emoji_ref, **kwargs):
@@ -6927,9 +6929,9 @@ class Tags(commands.Cog):
             try:
                 if not ctx.guild:
                     return "[]"
-                    
+
                 emoji_ref = emoji_ref.strip()
-                
+
                 if not emoji_ref:
                     emojis_data = [{
                         "id": str(e.id),
@@ -6940,7 +6942,7 @@ class Tags(commands.Cog):
                         "mention": str(e)
                     } for e in ctx.guild.emojis]
                     return json.dumps(emojis_data)
-                
+
 
                 try:
                     emoji_id = int(emoji_ref)
@@ -6957,7 +6959,7 @@ class Tags(commands.Cog):
                         return json.dumps(emoji_data)
                 except ValueError:
                     pass
-                
+
 
                 emoji = discord.utils.get(ctx.guild.emojis, name=emoji_ref)
                 if emoji:
@@ -6970,25 +6972,25 @@ class Tags(commands.Cog):
                         "mention": str(emoji)
                     }
                     return json.dumps(emoji_data)
-                
+
                 return "[JSON Emoji Error: Emoji not found]"
             except Exception as e:
                 return f"[JSON Emoji Error: {str(e)}]"
-        
+
         @self.formatter.register('json.attachment')
         @self.formatter.register('attachmentjson')
         async def _json_attachment(ctx, attachment_ref, **kwargs):
             """
             ### {json.attachment:index}
-                * Returns the current message's specific attachment JSON object. Defaults to all attachments. 
+                * Returns the current message's specific attachment JSON object. Defaults to all attachments.
             """
             try:
                 attachments = ctx.message.attachments
                 if not attachments:
                     return "[]"
-                    
+
                 attachment_ref = attachment_ref.strip().lower()
-                
+
                 if not attachment_ref.strip():
                     attachments_data = [{
                         "id": str(a.id),
@@ -7001,7 +7003,7 @@ class Tags(commands.Cog):
                         "width": getattr(a, 'width', None)
                     } for a in attachments]
                     return json.dumps(attachments_data)
-                
+
 
                 try:
                     index = int(attachment_ref)
@@ -7021,7 +7023,7 @@ class Tags(commands.Cog):
                     return "[JSON Attachment Error: Invalid index]"
                 except ValueError:
                     pass
-                
+
 
                 for a in attachments:
                     if attachment_ref in (a.url, a.filename):
@@ -7036,11 +7038,11 @@ class Tags(commands.Cog):
                             "width": getattr(a, 'width', None)
                         }
                         return json.dumps(attachment_data)
-                
+
                 return "[JSON Attachment Error: Attachment not found]"
             except Exception as e:
                 return f"[JSON Attachment Error: {str(e)}]"
-        
+
         @self.formatter.register('attach')
         async def _attach(ctx, args_str, **kwargs):
             """
@@ -7072,42 +7074,42 @@ class Tags(commands.Cog):
                         async with session.get(url) as resp:
                             if resp.status != 200:
                                 return (f"[attach error: HTTP {resp.status}]", [], None, [])
-                            
+
                             content_type = resp.headers.get('Content-Type', '')
                             filename = os.path.basename(urlparse(url).path)
-                            
+
 
                             ext = self._get_extension(content_type, filename)
                             filename = f"{filename.split('.')[0]}.{ext}" if '.' not in filename else filename
-                            
+
 
                             file_data = BytesIO(await resp.read())
                             file = discord.File(file_data, filename=filename)
                             return ("", [], None, [file])
 
                 return ("[attach error: No URL or attachment found]", [], None, [])
-            
+
             except Exception as e:
                 return (f"[attach error: {str(e)}]", [], None, [])
-            
-        
+
+
         async def _get_media_url(ctx, url_arg: str, media_types: tuple):
             if url_arg:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url_arg) as resp:
                         if resp.status != 200:
                             return None
-                        
+
                         content_type = resp.headers.get('Content-Type', '')
                         if content_type in media_types:
                             return url_arg
-                
+
 
             if ctx.message.attachments:
                 for attachment in ctx.message.attachments:
                     if media_types is None or attachment.content_type in media_types:
                         return attachment.url
-                        
+
             return None
 
         @self.formatter.register('image')
@@ -7185,7 +7187,7 @@ class Tags(commands.Cog):
                     - `{media}` (with any attachment) -> attachment URL
             """
             return await _get_media_url(ctx, url, media_types=AUDIO_TYPES+VIDEO_TYPES+IMAGE_TYPES)
-        
+
     def _get_extension(self, content_type: str, filename: str = None) -> str:
         if content_type:
             type_to_ext = {
@@ -7212,15 +7214,15 @@ class Tags(commands.Cog):
             for mime, ext in type_to_ext.items():
                 if mime in content_type.lower():
                     return ext
-        
+
 
             if '.' in filename:
                 return filename.split('.')[-1].lower()
-        
+
 
             return '.tmp'
 
-    
+
     def parse_args(self, raw: str) -> list[str]:
         if not raw:
             return []
@@ -7248,15 +7250,15 @@ class Tags(commands.Cog):
 
     async def process_tags(self, ctx: commands.Context, content: str, args: str = "") -> tuple[str, list, discord.ui.View]:
         return await self.formatter.format(content, ctx, args=args)
-    
+
     @commands.Cog.listener()
     async def on_message_delete(self, message):
         if message.id in self._variables:
             del self._variables[message.id]
-    
+
     def cog_unload(self):
         asyncio.create_task(self.processor.cleanup())
-    
+
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction):
         if interaction.type != discord.InteractionType.component:
@@ -7281,7 +7283,7 @@ class Tags(commands.Cog):
 
             else:
                 await interaction.followup.send("Unknown component type.", ephemeral=True)
-        
+
         except discord.HTTPException:
             pass
 
@@ -7290,7 +7292,7 @@ class Tags(commands.Cog):
                 await interaction.followup.send(f"Interaction failed: {str(e)}", ephemeral=True)
             except:
                 await interaction.channel.send(f"Interaction failed: {str(e)}")
-    
+
     async def handle_button(self, interaction: discord.Interaction, custom_id: str):
         ctx = await self.bot.get_context(interaction.message)
         ctx.author = interaction.user
@@ -7317,7 +7319,7 @@ class Tags(commands.Cog):
             raw_tag = selected[4:]
             formatted_tag, _, _, _ = await self.formatter.format(raw_tag, ctx)
             await self.execute_tag(interaction, formatted_tag)
-        
+
         elif selected.startswith("cmd:"):
             raw_cmd = selected[4:]
             formatted_cmd, _, _, _ = await self.formatter.format(raw_cmd, ctx)
@@ -7364,7 +7366,7 @@ class Tags(commands.Cog):
 
         async with self.pool.acquire() as conn:
             tag = await conn.fetchrow(
-                """SELECT content FROM tags 
+                """SELECT content FROM tags
                 WHERE name = $1 AND (guild_id = $2 OR user_id = $3)""",
                 tag_name,
                 interaction.guild.id if interaction.guild else None,
@@ -7407,14 +7409,14 @@ class Tags(commands.Cog):
                 f"Failed to send tag result: {str(e)}",
                 ephemeral=True
             )
-    
+
     def parse_personal_flag(self, content: str) -> tuple[str, bool]:
         personal = False
         if "--personal" in content.lower():
             personal = True
             content = content.replace("--personal", "").strip()
         return content, personal
-    
+
     @app_commands.autocomplete()
     async def tag_name_autocomplete(
         self,
@@ -7424,15 +7426,15 @@ class Tags(commands.Cog):
         cog = interaction.client.get_cog("Tags")
         if not cog:
             return []
-            
+
         async with cog.pool.acquire() as conn:
             if interaction.namespace.personal:
                 query = """
                     SELECT name AS tag_name, NULL AS alias FROM tags
                     WHERE user_id = $1 AND name ILIKE $2
-                    
+
                     UNION ALL
-                    
+
                     SELECT alias, tag_name FROM tag_aliases
                     WHERE user_id = $1 AND alias ILIKE $2
                     """
@@ -7441,7 +7443,7 @@ class Tags(commands.Cog):
                 if not interaction.guild:
                     return []
                 query = """
-                    SELECT name AS tag_name, NULL AS alias FROM tags 
+                    SELECT name AS tag_name, NULL AS alias FROM tags
                     WHERE guild_id = $1 AND name ILIKE $2
 
                     UNION ALL
@@ -7450,7 +7452,7 @@ class Tags(commands.Cog):
                     WHERE guild_id = $1 AND alias ILIKE $2
                     """
                 rows = await conn.fetch(query, interaction.guild.id, f"%{current}%")
-            
+
         choices = []
         for row in rows:
             tag_name = row["tag_name"]
@@ -7460,10 +7462,10 @@ class Tags(commands.Cog):
             else:
                 display = f"{alias} ({tag_name})"
             choices.append(app_commands.Choice(name=display, value=alias or tag_name))
-            
+
         return choices[:25]
 
-    
+
     @commands.hybrid_group(name="tag", description="Tag management commands.", invoke_without_command=True, with_app_command=True, aliases=["t"])
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
@@ -7471,7 +7473,7 @@ class Tags(commands.Cog):
         await ctx.typing()
         name, forced_personal = self.parse_personal_flag(name)
         name = name.lower()
-        
+
         async with self.pool.acquire() as conn:
             if not forced_personal:
                 tag = await conn.fetchrow(
@@ -7479,7 +7481,7 @@ class Tags(commands.Cog):
                     WHERE name = $1 AND user_id = $2""",
                     name, ctx.author.id
                 )
-                
+
 
                 if not tag and ctx.guild:
                     tag = await conn.fetchrow(
@@ -7509,17 +7511,17 @@ class Tags(commands.Cog):
                     )
                     if tag:
                         name = alias['tag_name']
-            
+
             if not tag:
                 return await ctx.send(f"Tag or alias `{name}` not found.")
-            
+
 
             await conn.execute(
                 """UPDATE tags SET uses = uses + 1
                 WHERE name = $1 AND (user_id = $2 OR guild_id = $3)""",
                 name, ctx.author.id, ctx.guild.id if ctx.guild else None
             )
-            
+
             text, embeds, view, files = await self.formatter.format(tag['content'], ctx, args=args)
             if text.strip() or embeds or (view and view.children) or files:
                 try:
@@ -7531,7 +7533,7 @@ class Tags(commands.Cog):
                     )
                 except discord.HTTPException as e:
                     await ctx.send(f"Failed to send tag: {e}")
-    
+
     @tag.command(name="show", description="Show a tag.", with_app_command=True, aliases=["fetch"])
     @app_commands.describe(name="The tag name.", args="The tag arguments, if any.", personal="Whether to show a personal tag.")
     async def show(self, ctx: commands.Context, name: str, *, args: str = "", personal: bool = False):
@@ -7539,7 +7541,7 @@ class Tags(commands.Cog):
         name, content_personal = self.parse_personal_flag(name)
         personal = personal or content_personal
         name = name.lower()
-        
+
         async with self.pool.acquire() as conn:
             if not personal:
                 tag = await conn.fetchrow(
@@ -7575,16 +7577,16 @@ class Tags(commands.Cog):
                     )
                     if tag:
                         name = alias['tag_name']
-            
+
             if not tag:
                 return await ctx.send(f"Tag or alias `{name}` not found.")
-            
+
             await conn.execute(
                 """UPDATE tags SET uses = uses + 1
                 WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4))""",
                 name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None
             )
-            
+
 
             text, embeds, view, files = await self.formatter.format(tag['content'], ctx, args=args)
             if text.strip() or embeds or (view and view.children) or files:
@@ -7597,7 +7599,7 @@ class Tags(commands.Cog):
                     )
                 except discord.HTTPException as e:
                     await ctx.send(f"Failed to send tag: {e}")
-    
+
     @show.autocomplete("name")
     async def autocomplete_tag_show_name(
         self,
@@ -7605,27 +7607,27 @@ class Tags(commands.Cog):
         current: str
     ):
         return await self.tag_name_autocomplete(interaction, current)
-    
+
     @tag.command(name="create", description="Create a tag.", with_app_command=True, aliases=["add"])
     @app_commands.describe(
-        name="The tag name.", 
-        content="The tag content.", 
+        name="The tag name.",
+        content="The tag content.",
         personal="Make this a personal tag."
     )
     async def create(self, ctx: commands.Context, name: str, *, content: str, personal: bool = False):
         await ctx.typing()
         if content is None:
             return await ctx.send("Please provide both a name and content for the tag.")
-        
+
         content, content_personal = self.parse_personal_flag(content)
         personal = personal or content_personal
-        
+
         name = name.lower()
         if len(name) > 50:
             return await ctx.send("Tag names must be 50 characters or less.")
         if len(content) > 2000:
             return await ctx.send("Tag content must be 2000 characters or less.")
-        
+
         try:
             async with self.pool.acquire() as conn:
                 if personal:
@@ -7646,7 +7648,7 @@ class Tags(commands.Cog):
                     await ctx.send(f"Created server tag `{name}`")
         except asyncpg.UniqueViolationError:
             await ctx.send(f"A tag named `{name}` already exists in this context.")
-    
+
     @tag.command(name="edit", description="Edit an existing tag.", with_app_command=True, aliases=["update"])
     @app_commands.describe(
         name="The tag name.",
@@ -7656,19 +7658,19 @@ class Tags(commands.Cog):
     async def edit(self, ctx: commands.Context, name: str, *, new_content: str = None, personal: bool = False):
         await ctx.typing()
         name = name.lower()
-        
+
 
         if new_content is not None:
             new_content, content_personal = self.parse_personal_flag(new_content)
             personal = personal or content_personal
-        
+
         if not new_content:
             return await ctx.send("Please provide the new content for the tag.")
-        
+
         async with self.pool.acquire() as conn:
             if personal:
                 updated = await conn.execute(
-                    """UPDATE tags SET content = $1 
+                    """UPDATE tags SET content = $1
                     WHERE name = $2 AND user_id = $3""",
                     new_content, name, ctx.author.id
                 )
@@ -7677,10 +7679,10 @@ class Tags(commands.Cog):
             else:
                 if not ctx.guild:
                     return await ctx.send("Server tags can only be edited in servers.")
-                
+
 
                 updated = await conn.execute(
-                    """UPDATE tags SET content = $1 
+                    """UPDATE tags SET content = $1
                     WHERE name = $2 AND guild_id = $3 AND author_id = $4""",
                     new_content, name, ctx.guild.id, ctx.author.id
                 )
@@ -7690,7 +7692,7 @@ class Tags(commands.Cog):
 
                 if ctx.author.guild_permissions.manage_messages:
                     updated = await conn.execute(
-                        """UPDATE tags SET content = $1 
+                        """UPDATE tags SET content = $1
                         WHERE name = $2 AND guild_id = $3""",
                         new_content, name, ctx.guild.id
                     )
@@ -7698,7 +7700,7 @@ class Tags(commands.Cog):
                         return await ctx.send(f"Forcefully edited server tag `{name}`")
 
             await ctx.send(f"No editable tag named `{name}` found.")
-    
+
     @edit.autocomplete("name")
     async def autocomplete_tag_edit_name(
         self,
@@ -7706,7 +7708,7 @@ class Tags(commands.Cog):
         current: str
     ):
         return await self.tag_name_autocomplete(interaction, current)
-    
+
     @tag.command(name="rename", description="Rename a tag.", with_app_command=True)
     @app_commands.describe(
         old_name="The current tag name.",
@@ -7717,17 +7719,17 @@ class Tags(commands.Cog):
         await ctx.typing()
         old_name = old_name.lower()
         new_name = new_name.lower()
-        
+
         if len(new_name) > 50:
             return await ctx.send("Tag names must be 50 characters or less.")
-        
+
         if old_name == new_name:
             return await ctx.send("The new name must be different from the old name.")
 
         async with self.pool.acquire() as conn:
             async with conn.transaction():
                 exists = await conn.fetchrow(
-                    """SELECT 1 FROM tags 
+                    """SELECT 1 FROM tags
                     WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4))""",
                     new_name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None
                 )
@@ -7736,14 +7738,14 @@ class Tags(commands.Cog):
 
 
                 tag = await conn.fetchrow(
-                    """SELECT 1 FROM tags 
+                    """SELECT 1 FROM tags
                     WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4 AND author_id = $5))""",
                     old_name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None, ctx.author.id
                 )
-                
+
                 if not tag and ctx.author.guild_permissions.manage_messages and not personal:
                     tag = await conn.fetchrow(
-                        """SELECT 1 FROM tags 
+                        """SELECT 1 FROM tags
                         WHERE name = $1 AND guild_id = $2""",
                         old_name, ctx.guild.id
                     )
@@ -7755,13 +7757,13 @@ class Tags(commands.Cog):
 
                 if personal:
                     await conn.execute(
-                        """UPDATE tags SET name = $1 
+                        """UPDATE tags SET name = $1
                         WHERE name = $2 AND user_id = $3""",
                         new_name, old_name, ctx.author.id
                     )
                 else:
                     await conn.execute(
-                        """UPDATE tags SET name = $1 
+                        """UPDATE tags SET name = $1
                         WHERE name = $2 AND guild_id = $3""",
                         new_name, old_name, ctx.guild.id
                     )
@@ -7777,7 +7779,7 @@ class Tags(commands.Cog):
                 )
 
         await ctx.send(f"Renamed tag from `{old_name}` to `{new_name}`")
-    
+
     @rename.autocomplete("old_name")
     async def autocomplete_tag_rename_name(
         self,
@@ -7785,7 +7787,7 @@ class Tags(commands.Cog):
         current: str
     ):
         return await self.tag_name_autocomplete(interaction, current)
-    
+
     @tag.command(name="remove", description="Remove a tag.", with_app_command=True, aliases=["rm", "delete", "del"])
     @app_commands.describe(
         name="The tag name.",
@@ -7796,7 +7798,7 @@ class Tags(commands.Cog):
         name, content_personal = self.parse_personal_flag(name)
         personal = personal or content_personal
         name = name.lower()
-        
+
         async with self.pool.acquire() as conn:
             if personal:
                 deleted = await conn.execute(
@@ -7808,10 +7810,10 @@ class Tags(commands.Cog):
             else:
                 if not ctx.guild:
                     return await ctx.send("Server tags can only be removed in servers.")
-                
+
 
                 deleted = await conn.execute(
-                    """DELETE FROM tags 
+                    """DELETE FROM tags
                     WHERE name = $1 AND guild_id = $2 AND author_id = $3""",
                     name, ctx.guild.id, ctx.author.id
                 )
@@ -7828,7 +7830,7 @@ class Tags(commands.Cog):
                         return await ctx.send(f"Forcefully removed server tag `{name}`")
 
             await ctx.send(f"No removeable tag `{name}` found.")
-    
+
     @remove.autocomplete("name")
     async def autocomplete_tag_remove_name(
         self,
@@ -7836,7 +7838,7 @@ class Tags(commands.Cog):
         current: str
     ):
         return await self.tag_name_autocomplete(interaction, current)
-    
+
     @tag.command(name="list", description="List available tags.", with_app_command=True, aliases=["ls"])
     @app_commands.describe(user="Filter tags by this user.", personal="Only show your personal tags.")
     async def list(self, ctx: commands.Context, user: discord.User = None, personal: bool = False):
@@ -7871,7 +7873,7 @@ class Tags(commands.Cog):
 
             if not tags:
                 return await ctx.send(f"No {'personal' if personal else 'server'} tags found.")
-            
+
             per_page = 10
             pages = []
             for i in range(0, len(tags), per_page):
@@ -7880,10 +7882,10 @@ class Tags(commands.Cog):
                     embed.add_field(name=f"{idx}.", value=tag['name'], inline=False)
                 embed.set_footer(text=f"Page {i//per_page + 1} of {(len(tags)-1)//per_page + 1}")
                 pages.append(embed)
-            
+
             view = TagPaginator(pages, ctx.interaction, ctx.author)
             view.message = await ctx.send(embed=pages[0], view=view)
-    
+
     @tag.command(name="info", description="Get information about a tag.", with_app_command=True)
     @app_commands.describe(
         name="The tag name.",
@@ -7894,7 +7896,7 @@ class Tags(commands.Cog):
         name, content_personal = self.parse_personal_flag(name)
         personal = personal or content_personal
         name = name.lower()
-        
+
         async with self.pool.acquire() as conn:
             tag = await conn.fetchrow(
                 """SELECT content, author_id, created_at, uses,
@@ -7906,7 +7908,7 @@ class Tags(commands.Cog):
 
             if not tag:
                 return await ctx.send(f"Tag `{name}` not found.")
-            
+
             embed = discord.Embed(title=f"Tag: {name}", color=discord.Color.blue())
             embed.add_field(name="Type", value="Server" if tag['is_guild_tag'] else "Personal", inline=True)
             embed.add_field(name="Uses", value=tag['uses'], inline=True)
@@ -7914,9 +7916,9 @@ class Tags(commands.Cog):
             author = self.bot.get_user(tag['author_id'])
             if author:
                 embed.set_author(name=f"Owned by {author}", icon_url=author.display_avatar.url, url=f"https://discord.com/users/{author.id}")
-            
+
             await ctx.send(embed=embed)
-    
+
     @info.autocomplete("name")
     async def autocomplete_tag_info_name(
         self,
@@ -7924,7 +7926,7 @@ class Tags(commands.Cog):
         current: str
     ):
         return await self.tag_name_autocomplete(interaction, current)
-    
+
     @tag.command(name="raw", description="Get the raw content of a tag.", with_app_command=True)
     @app_commands.describe(
         name="The tag name.",
@@ -7935,19 +7937,19 @@ class Tags(commands.Cog):
         name, content_personal = self.parse_personal_flag(name)
         personal = personal or content_personal
         name = name.lower()
-        
+
         async with self.pool.acquire() as conn:
             tag = await conn.fetchrow(
-                """SELECT content FROM tags 
+                """SELECT content FROM tags
                 WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4))""",
                 name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None
             )
 
             if not tag:
                 return await ctx.send(f"Tag `{name}` not found.")
-            
+
             await ctx.send(f"```\n{tag['content']}```")
-    
+
     @raw.autocomplete("name")
     async def autocomplete_tag_raw_name(
         self,
@@ -7955,7 +7957,7 @@ class Tags(commands.Cog):
         current: str
     ):
         return await self.tag_name_autocomplete(interaction, current)
-    
+
     @tag.command(name="transfer", description="Transfer ownership of a tag (server or personal).", with_app_command=True, aliases=["gift"])
     @app_commands.describe(name="The tag name.", new_owner="The user to transfer to.", personal="Whether this is a personal tag.")
     async def transfer(self, ctx: commands.Context, name: str, new_owner: discord.User, personal: bool = False):
@@ -7989,14 +7991,14 @@ class Tags(commands.Cog):
                         UPDATE tags SET author_id = $1
                         WHERE name = $2 AND guild_id = $3
                     """, new_owner.id, name, ctx.guild.id)
-            
+
             if result == "UPDATE 0":
                 return await ctx.send("Failed to transfer tag; no matching tag found.")
-            
+
             await conn.execute("UPDATE tag_aliases SET user_id = $1 WHERE tag_name = $2 AND guild_id = $3", new_owner.id, name, ctx.guild.id)
 
             await ctx.send(f"Transferred {'personal' if personal else 'server'} tag `{name}` to {new_owner.mention}")
-    
+
     @tag.command(name="search", description="Search for tags by name or content.", with_app_command=True)
     @app_commands.describe(query="The search term.", personal="Whether to search only your personal tags.")
     async def search(self, ctx: commands.Context, *, query: str, personal: bool = False):
@@ -8006,14 +8008,14 @@ class Tags(commands.Cog):
         async with self.pool.acquire() as conn:
             if personal:
                 rows = await conn.fetch("""
-                    SELECT name, content FROM tags 
+                    SELECT name, content FROM tags
                     WHERE user_id = $1 AND (name ILIKE '%' || $2 || '%' OR content ILIKE '%' || $2 || '%')""",
                     ctx.author.id, query)
             else:
                 if not ctx.guild:
                     return await ctx.send("Server tags can only be searched in servers.")
                 rows = await conn.fetch("""
-                    SELECT name, content FROM tags 
+                    SELECT name, content FROM tags
                     WHERE guild_id = $1 AND (name ILIKE '%' || $2 || '%' OR content ILIKE '%' || $2 || '%')""",
                     ctx.guild.id, query)
 
@@ -8031,7 +8033,7 @@ class Tags(commands.Cog):
 
             view = TagPaginator(pages, ctx.interaction, ctx.author)
             view.message = await ctx.send(embed=pages[0], view=view)
-    
+
     @tag.command(name="random", description="Show a random tag.", with_app_command=True)
     @app_commands.describe(args="Arguments and flags. (e.g. --personal, --user @User, --hide-name)", personal="Whether to fetch from personal tags.")
     async def random(self, ctx: commands.Context, *, args: str = "", personal: bool = False):
@@ -8086,7 +8088,7 @@ class Tags(commands.Cog):
 
             if not tag:
                 return await ctx.send("Failed to fetch tag content.")
-            
+
             await conn.execute("""
                 UPDATE tags SET uses = uses + 1
                 WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id IS NOT DISTINCT FROM $4))
@@ -8109,7 +8111,7 @@ class Tags(commands.Cog):
                 )
             except discord.HTTPException as e:
                 await ctx.send(f"Failed to send tag: {e}")
-    
+
     @tag.group(name="alias", description="Manage tag aliases.", with_app_command=True)
     async def alias(self, ctx: commands.Context):
         if ctx.invoked_subcommand is None:
@@ -8218,7 +8220,7 @@ class Tags(commands.Cog):
     @app_commands.describe(personal="Whether to list personal tag aliases")
     async def alias_list(self, ctx: commands.Context, personal: bool = False):
         await ctx.typing()
-        
+
         if not ctx.guild and not personal:
             return await ctx.send("Server tags can only be listed in servers.")
 
@@ -8226,14 +8228,14 @@ class Tags(commands.Cog):
             try:
                 if personal:
                     aliases = await conn.fetch(
-                        """SELECT alias, tag_name FROM tag_aliases 
+                        """SELECT alias, tag_name FROM tag_aliases
                         WHERE user_id = $1 ORDER BY alias""",
                         ctx.author.id
                     )
                     title = "Your personal tag aliases"
                 else:
                     aliases = await conn.fetch(
-                        """SELECT alias, tag_name FROM tag_aliases 
+                        """SELECT alias, tag_name FROM tag_aliases
                         WHERE guild_id = $1 ORDER BY alias""",
                         ctx.guild.id
                     )
@@ -8242,7 +8244,7 @@ class Tags(commands.Cog):
                 if not aliases:
                     scope_type = "personal" if personal else "server"
                     return await ctx.send(f"No {scope_type} tag aliases found.")
-                
+
                 per_page = 10
                 pages = []
                 for i in range(0, len(aliases), per_page):
@@ -8255,7 +8257,7 @@ class Tags(commands.Cog):
 
                 view = TagPaginator(pages, ctx.interaction, ctx.author)
                 view.message = await ctx.send(embed=pages[0], view=view)
-                
+
             except Exception as e:
                 await ctx.send(f"An error occurred: {str(e)}")
 
