@@ -250,7 +250,7 @@ class AI(commands.Cog):
                     f"{bot_info.data['llama_cpp_url']}/v1/chat/completions",
                     json=payload,
                     headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=180)
+                    timeout=aiohttp.ClientTimeout(total=300)
                 ) as resp:
                     if resp.status != 200:
                         text = await resp.text()
@@ -262,7 +262,7 @@ class AI(commands.Cog):
                     return content
 
         except asyncio.TimeoutError:
-            raise RuntimeError("AI request timed out after 180 seconds.")
+            raise RuntimeError("AI request timed out after 300 seconds.")
         except Exception as e:
             raise RuntimeError(f"AI request failed: {str(e)}")
 
