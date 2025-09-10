@@ -5052,8 +5052,11 @@ class Tags(commands.Cog):
                 * Example: `{if:some|==|thing|then:yes|else:no}`
             """
             resolved_str, _, _, _ = await self.formatter.format(args_str, ctx, **kwargs)
+            processed_str = re.sub(r'\s+then:', 'then:', resolved_str)
+            processed_str = re.sub(r'\s+elif:', 'elif:', processed_str)
+            processed_str = re.sub(r'\s+else:', 'else:', processed_str)
             tokens = []
-            for part in resolved_str.split('|'):
+            for part in processed_str.split('|'):
                 if ':' in part:
                     key = part.split(':')[0].lower()
                     if key in ('then', 'else', 'elif'):
