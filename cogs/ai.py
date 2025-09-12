@@ -278,7 +278,7 @@ class AI(commands.Cog):
                 INSERT INTO system_prompts (user_id, prompt) VALUES ($1, $2)
                 ON CONFLICT (user_id) DO UPDATE SET prompt = EXCLUDED.prompt
                 """, ctx.author.id, prompt)
-            await ctx.send(f"Custom system prompt for yourself has been set to:\n```{prompt[:500]}...```")
+            await ctx.send(f"Custom system prompt for yourself has been set to:\n```{prompt[:500]}```")
         else:
             await ctx.send("Database not initialized.")
 
@@ -307,7 +307,7 @@ class AI(commands.Cog):
                         INSERT INTO channel_prompts (channel_id, prompt) VALUES ($1, $2)
                         ON CONFLICT (channel_id) DO UPDATE SET prompt = EXCLUDED.prompt
                         """, ctx.channel.id, prompt)
-                    await ctx.send(f"Custom channel system prompt has been set to:\n```{prompt[:500]}...```")
+                    await ctx.send(f"Custom channel system prompt has been set to:\n```{prompt[:500]}```")
                 else:
                     await ctx.send("You don't have permission to change this channel's system prompt.")
                     return
@@ -316,7 +316,7 @@ class AI(commands.Cog):
                     INSERT INTO channel_prompts (channel_id, prompt) VALUES ($1, $2)
                     ON CONFLICT (channel_id) DO UPDATE SET prompt = EXCLUDED.prompt
                     """, ctx.channel.id, prompt)
-                await ctx.send(f"Custom channel system prompt has been set to:\n```{prompt[:500]}...```")
+                await ctx.send(f"Custom channel system prompt has been set to:\n```{prompt[:500]}```")
         else:
             await ctx.send("Database not initialized.")
 
@@ -352,7 +352,7 @@ class AI(commands.Cog):
                         INSERT INTO guild_prompts (guild_id, prompt) VALUES ($1, $2)
                         ON CONFLICT (guild_id) DO UPDATE SET prompt = EXCLUDED.prompt
                         """, ctx.guild.id, prompt)
-                    await ctx.send(f"Custom server system prompt has been set to:\n```{prompt[:500]}...```")
+                    await ctx.send(f"Custom server system prompt has been set to:\n```{prompt[:500]}```")
                 else:
                     await ctx.send("You don't have permission to change this server's system prompt.")
                     return

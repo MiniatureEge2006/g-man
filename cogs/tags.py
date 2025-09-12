@@ -4565,7 +4565,7 @@ class Tags(commands.Cog):
                     - human: "3d 2h" (default)
                     - precise: "3 days, 2 hours, 15 minutes"
                     - colon: "74:15:30" (HH:MM:SS)
-                    - iso: "P3DT2H15M30S" (ISO 8601)
+                    - iso: "2025-09-12T14:30:45.123456+00:00" ISO 8601
                     - seconds: total seconds
                     - discord: <t:unix_timestamp:F>
                     - unix: Unix timestamp
@@ -4656,19 +4656,8 @@ class Tags(commands.Cog):
                             parts.append(f"{value} {unit}{'s' if value != 1 else ''}")
                     return ", ".join(parts) if parts else "0 seconds"
 
-                def format_iso(seconds):
-                    days = delta.days
-                    hours = delta.seconds // 3600
-                    minutes = (delta.seconds // 60) % 60
-                    seconds = delta.seconds % 60
-                    iso = "P"
-                    if days: iso += f"{days}D"
-                    if any((hours, minutes, seconds)):
-                        iso += "T"
-                        if hours: iso += f"{hours}H"
-                        if minutes: iso += f"{minutes}M"
-                        if seconds: iso += f"{seconds}S"
-                    return iso.replace("T0S", "").replace("P0D", "PT0S")
+                def format_iso():
+                    return end.isoformat()
 
 
                 if fmt == "human":
@@ -4681,7 +4670,7 @@ class Tags(commands.Cog):
                     seconds = int(total_seconds % 60)
                     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
                 elif fmt == "iso":
-                    return format_iso(total_seconds)
+                    return format_iso()
                 elif fmt == "seconds":
                     return str(int(total_seconds))
                 elif fmt in ("discord", "unix"):
