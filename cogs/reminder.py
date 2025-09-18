@@ -58,7 +58,7 @@ class Reminder(commands.Cog):
         if not reminder_text:
             reminder_text = random.choice(random_reminders)
         if user:
-            if not (str(ctx.author.id) in bot_info.data['owners'] or not ctx.author.guild_permissions.manage_guild):
+            if not (str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.manage_guild):
                 await ctx.send("You need the `Manage Guild` permission to set a reminder for another user.")
                 return
             target_user = user
@@ -176,7 +176,7 @@ class Reminder(commands.Cog):
         query = "DELETE FROM reminders WHERE user_id = $1;"
         await self.db_pool.execute(query, target_user_id)
         if server:
-            if not (str(ctx.author.id) in bot_info.data['owners'] or not ctx.author.guild_permissions.manage_guild):
+            if not (str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.manage_guild):
                 await ctx.send("You need the `Manage Guild` permission to clear reminders for the server.")
                 return
             query = "DELETE FROM reminders WHERE guild_id = $1;"
@@ -185,7 +185,7 @@ class Reminder(commands.Cog):
         else:
             if not user:
                 target_user_id = ctx.author.id
-            if not (str(ctx.author.id) in bot_info.data['owners'] or not ctx.author.guild_permissions.manage_guild):
+            if not (str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.manage_guild):
                 await ctx.send("You need the `Manage Guild` permission to clear reminders for another user.")
                 return
             target_user_id = user.id if user else ctx.author.id
@@ -197,18 +197,16 @@ class Reminder(commands.Cog):
         if not self.db_pool:
             return
         while True:
-            query = "SELECT id, user_id, guild_id, channel_id, reminder_id, reminder, reminder_time FROM reminders WHERE reminder_time > $1 ORDER BY reminder_time ASC LIMIT 1;"
             current_time = datetime.now(timezone.utc)
-            reminder = await self.db_pool.fetchrow(query, current_time)
-            if reminder is None:
+            query = "SELECT id, user_id, guild_id, channel_id, reminder_id, reminder, reminder_time FROM reminders WHERE reminder_time <= $1;"
+            reminders = await self.db_pool.fetch(query, current_time)
+            
+            if not reminders:
                 await asyncio.sleep(5)
                 continue
-            reminder_time = reminder['reminder_time']
-            time_to_sleep = max(0, (reminder_time - current_time).total_seconds())
-            await asyncio.sleep(time_to_sleep)
-            confirmation_query = "SELECT reminder_id FROM reminders WHERE reminder_id = $1;"
-            confirmed_reminder = await self.db_pool.fetchval(confirmation_query, reminder['reminder_id'])
-            if confirmed_reminder:
+            
+            for reminder in reminders:
+                reminder_time = reminder['reminder_time']
                 channel = self.bot.get_channel(reminder['channel_id'])
                 user = self.bot.get_user(reminder['user_id'])
                 if user:
@@ -220,8 +218,11 @@ class Reminder(commands.Cog):
                             await dm_channel.send(f"{user.mention}, reminder from <t:{int(reminder_time.timestamp())}:R> (<t:{int(reminder_time.timestamp())}:F>, {reminder_time.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)')}): `{reminder['reminder']}`", allowed_mentions=discord.AllowedMentions(users=True))
                     except (discord.Forbidden, AttributeError):
                         pass
+                
                 delete_query = "DELETE FROM reminders WHERE reminder_id = $1;"
                 await self.db_pool.execute(delete_query, reminder['reminder_id'])
+            
+            await asyncio.sleep(1)
     
 
 async def setup(bot):
