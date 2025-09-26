@@ -41,7 +41,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install numpy requests pillow bgutil-ytdlp-pot-provider typed-ffmpeg
 RUN pip install --pre -U "yt-dlp[default]"
-RUN npm install -g typescript node ts-node @types/node mathjs imagescript
+RUN npm install -g typescript node ts-node @types/node mathjs imagescript deno
 ENV NODE_PATH=/usr/local/lib/node_modules
 USER gcoder
 RUN mkdir -p /home/gcoder/executions && \
