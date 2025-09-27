@@ -40,7 +40,7 @@ RUN groupadd -g 1000 gcoder && useradd -r -u 1000 -g gcoder -m -d /home/gcoder g
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install numpy requests pillow bgutil-ytdlp-pot-provider typed-ffmpeg
-RUN pip install --pre -U "yt-dlp[default]"
+RUN pip install --pre -U "yt-dlp[default,curl-cffi]"
 RUN npm install -g typescript node ts-node @types/node mathjs imagescript deno
 ENV NODE_PATH=/usr/local/lib/node_modules
 USER gcoder
