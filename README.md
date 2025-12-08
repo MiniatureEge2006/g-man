@@ -1,4 +1,7 @@
 ![gman](https://github.com/user-attachments/assets/f0f40d23-6de0-4ab3-b185-be5c4d32c812)
+# DISCONTINUED
+**This project is discontinued due to lack of motivation and other things to do. Feel free to fork it however.**
+
 # Rise and shine. Mr. Freeman. Rise. And. Shine.
 **This project is a fork of the original g_man bot. (https://github.com/nkrasn/g_man) So credits to nkrasn for making this bot.**
 
