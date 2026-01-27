@@ -11,7 +11,7 @@ from pathlib import Path
 import traceback
 
 APP_USER = "gcoder"
-EXECUTION_DIR = Path("/home/gcoder/executions")
+EXECUTION_DIR = Path("/home/gcoder")
 INPUT_DIR = EXECUTION_DIR / "input"
 OUTPUT_DIR = EXECUTION_DIR / "output"
 ALLOWED_LANGUAGES = ["bash", "python", "javascript", "typescript", "php", "ruby", "lua", "go", "rust", "c", "cpp", "csharp", "zig", "java", "kotlin", "nim"]

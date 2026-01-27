@@ -39,35 +39,21 @@ RUN curl -LO https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz 
 RUN groupadd -g 1000 gcoder && useradd -r -u 1000 -g gcoder -m -d /home/gcoder gcoder
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install numpy requests pillow bgutil-ytdlp-pot-provider typed-ffmpeg
+RUN pip install numpy requests pillow typed-ffmpeg
 RUN pip install --pre -U "yt-dlp[default,curl-cffi]"
 RUN npm install -g typescript node ts-node @types/node mathjs imagescript deno
 ENV NODE_PATH=/usr/local/lib/node_modules
 USER gcoder
-RUN mkdir -p /home/gcoder/executions && \
-    mkdir -p /home/gcoder/executions/input && \
-    mkdir -p /home/gcoder/executions/output && \
-    chmod 775 /home/gcoder/executions && \
-    cd /home/gcoder && \
-    git clone --single-branch --branch 1.2.2 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git && \
-    cd bgutil-ytdlp-pot-provider/server/ && \
-    npm install && \
-    npx tsc
+RUN mkdir -p /home/gcoder/input && \
+    mkdir -p /home/gcoder/output
 
 USER root
 RUN mkdir -p /app && \
     chown -R root:root /app && \
-    chmod -R 555 /app && \
-    chmod -R 555 /home/gcoder/bgutil-ytdlp-pot-provider
+    chmod -R 555 /app
 COPY --chown=gcoder:gcoder . /app
 
 USER gcoder
 EXPOSE 8000
 
-CMD ["bash", "-c", \
-     "set -m; \
-      (cd /home/gcoder/bgutil-ytdlp-pot-provider/server/ && node build/main.js) & \
-      (cd /home/gcoder/executions && uvicorn --app-dir /app app:app --host 0.0.0.0 --port 8000) & \
-      fg %1 || fg %2 || wait -n; \
-      kill 0; \
-      exit 1"]
+CMD ["bash", "-c", "uvicorn --app-dir /app app:app --host 0.0.0.0 --port 8000"]
