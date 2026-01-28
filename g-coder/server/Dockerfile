@@ -5,6 +5,7 @@ FROM python:3.13.3-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
+    jq \
     xz-utils \
     ffmpeg \
     frei0r-plugins \
