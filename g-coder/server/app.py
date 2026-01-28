@@ -152,45 +152,45 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
                 f.write(code)
             output, return_code = await run_with_timeout(['lua', str(lua_file)], cwd=work_dir)
         elif language == "go":
-            go_file = work_dir / "main.go"
+            go_file = work_dir / "script.go"
             with go_file.open('w') as f:
                 f.write(code)
             output, return_code = await run_with_timeout(['go', 'run', str(go_file)], cwd=work_dir)
         elif language == "rust":
-            rust_file = work_dir / "main.rs"
+            rust_file = work_dir / "script.rs"
             with rust_file.open('w') as f:
                 f.write(code)
             compile_out, compile_code = await run_with_timeout(
-                ['rustc', str(rust_file), '-o', str(work_dir / 'main')], cwd=work_dir)
+                ['rustc', str(rust_file), '-o', str(work_dir / 'script')], cwd=work_dir)
             if compile_code != 0:
                 output = compile_out
                 return_code = compile_code
             else:
-                output, return_code = await run_with_timeout([str(work_dir / 'main')], cwd=work_dir)
+                output, return_code = await run_with_timeout([str(work_dir / 'script')], cwd=work_dir)
         elif language == "c":
-            c_file = work_dir / "main.c"
+            c_file = work_dir / "script.c"
             with c_file.open('w') as f:
                 f.write(code)
             compile_out, compile_code = await run_with_timeout(
-                ['gcc', str(c_file), '-o', str(work_dir / 'main')], cwd=work_dir)
+                ['gcc', str(c_file), '-o', str(work_dir / 'script')], cwd=work_dir)
             if compile_code != 0:
                 output = compile_out
                 return_code = compile_code
             else:
-                output, return_code = await run_with_timeout([str(work_dir / 'main')], cwd=work_dir)
+                output, return_code = await run_with_timeout([str(work_dir / 'script')], cwd=work_dir)
         elif language == "cpp":
-            cpp_file = work_dir / "main.cpp"
+            cpp_file = work_dir / "script.cpp"
             with cpp_file.open('w') as f:
                 f.write(code)
             compile_out, compile_code = await run_with_timeout(
-                ['g++', str(cpp_file), '-o', str(work_dir / 'main')], cwd=work_dir)
+                ['g++', str(cpp_file), '-o', str(work_dir / 'script')], cwd=work_dir)
             if compile_code != 0:
                 output = compile_out
                 return_code = compile_code
             else:
-                output, return_code = await run_with_timeout([str(work_dir / 'main')], cwd=work_dir)
+                output, return_code = await run_with_timeout([str(work_dir / 'script')], cwd=work_dir)
         elif language == "csharp":
-            cs_file = work_dir / "Program.cs"
+            cs_file = work_dir / "script.cs"
             with cs_file.open('w') as f:
                 f.write(code)
             compile_out, compile_code = await run_with_timeout(['mcs', str(cs_file)], cwd=work_dir)
@@ -198,15 +198,14 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
                 output = compile_out
                 return_code = compile_code
             else:
-                output, return_code = await run_with_timeout(['mono', str(work_dir / 'Program.exe')], cwd=work_dir)
+                output, return_code = await run_with_timeout(['mono', str(work_dir / 'script.exe')], cwd=work_dir)
         elif language == "zig":
-            zig_file = work_dir / "main.zig"
+            zig_file = work_dir / "script.zig"
             with zig_file.open('w') as f:
                 f.write(code)
             output, return_code = await run_with_timeout(['zig', 'run', str(zig_file)], cwd=work_dir)
         elif language == "java":
-            java_class_name = "Main"
-            java_file = work_dir / f"{java_class_name}.java"
+            java_file = work_dir / f"script.java"
             with java_file.open("w") as f:
                 f.write(code)
             
@@ -215,13 +214,13 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
                 output = compile_out
                 return_code = compile_code
             else:
-                output, return_code = await run_with_timeout(['java', '-cp', str(work_dir), java_class_name], cwd=work_dir)
+                output, return_code = await run_with_timeout(['java', '-cp', str(work_dir), 'script.java'], cwd=work_dir)
         elif language == "kotlin":
-            kt_file = work_dir / "Main.kt"
+            kt_file = work_dir / "script.kt"
             with kt_file.open("w") as f:
                 f.write(code)
             
-            compile_jar = work_dir / "main.jar"
+            compile_jar = work_dir / "script.jar"
             compile_out, compile_code = await run_with_timeout(['kotlinc', str(kt_file), '-include-runtime', '-d', str(compile_jar)], cwd=work_dir)
             if compile_code != 0:
                 output = compile_out

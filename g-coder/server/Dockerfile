@@ -35,10 +35,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -LO https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz \
     && tar -xf zig-x86_64-linux-0.14.1.tar.xz \
     && mv zig-x86_64-linux-0.14.1 /opt/zig \
-    && ln -s /opt/zig/zig /usr/local/bin/zig
+    && ln -s /opt/zig/zig /usr/local/bin/zig \
+    && rm zig-x86_64-linux-0.14.1.tar.xz
 RUN groupadd -g 1000 gcoder && useradd -r -u 1000 -g gcoder -m -d /home/gcoder gcoder
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && rm requirements.txt
 RUN pip install numpy requests pillow typed-ffmpeg
 RUN pip install --pre -U "yt-dlp[default,curl-cffi]"
 RUN npm install -g typescript node ts-node @types/node mathjs imagescript deno
