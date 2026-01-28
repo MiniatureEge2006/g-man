@@ -12,3 +12,4 @@ PyNaCl
 yt-dlp
 matplotlib
 jsonschema
+ollama

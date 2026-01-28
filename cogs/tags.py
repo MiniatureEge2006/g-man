@@ -29,6 +29,7 @@ import matplotlib.font_manager
 import hashlib
 from zoneinfo import ZoneInfo
 import dateparser
+import ollama
 
 IMAGE_TYPES = ('image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif')
 VIDEO_TYPES = ('video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska', 'video/x-msvideo', 'video/x-ms-wmv')
@@ -3988,6 +3989,13 @@ class Tags(commands.Cog):
                 ai = ctx.bot.get_cog('AI')
                 if not ai:
                     return "[AI error: AI cog not loaded]"
+                
+                think_mode = re.search(r'(^|\s)--think($|\s)', prompt) is not None
+                if think_mode:
+                    prompt = re.sub(r'(^|\s)--think($|\s)', ' ', prompt).strip()
+                show_thinking = re.search(r'(^|\s)--show-thinking($|\s)', prompt) is not None
+                if show_thinking:
+                    prompt = re.sub(r'(^|\s)--show-thinking($|\s)', ' ', prompt).strip()
 
                 class AIContext:
                     __slots__ = ('bot', 'author', 'guild', 'channel', 'message', '_state')
@@ -4025,9 +4033,16 @@ class Tags(commands.Cog):
 
                 messages.append({"role": "user", "content": prompt})
 
-                content = await ai.get_ai_response(messages)
-                final_content = re.sub(r'<think>.*?</think>\s*', '', content, flags=re.DOTALL).strip()
-                final_content = re.sub(r'\n{3,}', '\n\n', final_content)
+                response = await asyncio.to_thread(
+                    ollama.chat,
+                    model=bot_info.data['ollama_model'],
+                    messages=messages,
+                    think=think_mode
+                )
+
+                content = response.message.content
+                if show_thinking:
+                    content = f"**Thinking..**\n{response.message.thinking}\n**...done thinking.**\n{content}"
 
                 new_history = (history[-MAX_CONVERSATION_HISTORY_LENGTH * 2:] if history else []) + [
                     {"role": "user", "content": prompt},
@@ -4035,7 +4050,7 @@ class Tags(commands.Cog):
                 ]
                 await ai.save_conversation_history(conv_key, new_history)
 
-                return final_content
+                return content
 
             except Exception as e:
                 return f"[AI error: {str(e)}]"
