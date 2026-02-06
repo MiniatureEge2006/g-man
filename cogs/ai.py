@@ -172,17 +172,26 @@ class AI(commands.Cog):
             if user_history:
                 messages[1:1] = user_history[-MAX_CONVERSATION_HISTORY_LENGTH:]
 
-            response = await self.get_ai_response(messages, think_mode, show_thinking)
-            content = response.message.content
+            response = await self.get_ai_response(messages, think_mode)
+            final_content = response.message.content
+            display_content = final_content
 
-            if not content:
-                await ctx.reply("Command returned no content.")
+            if show_thinking and getattr(response.message, "thinking", None):
+                display_content = (
+                    "**Thinking...**\n"
+                    f"{response.message.thinking}\n"
+                    "**...done thinking.**\n"
+                    f"{final_content}"
+                )
+
+            if not final_content:
+                await ctx.reply("AI returned no content.")
                 return
 
             tags = ctx.bot.get_cog('Tags')
             if tags and hasattr(tags, 'formatter'):
                 try:
-                    text, embeds, view, files = await tags.formatter.format(content, ctx)
+                    text, embeds, view, files = await tags.formatter.format(display_content, ctx)
 
                     if embeds or (view and view.childen) or files:
                         message_content = text[:2000] if text else None
@@ -214,7 +223,7 @@ class AI(commands.Cog):
                     new_history = user_history[-MAX_CONVERSATION_HISTORY_LENGTH * 2:] if user_history else []
                     new_history.extend([
                         {"role": "user", "content": prompt},
-                        {"role": "assistant", "content": content}
+                        {"role": "assistant", "content": final_content}
                     ])
                     await self.save_conversation_history(conversation_key, new_history)
                     return
@@ -222,18 +231,18 @@ class AI(commands.Cog):
                     pass
 
             if len(content) > 2000:
-                embed = discord.Embed(title="G-AI Response", description=content[:4096], color=discord.Color.blurple())
+                embed = discord.Embed(title="G-AI Response", description=display_content[:4096], color=discord.Color.blurple())
                 embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
                 embed.set_footer(text=f"AI Response took {time.time() - start_time:.2f} seconds", icon_url="https://ollama.com/public/og.png")
                 await ctx.reply(embed=embed)
             else:
-                await ctx.reply(content)
+                await ctx.reply(display_content)
 
 
             new_history = user_history[-MAX_CONVERSATION_HISTORY_LENGTH * 2:] if user_history else []
             new_history.extend([
                 {"role": "user", "content": prompt},
-                {"role": "assistant", "content": content}
+                {"role": "assistant", "content": final_content}
             ])
             await self.save_conversation_history(conversation_key, new_history)
 
@@ -241,7 +250,7 @@ class AI(commands.Cog):
             raise commands.CommandError(str(e))
 
 
-    async def get_ai_response(self, messages: list, think_mode: bool = False, show_thinking: bool = False):
+    async def get_ai_response(self, messages: list, think_mode: bool = False):
         try:
             response = await asyncio.to_thread(
                 ollama.chat,
@@ -249,12 +258,6 @@ class AI(commands.Cog):
                 messages=messages,
                 think=think_mode
             )
-            content = response.message.content
-            if not show_thinking:
-                content = content
-            elif show_thinking:
-                content = f"**Thinking...**\n{response.message.thinking}\n**...done thinking.**\n{content}"
-            response.message.content = content
             return response
         except Exception as e:
             raise RuntimeError(f"AI request failed: {str(e)}")

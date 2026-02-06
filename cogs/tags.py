@@ -4040,17 +4040,23 @@ class Tags(commands.Cog):
                     think=think_mode
                 )
 
-                content = response.message.content
-                if show_thinking:
-                    content = f"**Thinking..**\n{response.message.thinking}\n**...done thinking.**\n{content}"
+                final_content = response.message.content
+                display_content = final_content
+                if show_thinking and getattr(response.message, "thinking", None):
+                    display_content = (
+                        "**Thinking...**\n"
+                        f"{response.message.thinking}\n"
+                        "**...done thinking.**\n"
+                        f"{final_content}"
+                    )
 
                 new_history = (history[-MAX_CONVERSATION_HISTORY_LENGTH * 2:] if history else []) + [
                     {"role": "user", "content": prompt},
-                    {"role": "assistant", "content": content}
+                    {"role": "assistant", "content": final_content}
                 ]
                 await ai.save_conversation_history(conv_key, new_history)
 
-                return content
+                return display_content
 
             except Exception as e:
                 return f"[AI error: {str(e)}]"
