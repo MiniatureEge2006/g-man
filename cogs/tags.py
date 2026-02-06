@@ -4244,8 +4244,8 @@ class Tags(commands.Cog):
 
                         elif isinstance(item, list):
                             if token_type == 'key':
-                                if token == '*':
-                                    next_results.extend(item)
+                                if token.isdigit() or token == '*':
+                                    continue
                                 else:
                                     for elem in item:
                                         if isinstance(elem, dict) and token in elem:
