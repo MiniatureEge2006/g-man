@@ -193,7 +193,7 @@ class AI(commands.Cog):
                 try:
                     text, embeds, view, files = await tags.formatter.format(display_content, ctx)
 
-                    if embeds or (view and view.childen) or files:
+                    if embeds or (view and view.children) or files:
                         message_content = text[:2000] if text else None
                         await ctx.reply(
                             content=message_content,
