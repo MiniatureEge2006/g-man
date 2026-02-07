@@ -2,7 +2,6 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import ollama
-import asyncio
 import time
 import asyncpg
 import bot_info
@@ -153,7 +152,7 @@ class AI(commands.Cog):
         await ctx.typing()
         await self.process_ai_response(ctx, prompt)
 
-    async def process_ai_response(self, ctx: commands.Context, prompt: str, think_mode: bool = False, show_thinking: bool = False):
+    async def process_ai_response(self, ctx: commands.Context, prompt: str, think_mode: bool = False, show_thinking: bool = False, web_mode: bool = False):
         start_time = time.time()
         try:
             think_mode = re.search(r'(^|\s)--think($|\s)', prompt) is not None
@@ -162,6 +161,9 @@ class AI(commands.Cog):
             show_thinking = re.search(r'(^|\s)--show-thinking($|\s)', prompt) is not None
             if show_thinking:
                 prompt = re.sub(r'(^|\s)--show-thinking($|\s)', ' ', prompt).strip()
+            web_mode = re.search(r'(^|\s)--web($|\s)', prompt) is not None
+            if web_mode:
+                prompt = re.sub(r'(^|\s)--web($|\s)', ' ', prompt).strip()
             conversation_key = self.get_conversation(ctx)
             user_history = await self.get_conversation_history(conversation_key)
             system_prompt = await self.create_system_prompt(ctx, prompt)
@@ -172,7 +174,7 @@ class AI(commands.Cog):
             if user_history:
                 messages[1:1] = user_history[-MAX_CONVERSATION_HISTORY_LENGTH:]
 
-            response = await self.get_ai_response(messages, think_mode)
+            response = await self.get_ai_response(messages, think_mode, web_mode)
             final_content = response.message.content
             display_content = final_content
 
@@ -250,15 +252,38 @@ class AI(commands.Cog):
             raise commands.CommandError(str(e))
 
 
-    async def get_ai_response(self, messages: list, think_mode: bool = False):
+    async def get_ai_response(self, messages: list, think_mode: bool = False, web_mode: bool = False):
         try:
-            response = await asyncio.to_thread(
-                ollama.chat,
-                model=bot_info.data['ollama_model'],
-                messages=messages,
-                think=think_mode
-            )
-            return response
+            while True:
+                ollama_client = ollama.AsyncClient(
+                    host="https://ollama.com" if web_mode else None,
+                    headers={'Authorization': 'Bearer ' + bot_info.data['ollama_api_key'] if web_mode else None}
+                    )
+                available_tools = {'web_search': ollama_client.web_search, 'web_fetch': ollama_client.web_fetch}
+                response = await ollama_client.chat(
+                    model=bot_info.data['ollama_model'],
+                    messages=messages,
+                    think=think_mode,
+                    tools=[ollama_client.web_search, ollama_client.web_fetch] if web_mode else None
+                )
+                msg = response.message
+
+                if web_mode and getattr(msg, "tool_calls", None):
+                    for tool_call in msg.tool_calls:
+                        function_to_call = available_tools.get(tool_call.function.name)
+                        if function_to_call:
+                            args = tool_call.function.arguments
+                            result = await function_to_call(**args)
+                            messages.append({
+                                "role": "tool",
+                                "tool_name": tool_call.function.name,
+                                "content": str(result)[:2000]
+                            })
+                        else:
+                            messages.append({"role": "tool", "content": f"Tool {tool_call.function.name} not found", "tool_name": tool_call.function.name})
+                    
+                    continue
+                return response
         except Exception as e:
             raise RuntimeError(f"AI request failed: {str(e)}")
 

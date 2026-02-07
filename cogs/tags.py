@@ -3996,6 +3996,9 @@ class Tags(commands.Cog):
                 show_thinking = re.search(r'(^|\s)--show-thinking($|\s)', prompt) is not None
                 if show_thinking:
                     prompt = re.sub(r'(^|\s)--show-thinking($|\s)', ' ', prompt).strip()
+                web_mode = re.search(r'(^|\s)--web($|\s)', prompt) is not None
+                if web_mode:
+                    prompt = re.sub(r'(^|\s)--web($|\s)', ' ', prompt).strip()
 
                 class AIContext:
                     __slots__ = ('bot', 'author', 'guild', 'channel', 'message', '_state')
@@ -4032,31 +4035,52 @@ class Tags(commands.Cog):
                     messages.extend(history[-MAX_CONVERSATION_HISTORY_LENGTH:])
 
                 messages.append({"role": "user", "content": prompt})
-
-                response = await asyncio.to_thread(
-                    ollama.chat,
-                    model=bot_info.data['ollama_model'],
-                    messages=messages,
-                    think=think_mode
-                )
-
-                final_content = response.message.content
-                display_content = final_content
-                if show_thinking and getattr(response.message, "thinking", None):
-                    display_content = (
-                        "**Thinking...**\n"
-                        f"{response.message.thinking}\n"
-                        "**...done thinking.**\n"
-                        f"{final_content}"
+                while True:
+                    ollama_client = ollama.AsyncClient(
+                        host="https://ollama.com" if web_mode else None,
+                        headers={'Authorization': 'Bearer ' + bot_info.data['ollama_api_key'] if web_mode else None}
                     )
+                    available_tools = {'web_search': ollama_client.web_search, 'web_fetch': ollama_client.web_fetch}
+                    response = await ollama_client.chat(
+                        model=bot_info.data['ollama_model'],
+                        messages=messages,
+                        think=think_mode,
+                        tools=[ollama_client.web_search, ollama_client.web_fetch] if web_mode else None
+                    )
+                    msg = response.message
+                    if web_mode and getattr(msg, "tool_calls", None):
+                        for tool_call in msg.tool_calls:
+                            function_to_call = available_tools.get(tool_call.function.name)
+                            if function_to_call:
+                                args = tool_call.function.arguments
+                                result = await function_to_call(**args)
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_name": tool_call.function.name,
+                                    "content": str(result)[:2000]
+                                })
+                            else:
+                                messages.append({"role":" tool", "content": f"Tool {tool_call.function.name} not found", "tool_name": tool_call.function.name})
+                        
+                        continue
+                    
+                    final_content = msg.content
+                    display_content = final_content
+                    if show_thinking and getattr(msg, "thinking", None):
+                        display_content = (
+                            "**Thinking...**\n"
+                            f"{msg.thinking}\n"
+                            "**...done thinking.**\n"
+                            f"{final_content}"
+                        )
 
-                new_history = (history[-MAX_CONVERSATION_HISTORY_LENGTH * 2:] if history else []) + [
-                    {"role": "user", "content": prompt},
-                    {"role": "assistant", "content": final_content}
-                ]
-                await ai.save_conversation_history(conv_key, new_history)
+                    new_history = (history[-MAX_CONVERSATION_HISTORY_LENGTH * 2:] if history else []) + [
+                        {"role": "user", "content": prompt},
+                        {"role": "assistant", "content": final_content}
+                    ]
+                    await ai.save_conversation_history(conv_key, new_history)
 
-                return display_content
+                    return display_content
 
             except Exception as e:
                 return f"[AI error: {str(e)}]"

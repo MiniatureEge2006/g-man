@@ -6,5 +6,6 @@
     "database": "Your PostgreSQL database URL",
     "spotify_client_id": "Your Spotify client ID",
     "spotify_client_secret": "Your Spotify client secret",
-    "ollama_model": "Your Ollama AI model"
+    "ollama_model": "Your Ollama AI model",
+    "ollama_api_key": "Your Ollama API key"
 }
