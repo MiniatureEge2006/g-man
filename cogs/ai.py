@@ -230,7 +230,7 @@ class AI(commands.Cog):
                 except Exception:
                     pass
 
-            if len(content) > 2000:
+            if len(display_content) > 2000:
                 embed = discord.Embed(title="G-AI Response", description=display_content[:4096], color=discord.Color.blurple())
                 embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
                 embed.set_footer(text=f"AI Response took {time.time() - start_time:.2f} seconds", icon_url="https://ollama.com/public/og.png")
