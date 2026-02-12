@@ -51,7 +51,7 @@ pip3 install -r requirements.txt
 * Create a copy of `bot_info_template.json` and rename it to `bot_info.json`. Fill it in with the appropriate information (keep the quotes).
 * Go to the g-coder directory and run `docker-compose up -d --build` to set up the code execution server.
   * Code execution server's port is 8000.
-* Run `py gman.py` (or if you are on Linux/macOS, `python3 gman.py`)
+* Run `py gman.py` (or if you are on Linux/macOS, `python gman.py`)
 # Terms of Service & Privacy Policy
 **You must follow our ToS and Privacy Policy in order to use the public version of G-Man. Please keep in mind I am a normal human being and that I can make mistakes. I have a life.**
 ## Terms of Service
