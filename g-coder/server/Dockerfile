@@ -33,11 +33,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -LO https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz \
-    && tar -xf zig-x86_64-linux-0.14.1.tar.xz \
-    && mv zig-x86_64-linux-0.14.1 /opt/zig \
+RUN curl -LO https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz \
+    && tar -xf zig-x86_64-linux-0.15.2.tar.xz \
+    && mv zig-x86_64-linux-0.15.2 /opt/zig \
     && ln -s /opt/zig/zig /usr/local/bin/zig \
-    && rm zig-x86_64-linux-0.14.1.tar.xz
+    && rm zig-x86_64-linux-0.15.2.tar.xz
 RUN groupadd -g 1000 gcoder && useradd -r -u 1000 -g gcoder -m -d /home/gcoder gcoder
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && rm requirements.txt
