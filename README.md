@@ -1,3 +1,5 @@
+# MIGRATED TO CODEBERG!
+
 ![gman](https://github.com/user-attachments/assets/f0f40d23-6de0-4ab3-b185-be5c4d32c812)
 
 # Rise and shine. Mr. Freeman. Rise. And. Shine.
