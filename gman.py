@@ -1,74 +1,114 @@
 import contextlib
 import copy
-import io
-import textwrap
-import bot_info
 import datetime
-import dateparser
-import time
-import psutil
+import io
 import logging
-import colorlog
+import os
+import random
+import textwrap
+import time
+import traceback
+from typing import Literal, Optional, Union
+
 import asyncpg
+import colorlog
+import dateparser
 import discord
+import psutil
 from discord import app_commands
 from discord.ext import commands
-from typing import Literal, Optional, Union
-import os
-import traceback
-import random
 
+import bot_info
 
 uptime_start = datetime.datetime.now(datetime.timezone.utc)
 
 # If any videos were not deleted while the bot was last up, remove them
-vid_files = [f for f in os.listdir('vids') if os.path.isfile(os.path.join('vids', f))]
+vid_files = [f for f in os.listdir("vids") if os.path.isfile(os.path.join("vids", f))]
 for f in vid_files:
-    os.remove(f'vids/{f}')
+    os.remove(f"vids/{f}")
+
 
 async def get_prefix(bot, message: discord.Message):
     if not message.guild:
         async with bot.db.acquire() as conn:
-            personal_prefixes = await conn.fetchval("SELECT prefixes from user_prefixes WHERE user_id = $1", message.author.id)
-        return commands.when_mentioned_or(*(personal_prefixes or [bot_info.data['prefix']]))(bot, message)
-    
+            personal_prefixes = await conn.fetchval(
+                "SELECT prefixes from user_prefixes WHERE user_id = $1",
+                message.author.id,
+            )
+        return commands.when_mentioned_or(
+            *(personal_prefixes or [bot_info.data["prefix"]])
+        )(bot, message)
+
     async with bot.db.acquire() as conn:
         row = await conn.fetchrow(
             """
 SELECT (SELECT prefixes FROM user_prefixes WHERE user_id = $1) AS personal_prefixes,
 (SELECT prefixes FROM guild_prefixes WHERE guild_id = $2) AS guild_prefixes""",
-message.author.id, message.guild.id
+            message.author.id,
+            message.guild.id,
         )
-    
+
     personal_prefixes = row["personal_prefixes"] or []
     guild_prefixes = row["guild_prefixes"] or []
 
-    all_prefixes = personal_prefixes or guild_prefixes or [bot_info.data['prefix']]
+    all_prefixes = personal_prefixes or guild_prefixes or [bot_info.data["prefix"]]
 
     return commands.when_mentioned_or(*all_prefixes)(bot, message)
+
 
 async def set_prefix(entity_id: int, prefix: str, is_guild: bool = True):
     table = "guild_prefixes" if is_guild else "user_prefixes"
     id_field = "guild_id" if is_guild else "user_id"
 
     async with bot.db.acquire() as conn:
-        current_prefixes = await conn.fetchval(f"SELECT prefixes FROM {table} WHERE {id_field} = $1", entity_id)
+        current_prefixes = await conn.fetchval(
+            f"SELECT prefixes FROM {table} WHERE {id_field} = $1", entity_id
+        )
 
         if current_prefixes is None:
             current_prefixes = []
         else:
             current_prefixes = list(current_prefixes)
-        
+
         if prefix not in current_prefixes:
             current_prefixes.append(prefix)
-            await conn.execute(f"INSERT INTO {table} ({id_field}, prefixes) VALUES ($1, $2) ON CONFLICT ({id_field}) DO UPDATE SET prefixes = $2", entity_id, current_prefixes)
+            await conn.execute(
+                f"INSERT INTO {table} ({id_field}, prefixes) VALUES ($1, $2) ON CONFLICT ({id_field}) DO UPDATE SET prefixes = $2",
+                entity_id,
+                current_prefixes,
+            )
             return f"Added prefix `{prefix}` successfully."
         else:
             return f"Prefix `{prefix}` is already set."
 
 
-extensions = ['cogs.ai', 'cogs.audio', 'cogs.code', 'cogs.exif', 'cogs.help', 'cogs.info', 'cogs.tags', 'cogs.media', 'cogs.moderation', 'cogs.reminder', 'cogs.roblox', 'cogs.search', 'cogs.ytdlp']
-bot = commands.AutoShardedBot(command_prefix=get_prefix, case_insensitive=True, strip_after_prefix=True, status=discord.Status.online, activity=discord.Game(name=f"{bot_info.data['prefix']}help"), help_command=None, intents=discord.Intents.all(), allowed_mentions=discord.AllowedMentions(users=False, roles=False, everyone=False, replied_user=True))
+extensions = [
+    "cogs.ai",
+    "cogs.audio",
+    "cogs.code",
+    "cogs.exif",
+    "cogs.help",
+    "cogs.info",
+    "cogs.tags",
+    "cogs.media",
+    "cogs.moderation",
+    "cogs.reminder",
+    "cogs.roblox",
+    "cogs.search",
+    "cogs.ytdlp",
+]
+bot = commands.AutoShardedBot(
+    command_prefix=get_prefix,
+    case_insensitive=True,
+    strip_after_prefix=True,
+    status=discord.Status.online,
+    activity=discord.Game(name=f"{bot_info.data['prefix']}help"),
+    help_command=None,
+    intents=discord.Intents.all(),
+    allowed_mentions=discord.AllowedMentions(
+        users=False, roles=False, everyone=False, replied_user=True
+    ),
+)
 
 
 def setup_logger():
@@ -80,9 +120,10 @@ def setup_logger():
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
 
+
 # Loads extensions, returns string saying what reloaded
 async def reload_extensions(exs):
-    module_msg = ''
+    module_msg = ""
     for ex in exs:
         try:
             if ex in bot.extensions:
@@ -90,15 +131,16 @@ async def reload_extensions(exs):
             await bot.load_extension(ex)
             module_msg += 'module "{}" reloaded\n'.format(ex)
         except Exception as e:
-           module_msg += 'reloading "{}" failed, error is:```{}```\n'.format(ex, e)
+            module_msg += 'reloading "{}" failed, error is:```{}```\n'.format(ex, e)
     return module_msg
 
 
 @bot.check
 async def global_permissions_check(ctx: commands.Context):
-    if ctx.author.id in bot_info.data['owners']:
+    if ctx.author.id in bot_info.data["owners"]:
         return True
     return await command_permission_check(ctx)
+
 
 async def command_permission_check(ctx: commands.Context) -> bool:
     try:
@@ -111,45 +153,84 @@ async def command_permission_check(ctx: commands.Context) -> bool:
     if guild_id:
         async with bot.db.acquire() as conn:
             server_query = "SELECT status, reason FROM server_command_permissions WHERE guild_id = $1 AND command_name = $2"
-            server_result = await conn.fetchrow(server_query, ctx.guild.id, ctx.command.qualified_name)
+            server_result = await conn.fetchrow(
+                server_query, ctx.guild.id, ctx.command.qualified_name
+            )
             if server_result:
                 if not server_result["status"] and not is_admin:
-                    await ctx.send(f"Command `{ctx.command.qualified_name}` blocked. This server disabled this command. Reason: `{server_result['reason']}`", ephemeral=True)
+                    await ctx.send(
+                        f"Command `{ctx.command.qualified_name}` blocked. This server disabled this command. Reason: `{server_result['reason']}`",
+                        ephemeral=True,
+                    )
                     return False
             block_query = "SELECT status, target_type, reason FROM command_permissions WHERE guild_id = $1 AND command_name = $2 AND ((target_type = 'user' AND target_id = $3) OR (target_type = 'channel' AND target_id = $4) OR (target_type = 'role' AND target_id = ANY($5::BIGINT[])))"
-            block_result = await conn.fetch(block_query, ctx.guild.id, ctx.command.qualified_name, ctx.author.id, ctx.channel.id, role_ids)
+            block_result = await conn.fetch(
+                block_query,
+                ctx.guild.id,
+                ctx.command.qualified_name,
+                ctx.author.id,
+                ctx.channel.id,
+                role_ids,
+            )
             for row in block_result:
                 if not row["status"] and not is_admin:
                     if row["target_type"] == "user":
-                        await ctx.send(f"Command `{ctx.command.qualified_name}` blocked. You are part of this command's blocklist. Reason: `{row['reason']}`", ephemeral=True)
+                        await ctx.send(
+                            f"Command `{ctx.command.qualified_name}` blocked. You are part of this command's blocklist. Reason: `{row['reason']}`",
+                            ephemeral=True,
+                        )
                     elif row["target_type"] == "channel":
-                        await ctx.send(f"Command `{ctx.command.qualified_name}` blocked. This channel is part of this command's blocklist. Reason: `{row['reason']}`", ephemeral=True)
+                        await ctx.send(
+                            f"Command `{ctx.command.qualified_name}` blocked. This channel is part of this command's blocklist. Reason: `{row['reason']}`",
+                            ephemeral=True,
+                        )
                     elif row["target_type"] == "role":
-                        await ctx.send(f"Command `{ctx.command.qualified_name}` blocked. One of your roles is part of this command's blocklist. Reason: `{row['reason']}`", ephemeral=True)
+                        await ctx.send(
+                            f"Command `{ctx.command.qualified_name}` blocked. One of your roles is part of this command's blocklist. Reason: `{row['reason']}`",
+                            ephemeral=True,
+                        )
                     return False
             allow_query = "SELECT status, target_type, target_id, reason FROM command_permissions WHERE guild_id = $1 AND command_name = $2 AND status = TRUE"
-            allow_result = await conn.fetch(allow_query, ctx.guild.id, ctx.command.qualified_name)
+            allow_result = await conn.fetch(
+                allow_query, ctx.guild.id, ctx.command.qualified_name
+            )
             if allow_result:
                 allowed = False
                 for row in allow_result:
-                    if row["target_type"] == "user" and ctx.author.id == row["target_id"]:
+                    if (
+                        row["target_type"] == "user"
+                        and ctx.author.id == row["target_id"]
+                    ):
                         allowed = True
-                    elif row["target_type"] == "channel" and ctx.channel.id == row["target_id"]:
+                    elif (
+                        row["target_type"] == "channel"
+                        and ctx.channel.id == row["target_id"]
+                    ):
                         allowed = True
                     elif row["target_type"] == "role" and row["target_id"] in role_ids:
                         allowed = True
                 if not allowed and not is_admin:
                     for row in allow_result:
                         if row["target_type"] == "user":
-                            await ctx.send(f"Command `{ctx.command.qualified_name}` blocked. You are not part of this command's allowlist. Reason: `{row['reason']}`", ephemeral=True)
+                            await ctx.send(
+                                f"Command `{ctx.command.qualified_name}` blocked. You are not part of this command's allowlist. Reason: `{row['reason']}`",
+                                ephemeral=True,
+                            )
                         elif row["target_type"] == "channel":
-                            await ctx.send(f"Command `{ctx.command.qualified_name}` blocked. This channel is not part of this command's allowlist. Reason: `{row['reason']}`", ephemeral=True)
+                            await ctx.send(
+                                f"Command `{ctx.command.qualified_name}` blocked. This channel is not part of this command's allowlist. Reason: `{row['reason']}`",
+                                ephemeral=True,
+                            )
                         elif row["target_type"] == "role":
-                            await ctx.send(f"Command `{ctx.command.qualified_name}` blocked. One of your roles is not part of this command's allowlist. Reason: `{row['reason']}`", ephemeral=True)
+                            await ctx.send(
+                                f"Command `{ctx.command.qualified_name}` blocked. One of your roles is not part of this command's allowlist. Reason: `{row['reason']}`",
+                                ephemeral=True,
+                            )
                     return False
         return True
     else:
         return True
+
 
 @bot.before_invoke
 async def check_access(ctx: commands.Context):
@@ -163,49 +244,92 @@ async def check_access(ctx: commands.Context):
     channel_id = ctx.channel.id
     guild_id = ctx.guild.id if ctx.guild else None
     async with bot.db.acquire() as conn:
-        global_blocked = await conn.fetchval("SELECT reason FROM global_blocked_users WHERE discord_id = $1", user_id)
+        global_blocked = await conn.fetchval(
+            "SELECT reason FROM global_blocked_users WHERE discord_id = $1", user_id
+        )
         if global_blocked:
-            await ctx.send(f"You are globally blocked from using {bot.user.name}. Reason: `{global_blocked}`", ephemeral=True)
+            await ctx.send(
+                f"You are globally blocked from using {bot.user.name}. Reason: `{global_blocked}`",
+                ephemeral=True,
+            )
             raise commands.CheckFailure("User is globally blocked.")
         if guild_id:
-            server_blocked = await conn.fetchval("SELECT reason FROM global_blocked_servers WHERE guild_id = $1", guild_id)
+            server_blocked = await conn.fetchval(
+                "SELECT reason FROM global_blocked_servers WHERE guild_id = $1",
+                guild_id,
+            )
             if server_blocked:
-                await ctx.send(f"This server is globally blocked from using {bot.user.name}. Reason: `{server_blocked}`", ephemeral=True)
+                await ctx.send(
+                    f"This server is globally blocked from using {bot.user.name}. Reason: `{server_blocked}`",
+                    ephemeral=True,
+                )
                 raise commands.CheckFailure("Server is globally blocked.")
-        if str(user_id) in bot_info.data['owners']:
+        if str(user_id) in bot_info.data["owners"]:
             return
         if is_admin:
             return
-        allowlist_active = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM allowlist)")
+        allowlist_active = await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM allowlist)"
+        )
         if allowlist_active:
-            is_allowed = await conn.fetchval("SELECT 1 FROM allowlist WHERE (type = 'user' AND entity_id = $1) OR (type = 'channel' AND entity_id = $2) OR (type = 'role' AND entity_id = ANY($3))", user_id, channel_id, roles)
+            is_allowed = await conn.fetchval(
+                "SELECT 1 FROM allowlist WHERE (type = 'user' AND entity_id = $1) OR (type = 'channel' AND entity_id = $2) OR (type = 'role' AND entity_id = ANY($3))",
+                user_id,
+                channel_id,
+                roles,
+            )
             if not is_allowed:
-                allowlist_entries = await conn.fetch("SELECT type, entity_id, reason FROM allowlist")
+                allowlist_entries = await conn.fetch(
+                    "SELECT type, entity_id, reason FROM allowlist"
+                )
                 for entry in allowlist_entries:
                     if entry["type"] == "user":
-                        await ctx.send(f"You are not part of the allowlist to use {bot.user.name} in this server. Reason: `{entry['reason']}`", ephemeral=True)
+                        await ctx.send(
+                            f"You are not part of the allowlist to use {bot.user.name} in this server. Reason: `{entry['reason']}`",
+                            ephemeral=True,
+                        )
                     elif entry["type"] == "channel":
-                        await ctx.send(f"This channel is not part of the allowlist to use {bot.user.name} in this server. Reason: `{entry['reason']}`", ephemeral=True)
+                        await ctx.send(
+                            f"This channel is not part of the allowlist to use {bot.user.name} in this server. Reason: `{entry['reason']}`",
+                            ephemeral=True,
+                        )
                     elif entry["type"] == "role":
-                        await ctx.send(f"One of your roles is not part of the allowlist to use {bot.user.name} in this server. Reason: `{entry['reason']}`", ephemeral=True)
+                        await ctx.send(
+                            f"One of your roles is not part of the allowlist to use {bot.user.name} in this server. Reason: `{entry['reason']}`",
+                            ephemeral=True,
+                        )
                 raise commands.CheckFailure("User/Channel/Role is not allowed.")
             if is_allowed:
                 return
-        blocked = await conn.fetchval("SELECT reason FROM blocklist WHERE (type = 'user' AND entity_id = $1) OR (type = 'channel' AND entity_id = $2) OR (type = 'role' AND entity_id = ANY($3))", user_id, channel_id, roles)
+        blocked = await conn.fetchval(
+            "SELECT reason FROM blocklist WHERE (type = 'user' AND entity_id = $1) OR (type = 'channel' AND entity_id = $2) OR (type = 'role' AND entity_id = ANY($3))",
+            user_id,
+            channel_id,
+            roles,
+        )
         if blocked:
-            blocklist_entries = await conn.fetch("SELECT type, entity_id, reason FROM blocklist")
+            blocklist_entries = await conn.fetch(
+                "SELECT type, entity_id, reason FROM blocklist"
+            )
             for entry in blocklist_entries:
                 if entry["type"] == "user":
-                    await ctx.send(f"You are part of the blocklist in this server to use {bot.user.name}. Reason: `{entry['reason']}`", ephemeral=True)
+                    await ctx.send(
+                        f"You are part of the blocklist in this server to use {bot.user.name}. Reason: `{entry['reason']}`",
+                        ephemeral=True,
+                    )
                 elif entry["type"] == "channel":
-                    await ctx.send(f"This channel is part of the blocklist in this server to use {bot.user.name}. Reason: `{entry['reason']}`", ephemeral=True)
+                    await ctx.send(
+                        f"This channel is part of the blocklist in this server to use {bot.user.name}. Reason: `{entry['reason']}`",
+                        ephemeral=True,
+                    )
                 elif entry["type"] == "role":
-                    await ctx.send(f"One of your roles is part of the blocklist in this server to use {bot.user.name}. Reason: `{entry['reason']}`", ephemeral=True)
+                    await ctx.send(
+                        f"One of your roles is part of the blocklist in this server to use {bot.user.name}. Reason: `{entry['reason']}`",
+                        ephemeral=True,
+                    )
             raise commands.CheckFailure("User/Channel/Role is blocked.")
-    
-    
-    
-    
+
+
 # Set up stuff
 @bot.event
 async def on_ready():
@@ -216,13 +340,19 @@ async def on_ready():
     except Exception as e:
         logger.error(f"Error reloading extensions: {e}")
     try:
-        bot.db = await asyncpg.create_pool(bot_info.data['database'])
+        bot.db = await asyncpg.create_pool(bot_info.data["database"])
         logger.info(f"Connected to PostgreSQL database via {bot_info.data['database']}")
     except Exception as e:
         logger.error(f"Error connecting to PostgreSQL database: {e}")
-    logger.info(f"Bot {bot.user.name} has successfully logged in via Token {bot_info.data['login']}. ID: {bot.user.id}")
-    logger.info(f"Bot {bot.user.name} is in {len(bot.guilds)} guilds, caching a total of {sum(1 for _ in bot.get_all_channels())} channels and {len(bot.users)} users.")
-    logger.info(f"Bot {bot.user.name} has a total of {len(bot.commands)} commands with {len(bot.cogs)} cogs.")
+    logger.info(
+        f"Bot {bot.user.name} has successfully logged in via Token {bot_info.data['login']}. ID: {bot.user.id}"
+    )
+    logger.info(
+        f"Bot {bot.user.name} is in {len(bot.guilds)} guilds, caching a total of {sum(1 for _ in bot.get_all_channels())} channels and {len(bot.users)} users."
+    )
+    logger.info(
+        f"Bot {bot.user.name} has a total of {len(bot.commands)} commands with {len(bot.cogs)} cogs."
+    )
 
 
 @bot.event
@@ -234,8 +364,9 @@ async def on_message(message: discord.Message):
 
     if ctx.command is None:
         return
-    
+
     await bot.process_commands(message)
+
 
 @bot.event
 async def on_message_edit(before: discord.Message, after: discord.Message):
@@ -247,7 +378,7 @@ async def on_message_edit(before: discord.Message, after: discord.Message):
 
     if not (ctx_before.valid and ctx_after.valid):
         return
-    
+
     if ctx_after.command is None:
         return
 
@@ -267,27 +398,27 @@ async def on_message_edit(before: discord.Message, after: discord.Message):
     async def edit_send(*args, **kwargs):
         edit_kwargs = {}
 
-        if 'content' in kwargs:
-            edit_kwargs['content'] = kwargs['content']
+        if "content" in kwargs:
+            edit_kwargs["content"] = kwargs["content"]
         elif args:
-            edit_kwargs['content'] = args[0]
+            edit_kwargs["content"] = args[0]
 
-        if 'embeds' in kwargs:
-            edit_kwargs['embeds'] = kwargs['embeds']
-        elif 'embed' in kwargs:
-            edit_kwargs['embed'] = kwargs['embed']
+        if "embeds" in kwargs:
+            edit_kwargs["embeds"] = kwargs["embeds"]
+        elif "embed" in kwargs:
+            edit_kwargs["embed"] = kwargs["embed"]
 
-        if 'view' in kwargs:
-            edit_kwargs['view'] = kwargs['view']
+        if "view" in kwargs:
+            edit_kwargs["view"] = kwargs["view"]
 
         files = []
-        if 'file' in kwargs:
-            files.append(kwargs['file'])
-        elif 'files' in kwargs:
-            files.extend(kwargs['files'])
+        if "file" in kwargs:
+            files.append(kwargs["file"])
+        elif "files" in kwargs:
+            files.extend(kwargs["files"])
 
         if files:
-            edit_kwargs['attachments'] = files
+            edit_kwargs["attachments"] = files
 
         try:
             await original_response.edit(**edit_kwargs)
@@ -302,15 +433,31 @@ async def on_message_edit(before: discord.Message, after: discord.Message):
     except Exception as e:
         await original_response.edit(content=f"Error executing edited command: {e}")
 
+
 @bot.event
 async def on_command(ctx: commands.Context):
     logger = logging.getLogger()
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     user = f"{ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
     guild = f"{ctx.guild.name} (ID: {ctx.guild.id})" if ctx.guild else "DMs"
-    channel = f"#{ctx.channel.name} (ID: {ctx.channel.id})" if ctx.guild else f"DMs with {ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
+    channel = (
+        f"#{ctx.channel.name} (ID: {ctx.channel.id})"
+        if ctx.guild
+        else f"DMs with {ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
+    )
     command_name = ctx.command.qualified_name
-    command_content = ctx.message.content if not ctx.interaction else "".join(f"/{ctx.interaction.command.qualified_name} " + " ".join(f"{k}:{v}" for k, v in ctx.interaction.namespace.__dict__.items() if v is not None))
+    command_content = (
+        ctx.message.content
+        if not ctx.interaction
+        else "".join(
+            f"/{ctx.interaction.command.qualified_name} "
+            + " ".join(
+                f"{k}:{v}"
+                for k, v in ctx.interaction.namespace.__dict__.items()
+                if v is not None
+            )
+        )
+    )
     async with bot.db.acquire() as conn:
         await conn.execute(
             "INSERT INTO command_usage (command_name, user_id, channel_id, guild_id, content) VALUES ($1, $2, $3, $4, $5)",
@@ -318,8 +465,8 @@ async def on_command(ctx: commands.Context):
             ctx.author.id,
             ctx.channel.id,
             ctx.guild.id if ctx.guild else None,
-            command_content
-            )
+            command_content,
+        )
     log_message = (
         f"\n--- {'Slash ' if ctx.interaction else ''}Command Log ---\n"
         f"Timestamp: {timestamp}\n"
@@ -332,6 +479,7 @@ async def on_command(ctx: commands.Context):
     )
     logger.info(log_message)
 
+
 # Command error
 @bot.event
 async def on_command_error(ctx: commands.Context, error):
@@ -339,9 +487,24 @@ async def on_command_error(ctx: commands.Context, error):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     user = f"{ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
     guild = f"{ctx.guild.name} (ID: {ctx.guild.id})" if ctx.guild else "DMs"
-    channel = f"#{ctx.channel.name} (ID: {ctx.channel.id})" if ctx.guild else f"DMs with {ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
+    channel = (
+        f"#{ctx.channel.name} (ID: {ctx.channel.id})"
+        if ctx.guild
+        else f"DMs with {ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
+    )
     command_name = ctx.command.qualified_name if ctx.command else "Unknown"
-    command_content = ctx.message.content if not ctx.interaction else "".join(f"/{ctx.interaction.command.qualified_name} " + " ".join(f"{k}:{v}" for k, v in ctx.interaction.namespace.__dict__.items() if v is not None))
+    command_content = (
+        ctx.message.content
+        if not ctx.interaction
+        else "".join(
+            f"/{ctx.interaction.command.qualified_name} "
+            + " ".join(
+                f"{k}:{v}"
+                for k, v in ctx.interaction.namespace.__dict__.items()
+                if v is not None
+            )
+        )
+    )
     logger.error(
         f"\n--- {'Slash ' if ctx.interaction else ''}Command Error Log ---\n"
         f"Timestamp: {timestamp}\n"
@@ -352,8 +515,18 @@ async def on_command_error(ctx: commands.Context, error):
         f"Command Content: {command_content}\n"
         f"--- End {'Slash ' if ctx.interaction else ''}Command Error Log ---"
     )
-    embed = discord.Embed(title=":warning: Command Error" if not ctx.interaction else ":warning: Slash Command Error", color=discord.Color.red(), timestamp=discord.utils.utcnow())
-    embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
+    embed = discord.Embed(
+        title=":warning: Command Error"
+        if not ctx.interaction
+        else ":warning: Slash Command Error",
+        color=discord.Color.red(),
+        timestamp=discord.utils.utcnow(),
+    )
+    embed.set_author(
+        name=f"{ctx.author.name}#{ctx.author.discriminator}",
+        icon_url=ctx.author.display_avatar.url,
+        url=f"https://discord.com/users/{ctx.author.id}",
+    )
     if isinstance(error, commands.CheckFailure):
         return
     if isinstance(error, commands.MissingRequiredArgument):
@@ -369,19 +542,37 @@ async def on_command_error(ctx: commands.Context, error):
         await ctx.send(embed=embed)
         return
     else:
-        logger.critical(traceback.format_exception(type(error), error, error.__traceback__))
+        logger.critical(
+            traceback.format_exception(type(error), error, error.__traceback__)
+        )
         embed.description = str(error)
     await ctx.send(embed=embed)
-    
+
+
 @bot.event
 async def on_command_completion(ctx: commands.Context):
     logger = logging.getLogger()
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     user = f"{ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
     guild = f"{ctx.guild.name} (ID: {ctx.guild.id})" if ctx.guild else "DMs"
-    channel = f"#{ctx.channel.name} (ID: {ctx.channel.id})" if ctx.guild else f"DMs with {ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
+    channel = (
+        f"#{ctx.channel.name} (ID: {ctx.channel.id})"
+        if ctx.guild
+        else f"DMs with {ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
+    )
     command_name = ctx.command.qualified_name
-    command_content = ctx.message.content if not ctx.interaction else "".join(f"/{ctx.interaction.command.qualified_name} " + " ".join(f"{k}:{v}" for k, v in ctx.interaction.namespace.__dict__.items() if v is not None))
+    command_content = (
+        ctx.message.content
+        if not ctx.interaction
+        else "".join(
+            f"/{ctx.interaction.command.qualified_name} "
+            + " ".join(
+                f"{k}:{v}"
+                for k, v in ctx.interaction.namespace.__dict__.items()
+                if v is not None
+            )
+        )
+    )
     logger.info(
         f"\n--- {'Slash ' if ctx.interaction else ''}Command Success Log ---\n"
         f"Timestamp: {timestamp}\n"
@@ -393,10 +584,12 @@ async def on_command_completion(ctx: commands.Context):
         f"--- End {'Slash ' if ctx.interaction else ''}Command Success Log ---"
     )
 
+
 @bot.event
 async def on_guild_join(guild: discord.Guild):
     logger = logging.getLogger()
     logger.info(f"Joined guild {guild.name} (ID: {guild.id})")
+
 
 @bot.event
 async def on_guild_remove(guild: discord.Guild):
@@ -408,6 +601,7 @@ async def on_guild_remove(guild: discord.Guild):
 async def on_guild_unavailable(guild: discord.Guild):
     logger = logging.getLogger()
     logger.info(f"Guild unavailable: {guild.name} (ID: {guild.id})")
+
 
 @bot.event
 async def on_guild_available(guild: discord.Guild):
@@ -431,25 +625,35 @@ async def ping(ctx: commands.Context):
     minutes, seconds = divmod(remainder, 60)
     cpu_usage = psutil.cpu_percent()
     memory_info = psutil.virtual_memory()
-    memory_usage = round(memory_info.used / (1024 ** 2))
-    memory_total = round(memory_info.total / (1024 ** 2))
+    memory_usage = round(memory_info.used / (1024**2))
+    memory_total = round(memory_info.total / (1024**2))
 
     content = f"Pong!\nGateway: {ws_latency}ms\nAPI: {api_response_time}ms\nUptime: {days}d {hours}h {minutes}m {seconds}s\nCPU Usage: {cpu_usage}%\nMemory Usage: {memory_usage} MB / {memory_total} MB"
 
     await message.edit(content=content)
 
 
-@bot.command(name="sudo", description="Execute a command as another user. Use sudo! to bypass checks and permissions.", aliases=["sudo!"])
+@bot.command(
+    name="sudo",
+    description="Execute a command as another user. Use sudo! to bypass checks and permissions.",
+    aliases=["sudo!"],
+)
 @bot_info.is_owner()
-async def sudo(ctx: commands.Context, user: discord.Member, command: str, *, arguments: str = None):
+async def sudo(
+    ctx: commands.Context, user: discord.Member, command: str, *, arguments: str = None
+):
     async def get_effective_prefix(bot, message):
         return await get_prefix(bot, message)
-    
+
     fake_message = copy.copy(ctx.message)
     fake_message.author = user
     effective_prefixes = await get_effective_prefix(bot, fake_message)
-    used_prefix = effective_prefixes[0] if effective_prefixes else bot_info.data['prefix']
-    fake_message.content = f"{used_prefix}{command}" + (f" {arguments}" if arguments else "")
+    used_prefix = (
+        effective_prefixes[0] if effective_prefixes else bot_info.data["prefix"]
+    )
+    fake_message.content = f"{used_prefix}{command}" + (
+        f" {arguments}" if arguments else ""
+    )
 
     new_ctx = await bot.get_context(fake_message)
 
@@ -458,7 +662,7 @@ async def sudo(ctx: commands.Context, user: discord.Member, command: str, *, arg
         return
 
     try:
-        if ctx.invoked_with and ctx.invoked_with.endswith('!'):
+        if ctx.invoked_with and ctx.invoked_with.endswith("!"):
             await new_ctx.command.reinvoke(new_ctx)
             return
         await new_ctx.command.invoke(new_ctx)
@@ -470,7 +674,11 @@ async def sudo(ctx: commands.Context, user: discord.Member, command: str, *, arg
 
 @bot.command(name="sync", description="Sync slash commands.")
 @bot_info.is_owner()
-async def sync(ctx: commands.Context, guilds: commands.Greedy[discord.Object], spec: Optional[Literal["~", "*", "^"]] = None) -> None:
+async def sync(
+    ctx: commands.Context,
+    guilds: commands.Greedy[discord.Object],
+    spec: Optional[Literal["~", "*", "^"]] = None,
+) -> None:
     logger = logging.getLogger()
     message = await ctx.send("Syncing...")
     if not guilds:
@@ -485,8 +693,12 @@ async def sync(ctx: commands.Context, guilds: commands.Greedy[discord.Object], s
             synced = []
         else:
             synced = await ctx.bot.tree.sync()
-        logger.info(f"Synced {len(synced)} commands {'globally' if spec is None else 'to the current guild'}.")
-        await message.edit(content=f"Synced {len(synced)} commands {'globally' if spec is None else 'to the current guild'}.")
+        logger.info(
+            f"Synced {len(synced)} commands {'globally' if spec is None else 'to the current guild'}."
+        )
+        await message.edit(
+            content=f"Synced {len(synced)} commands {'globally' if spec is None else 'to the current guild'}."
+        )
         return
     ret = 0
     for guild in guilds:
@@ -497,11 +709,15 @@ async def sync(ctx: commands.Context, guilds: commands.Greedy[discord.Object], s
             pass
         else:
             ret += 1
-    
-    await ctx.send(f"Synced the tree to {ret}/{len(guilds)} guilds.")
-    
 
-@bot.hybrid_command(name="commandusage", description="View command usage history.", aliases=["cmdusage", "commandhistory", "cmdhistory"])
+    await ctx.send(f"Synced the tree to {ret}/{len(guilds)} guilds.")
+
+
+@bot.hybrid_command(
+    name="commandusage",
+    description="View command usage history.",
+    aliases=["cmdusage", "commandhistory", "cmdhistory"],
+)
 @app_commands.describe(
     command="Filter by command name.",
     user="Filter by user.",
@@ -509,9 +725,14 @@ async def sync(ctx: commands.Context, guilds: commands.Greedy[discord.Object], s
     guild="Filter by guild. (bot owners only)",
     limit="Number of entries to show.",
     before="Show entries before this date.",
-    after="Show entries after this date."
+    after="Show entries after this date.",
 )
-@commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.manage_guild)
+@commands.check(
+    lambda ctx: (
+        str(ctx.author.id) in bot_info.data["owners"]
+        or ctx.author.guild_permissions.manage_guild
+    )
+)
 @app_commands.allowed_installs(guilds=True, users=False)
 async def command_usage(
     ctx: commands.Context,
@@ -521,7 +742,7 @@ async def command_usage(
     guild: Optional[str] = None,
     limit: Optional[int] = None,
     before: Optional[str] = None,
-    after: Optional[str] = None
+    after: Optional[str] = None,
 ):
     await ctx.typing()
     converted_user = None
@@ -534,18 +755,20 @@ async def command_usage(
         except commands.BadArgument:
             await ctx.send(f"Could not find user: {user}")
             return
-    
+
     if channel:
         try:
-            converted_channel = await commands.GuildChannelConverter().convert(ctx, channel)
+            converted_channel = await commands.GuildChannelConverter().convert(
+                ctx, channel
+            )
         except commands.BadArgument:
             await ctx.send(f"Could not find channel: {channel}")
             return
-    
+
     if guild:
         try:
             specified_guild = await commands.GuildConverter().convert(ctx, guild)
-            if str(ctx.author.id) not in bot_info.data['owners']:
+            if str(ctx.author.id) not in bot_info.data["owners"]:
                 if specified_guild.id != ctx.guild.id:
                     await ctx.send("Only bot owners can filter by other guilds.")
                     return
@@ -555,7 +778,7 @@ async def command_usage(
             else:
                 converted_guild = specified_guild
         except commands.BadArgument:
-            if str(ctx.author.id) not in bot_info.data['owners']:
+            if str(ctx.author.id) not in bot_info.data["owners"]:
                 try:
                     if int(guild) == ctx.guild.id:
                         force_current_guild = True
@@ -571,127 +794,143 @@ async def command_usage(
                 return
     before_date = None
     after_date = None
-    
+
     if before:
         try:
             before_date = dateparser.parse(
                 before,
                 settings={
-                    'RETURN_AS_TIMEZONE_AWARE': True,
-                    'TIMEZONE': 'UTC',
-                    'PREFER_DATES_FROM': 'past'
-                }
+                    "RETURN_AS_TIMEZONE_AWARE": True,
+                    "TIMEZONE": "UTC",
+                    "PREFER_DATES_FROM": "past",
+                },
             )
             if not before_date:
                 raise ValueError("Could not parse date")
             before_date = before_date.astimezone(datetime.timezone.utc)
         except Exception as e:
-            await ctx.send(f"Could not parse 'before' date/time: {str(e)}\nExamples: '2 weeks ago', '2025', 'january 2024', 'last monday'")
+            await ctx.send(
+                f"Could not parse 'before' date/time: {str(e)}\nExamples: '2 weeks ago', '2025', 'january 2024', 'last monday'"
+            )
             return
-    
+
     if after:
         try:
             after_date = dateparser.parse(
                 after,
                 settings={
-                    'RETURN_AS_TIMEZONE_AWARE': True,
-                    'TIMEZONE': 'UTC',
-                    'PREFER_DATES_FROM': 'future'
-                }
+                    "RETURN_AS_TIMEZONE_AWARE": True,
+                    "TIMEZONE": "UTC",
+                    "PREFER_DATES_FROM": "future",
+                },
             )
             if not after_date:
                 raise ValueError("Could not parse date")
             after_date = after_date.astimezone(datetime.timezone.utc)
         except Exception as e:
-            await ctx.send(f"Could not parse 'after' date/time: {str(e)}\nExamples: 'yesterday', '2024-06', '3 months ago'")
+            await ctx.send(
+                f"Could not parse 'after' date/time: {str(e)}\nExamples: 'yesterday', '2024-06', '3 months ago'"
+            )
             return
-    
 
     query = "SELECT command_name, user_id, channel_id, guild_id, timestamp, content FROM command_usage WHERE "
     conditions = []
     params = []
-    
 
-    if str(ctx.author.id) not in bot_info.data['owners'] or force_current_guild:
+    if str(ctx.author.id) not in bot_info.data["owners"] or force_current_guild:
         conditions.append("guild_id = $1")
         params.append(ctx.guild.id)
     elif converted_guild:
         conditions.append("guild_id = $1")
         params.append(converted_guild.id)
-    
+
     if command:
         conditions.append("command_name ILIKE $" + str(len(params) + 1))
         params.append(f"%{command}%")
-    
+
     if user:
         conditions.append("user_id = $" + str(len(params) + 1))
         params.append(converted_user.id)
-    
+
     if channel:
         conditions.append("channel_id = $" + str(len(params) + 1))
         params.append(converted_channel.id)
-    
+
     if before_date:
         conditions.append("timestamp < $" + str(len(params) + 1))
         params.append(before_date)
-    
+
     if after_date:
         conditions.append("timestamp > $" + str(len(params) + 1))
         params.append(after_date)
-    
+
     if not conditions:
         conditions.append("TRUE")
-    
+
     query += " AND ".join(conditions) + " ORDER BY timestamp DESC"
     if limit is not None:
         query += " LIMIT $" + str(len(params) + 1)
         params.append(limit)
-    
+
     async with bot.db.acquire() as conn:
         records = await conn.fetch(query, *params)
-    
+
     if not records:
         await ctx.send("No command usage records found matching your filters.")
         return
-    
+
     processed = []
     for record in records:
         try:
-            user_obj = bot.get_user(record['user_id']) or await bot.fetch_user(record['user_id'])
+            user_obj = bot.get_user(record["user_id"]) or await bot.fetch_user(
+                record["user_id"]
+            )
             user_name = f"{user_obj.mention} - {user_obj.name}#{user_obj.discriminator}"
         except discord.NotFound:
             user_name = f"Unknown User ({record['user_id']})"
-        
+
         try:
-            channel_obj = bot.get_channel(record['channel_id']) or await bot.fetch_channel(record['channel_id'])
-            channel_name = f"{channel_obj.mention} - #{channel_obj.name}" if hasattr(channel_obj, 'mention') and hasattr(channel_obj, 'name') else f"Channel {record['channel_id']}"
+            channel_obj = bot.get_channel(
+                record["channel_id"]
+            ) or await bot.fetch_channel(record["channel_id"])
+            channel_name = (
+                f"{channel_obj.mention} - #{channel_obj.name}"
+                if hasattr(channel_obj, "mention") and hasattr(channel_obj, "name")
+                else f"Channel {record['channel_id']}"
+            )
         except (discord.NotFound, discord.Forbidden):
             channel_name = f"Unknown Channel ({record['channel_id']})"
-        
+
         guild_name = "DMs"
-        if record['guild_id']:
+        if record["guild_id"]:
             try:
-                guild_obj = bot.get_guild(record['guild_id']) or await bot.fetch_guild(record['guild_id'])
+                guild_obj = bot.get_guild(record["guild_id"]) or await bot.fetch_guild(
+                    record["guild_id"]
+                )
                 guild_name = guild_obj.name
             except discord.NotFound:
                 guild_name = f"Unknown Guild ({record['guild_id']})"
-        
-        processed.append({
-            "command": record['command_name'],
-            "user": user_name,
-            "user_id": record['user_id'],
-            "channel": channel_name,
-            "channel_id": record['channel_id'],
-            "guild": guild_name,
-            "guild_id": record['guild_id'],
-            "timestamp": f"<t:{int(record['timestamp'].timestamp())}:R>",
-            "content": record['content'][:50] + "..." if len(record['content']) > 50 else record['content']
-        })
-    
+
+        processed.append(
+            {
+                "command": record["command_name"],
+                "user": user_name,
+                "user_id": record["user_id"],
+                "channel": channel_name,
+                "channel_id": record["channel_id"],
+                "guild": guild_name,
+                "guild_id": record["guild_id"],
+                "timestamp": f"<t:{int(record['timestamp'].timestamp())}:R>",
+                "content": record["content"][:50] + "..."
+                if len(record["content"]) > 50
+                else record["content"],
+            }
+        )
+
     pages = []
     current_page = []
     current_length = 0
-    
+
     for entry in processed:
         entry_text = (
             f"**Command:** `{entry['command']}`\n"
@@ -701,18 +940,17 @@ async def command_usage(
             f"**When:** {entry['timestamp']}\n"
             f"**Content:** `{entry['content']}`\n"
         )
-        
+
         if current_length + len(entry_text) > 2000:
             pages.append("\n".join(current_page))
             current_page = []
             current_length = 0
-        
+
         current_page.append(entry_text)
         current_length += len(entry_text) + 1
-    
+
     if current_page:
         pages.append("\n".join(current_page))
-    
 
     class CommandUsagePaginator(discord.ui.View):
         def __init__(self, pages: list, author: discord.Member):
@@ -723,61 +961,77 @@ async def command_usage(
             self.message = None
             self.records = records
             self.update_buttons()
-        
+
         def update_buttons(self):
             self.children[0].disabled = self.current_page == 0
             self.children[1].disabled = self.current_page == len(self.pages) - 1
-        
+
         async def interaction_check(self, interaction: discord.Interaction):
             if interaction.user != self.author:
-                await interaction.response.send_message("You can't control this pagination.", ephemeral=True)
+                await interaction.response.send_message(
+                    "You can't control this pagination.", ephemeral=True
+                )
                 return False
             return True
-        
+
         async def on_timeout(self):
             if self.message:
                 await self.message.edit(view=None)
-        
+
         @discord.ui.button(label="⬅️", style=discord.ButtonStyle.primary, disabled=True)
-        async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async def previous(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
             self.current_page -= 1
             await self.update_page(interaction)
-        
+
         @discord.ui.button(label="➡️", style=discord.ButtonStyle.primary, disabled=False)
-        async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async def next(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
             self.current_page += 1
             await self.update_page(interaction)
-        
+
         @discord.ui.button(label="🔁", style=discord.ButtonStyle.primary)
-        async def shuffle(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async def shuffle(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
             self.current_page = random.randint(0, len(self.pages) - 1)
             await self.update_page(interaction)
-        
+
         @discord.ui.button(label="🔢", style=discord.ButtonStyle.primary)
-        async def jump(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async def jump(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
             modal = JumpModal(self)
             await interaction.response.send_modal(modal)
-        
+
         @discord.ui.button(label="⏹️", style=discord.ButtonStyle.danger)
-        async def _stop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async def _stop(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
             await interaction.response.edit_message(view=None)
             self.stop()
-        
+
         @discord.ui.button(label="🗑️", style=discord.ButtonStyle.danger)
-        async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async def delete(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
             await interaction.message.delete()
             self.stop()
-        
+
         async def update_page(self, interaction: discord.Interaction):
             embed = discord.Embed(
-                title=f"Command Usage History",
+                title="Command Usage History",
                 description=self.pages[self.current_page],
-                color=discord.Color.blurple()
+                color=discord.Color.blurple(),
             )
-            embed.set_footer(text=f"Page {self.current_page + 1}/{len(self.pages)} of {len(self.records)} entries")
+            embed.set_footer(
+                text=f"Page {self.current_page + 1}/{len(self.pages)} of {len(self.records)} entries"
+            )
             self.update_buttons()
             await interaction.response.edit_message(embed=embed, view=self)
-    
+
     class JumpModal(discord.ui.Modal):
         def __init__(self, paginator):
             super().__init__(title="Jump to Page")
@@ -785,10 +1039,10 @@ async def command_usage(
             self.page_input = discord.ui.TextInput(
                 label="Page Number",
                 placeholder=f"Enter a number between 1 and {len(self.paginator.pages)}",
-                required=True
+                required=True,
             )
             self.add_item(self.page_input)
-        
+
         async def on_submit(self, interaction: discord.Interaction):
             try:
                 page_num = int(self.page_input.value)
@@ -798,36 +1052,48 @@ async def command_usage(
                 else:
                     await interaction.response.send_message(
                         f"Please enter a number between 1 and {len(self.paginator.pages)}",
-                        ephemeral=True
+                        ephemeral=True,
                     )
             except ValueError:
-                await interaction.response.send_message("Please enter a valid number.", ephemeral=True)
-    
+                await interaction.response.send_message(
+                    "Please enter a valid number.", ephemeral=True
+                )
+
     view = CommandUsagePaginator(pages, ctx.author)
     embed = discord.Embed(
-        title=f"Command Usage History",
+        title="Command Usage History",
         description=pages[0],
-        color=discord.Color.blurple()
+        color=discord.Color.blurple(),
     )
     embed.set_footer(text=f"Page 1/{len(pages)} of {len(records)} entries")
     view.message = await ctx.send(embed=embed, view=view)
 
-@bot.command(name="command", description="Enable or disable a command.", aliases=["cmd"])
-@commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.manage_guild)
+
+@bot.command(
+    name="command", description="Enable or disable a command.", aliases=["cmd"]
+)
+@commands.check(
+    lambda ctx: (
+        str(ctx.author.id) in bot_info.data["owners"]
+        or ctx.author.guild_permissions.manage_guild
+    )
+)
 async def command_permission(
     ctx: commands.Context,
     command: str,
     target_type: Literal["server", "user", "channel", "role"],
-    target: Optional[Union[commands.MemberConverter, commands.GuildChannelConverter, commands.RoleConverter]] = None,
+    target: Optional[
+        Union[
+            commands.MemberConverter,
+            commands.GuildChannelConverter,
+            commands.RoleConverter,
+        ]
+    ] = None,
     status: Literal["allow", "deny", "reset"] = "allow",
-    *, 
-    reason: str = "No reason provided"
+    *,
+    reason: str = "No reason provided",
 ):
-    status_value = {
-        "allow": True,
-        "deny": False,
-        "reset": None
-    }[status.lower()]
+    status_value = {"allow": True, "deny": False, "reset": None}[status.lower()]
 
     try:
         cmd = bot.get_command(command)
@@ -851,24 +1117,36 @@ async def command_permission(
                 ON CONFLICT (guild_id, command_name)
                 DO UPDATE SET status = EXCLUDED.status, reason = EXCLUDED.reason
             """
-            params = (ctx.guild.id, root_name, status_value, reason, ctx.author.id, datetime.datetime.now())
+            params = (
+                ctx.guild.id,
+                root_name,
+                status_value,
+                reason,
+                ctx.author.id,
+                datetime.datetime.now(),
+            )
             action = "allowed" if status_value else "denied"
-        
+
         async with bot.db.acquire() as conn:
             await conn.execute(query, *params)
-        
-        await ctx.send(f"Command `{root_name}` has been {action} server-wide. Reason: `{reason}`")
+
+        await ctx.send(
+            f"Command `{root_name}` has been {action} server-wide. Reason: `{reason}`"
+        )
         return
 
-
     if target is None:
-        raise commands.BadArgument(f"You must specify a target when using {target_type} permissions.")
+        raise commands.BadArgument(
+            f"You must specify a target when using {target_type} permissions."
+        )
 
     try:
         if target_type == "user":
             target_obj = await commands.MemberConverter().convert(ctx, str(target))
         elif target_type == "channel":
-            target_obj = await commands.GuildChannelConverter().convert(ctx, str(target))
+            target_obj = await commands.GuildChannelConverter().convert(
+                ctx, str(target)
+            )
         elif target_type == "role":
             target_obj = await commands.RoleConverter().convert(ctx, str(target))
     except commands.BadArgument as e:
@@ -885,16 +1163,37 @@ async def command_permission(
             ON CONFLICT (guild_id, command_name, target_type, target_id)
             DO UPDATE SET status = EXCLUDED.status, reason = EXCLUDED.reason
         """
-        params = (ctx.guild.id, root_name, target_type, target_obj.id, status_value, reason, ctx.author.id, datetime.datetime.now())
+        params = (
+            ctx.guild.id,
+            root_name,
+            target_type,
+            target_obj.id,
+            status_value,
+            reason,
+            ctx.author.id,
+            datetime.datetime.now(),
+        )
         action = "allowed" if status_value else "denied"
 
     async with bot.db.acquire() as conn:
         await conn.execute(query, *params)
 
-    await ctx.send(f"Command `{root_name}` has been {action} for {target_type} {target_obj}. Reason: `{reason}`")
+    await ctx.send(
+        f"Command `{root_name}` has been {action} for {target_type} {target_obj}. Reason: `{reason}`"
+    )
 
-@bot.command(name="commandclear", description="Clear all command permissions for a command.", aliases=["cmdclear"])
-@commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.manage_guild)
+
+@bot.command(
+    name="commandclear",
+    description="Clear all command permissions for a command.",
+    aliases=["cmdclear"],
+)
+@commands.check(
+    lambda ctx: (
+        str(ctx.author.id) in bot_info.data["owners"]
+        or ctx.author.guild_permissions.manage_guild
+    )
+)
 async def command_clear(ctx: commands.Context, command: str, target_type: str):
     cmd = bot.get_command(command)
     if not cmd:
@@ -907,9 +1206,13 @@ async def command_clear(ctx: commands.Context, command: str, target_type: str):
             async with bot.db.acquire() as conn:
                 result = await conn.execute(query, ctx.guild.id, root_name)
                 if result == "DELETE 0":
-                    await ctx.send(f"No server-wide command permissions found for command `{root_name}`.")
+                    await ctx.send(
+                        f"No server-wide command permissions found for command `{root_name}`."
+                    )
                 else:
-                    await ctx.send(f"Server-wide command permissions for command `{root_name}` have been cleared.")
+                    await ctx.send(
+                        f"Server-wide command permissions for command `{root_name}` have been cleared."
+                    )
         except Exception as e:
             await ctx.send(f"Error clearing server-wide command permissions: {e}")
         return
@@ -918,34 +1221,45 @@ async def command_clear(ctx: commands.Context, command: str, target_type: str):
         async with bot.db.acquire() as conn:
             result = await conn.execute(query, ctx.guild.id, root_name, target_type)
             if result == "DELETE 0":
-                await ctx.send(f"No command permissions found for command `{root_name}` for {target_type}.")
+                await ctx.send(
+                    f"No command permissions found for command `{root_name}` for {target_type}."
+                )
             else:
-                await ctx.send(f"Command permissions for command `{root_name}` have been cleared for {target_type}.")
+                await ctx.send(
+                    f"Command permissions for command `{root_name}` have been cleared for {target_type}."
+                )
     except Exception as e:
         await ctx.send(f"Error clearing command permissions: {e}")
     return
 
-@bot.command(name="commandlist", description="List all command permissions.", aliases=["cmdlist"])
-@commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.manage_guild)
+
+@bot.command(
+    name="commandlist", description="List all command permissions.", aliases=["cmdlist"]
+)
+@commands.check(
+    lambda ctx: (
+        str(ctx.author.id) in bot_info.data["owners"]
+        or ctx.author.guild_permissions.manage_guild
+    )
+)
 async def command_list(ctx: commands.Context):
     query = """
-        SELECT command_name, target_type, target_id, status, reason, added_by, added_at 
-        FROM command_permissions 
-        WHERE guild_id = $1 
-        UNION ALL 
-        SELECT command_name, 'server' AS target_type, NULL AS target_id, status, reason, added_by, added_at 
-        FROM server_command_permissions 
+        SELECT command_name, target_type, target_id, status, reason, added_by, added_at
+        FROM command_permissions
+        WHERE guild_id = $1
+        UNION ALL
+        SELECT command_name, 'server' AS target_type, NULL AS target_id, status, reason, added_by, added_at
+        FROM server_command_permissions
         WHERE guild_id = $1
         ORDER BY command_name, target_type
     """
-    
+
     async with bot.db.acquire() as conn:
         records = await conn.fetch(query, ctx.guild.id)
-    
+
     if not records:
         await ctx.send("No command permissions are configured for this server.")
         return
-    
 
     processed = []
     for record in records:
@@ -955,50 +1269,56 @@ async def command_list(ctx: commands.Context):
             "status": record["status"],
             "reason": record["reason"],
             "added_by": record["added_by"],
-            "added_at": f"<t:{int(record['added_at'].timestamp())}:R>"
+            "added_at": f"<t:{int(record['added_at'].timestamp())}:R>",
         }
-        
 
         if record["target_type"] == "server":
             entry["target"] = "Server-wide"
         else:
             try:
                 if record["target_type"] == "user":
-                    target = await commands.MemberConverter().convert(ctx, str(record["target_id"]))
+                    target = await commands.MemberConverter().convert(
+                        ctx, str(record["target_id"])
+                    )
                     entry["target"] = f"User: {target.mention}"
                 elif record["target_type"] == "channel":
-                    target = await commands.GuildChannelConverter().convert(ctx, str(record["target_id"]))
+                    target = await commands.GuildChannelConverter().convert(
+                        ctx, str(record["target_id"])
+                    )
                     entry["target"] = f"Channel: {target.mention}"
                 elif record["target_type"] == "role":
-                    target = await commands.RoleConverter().convert(ctx, str(record["target_id"]))
+                    target = await commands.RoleConverter().convert(
+                        ctx, str(record["target_id"])
+                    )
                     entry["target"] = f"Role: {target.mention}"
             except commands.BadArgument:
-                entry["target"] = f"{record['target_type'].title()} ID: {record['target_id']}"
-        
+                entry["target"] = (
+                    f"{record['target_type'].title()} ID: {record['target_id']}"
+                )
 
         try:
-            adder = await commands.MemberConverter().convert(ctx, str(record["added_by"]))
+            adder = await commands.MemberConverter().convert(
+                ctx, str(record["added_by"])
+            )
             entry["added_by"] = adder.mention
         except commands.BadArgument:
             entry["added_by"] = f"User ID: {record['added_by']}"
-        
+
         processed.append(entry)
-    
 
     commands_dict = {}
     for entry in processed:
         if entry["command"] not in commands_dict:
             commands_dict[entry["command"]] = []
         commands_dict[entry["command"]].append(entry)
-    
 
     pages = []
     current_page = []
     current_length = 0
-    
+
     for cmd, entries in commands_dict.items():
         cmd_text = [f"**Command:** `{cmd}`"]
-        
+
         for entry in entries:
             entry_text = (
                 f"- **Target:** {entry['target']}\n"
@@ -1007,20 +1327,20 @@ async def command_list(ctx: commands.Context):
                 f"- **By:** {entry['added_by']} at {entry['added_at']}"
             )
             cmd_text.append(entry_text)
-        
+
         full_cmd_text = "\n".join(cmd_text)
-        
+
         if current_length + len(full_cmd_text) > 2000:
             pages.append("\n\n".join(current_page))
             current_page = []
             current_length = 0
-        
+
         current_page.append(full_cmd_text)
         current_length += len(full_cmd_text) + 2
-    
+
     if current_page:
         pages.append("\n\n".join(current_page))
-    
+
     class CommandListPaginator(discord.ui.View):
         def __init__(self, pages: list, author: discord.Member):
             super().__init__(timeout=60.0)
@@ -1029,56 +1349,70 @@ async def command_list(ctx: commands.Context):
             self.author = author
             self.message = None
             self.update_buttons()
-        
+
         def update_buttons(self):
             self.children[0].disabled = self.current_page == 0
             self.children[1].disabled = self.current_page == len(self.pages) - 1
-        
+
         async def interaction_check(self, interaction: discord.Interaction):
             if interaction.user != self.author:
-                await interaction.response.send_message("You can't control this pagination.", ephemeral=True)
+                await interaction.response.send_message(
+                    "You can't control this pagination.", ephemeral=True
+                )
                 return False
             return True
-        
+
         async def on_timeout(self):
             if self.message:
                 await self.message.edit(view=None)
-        
+
         @discord.ui.button(label="⬅️", style=discord.ButtonStyle.primary, disabled=True)
-        async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async def previous(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
             self.current_page -= 1
             await self.update_page(interaction)
-        
+
         @discord.ui.button(label="➡️", style=discord.ButtonStyle.primary, disabled=False)
-        async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async def next(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
             self.current_page += 1
             await self.update_page(interaction)
-        
+
         @discord.ui.button(label="🔁", style=discord.ButtonStyle.primary)
-        async def shuffle(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async def shuffle(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
             self.current_page = random.randint(0, len(self.pages) - 1)
             await self.update_page(interaction)
-        
+
         @discord.ui.button(label="🔢", style=discord.ButtonStyle.primary)
-        async def jump(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async def jump(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
             modal = JumpModal(self)
             await interaction.response.send_modal(modal)
-        
+
         @discord.ui.button(label="⏹️", style=discord.ButtonStyle.danger)
-        async def _stop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async def _stop(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
             await interaction.response.edit_message(view=None)
             self.stop()
-        
+
         @discord.ui.button(label="🗑️", style=discord.ButtonStyle.danger)
-        async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async def delete(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
             await interaction.message.delete()
             self.stop()
-        
+
         async def update_page(self, interaction: discord.Interaction):
             embed = discord.Embed(
                 title=f"Command Permissions (Page {self.current_page + 1}/{len(self.pages)})",
                 description=self.pages[self.current_page],
-                color=discord.Color.blurple()
+                color=discord.Color.blurple(),
             )
             self.update_buttons()
             await interaction.response.edit_message(embed=embed, view=self)
@@ -1090,10 +1424,10 @@ async def command_list(ctx: commands.Context):
             self.page_input = discord.ui.TextInput(
                 label="Page Number",
                 placeholder=f"Enter a number between 1 and {len(self.paginator.pages)}",
-                required=True
+                required=True,
             )
             self.add_item(self.page_input)
-        
+
         async def on_submit(self, interaction: discord.Interaction):
             try:
                 page_num = int(self.page_input.value)
@@ -1103,108 +1437,194 @@ async def command_list(ctx: commands.Context):
                 else:
                     await interaction.response.send_message(
                         f"Please enter a number between 1 and {len(self.paginator.pages)}",
-                        ephemeral=True
+                        ephemeral=True,
                     )
             except ValueError:
-                await interaction.response.send_message("Please enter a valid number.", ephemeral=True)
-
+                await interaction.response.send_message(
+                    "Please enter a valid number.", ephemeral=True
+                )
 
     view = CommandListPaginator(pages, ctx.author)
     embed = discord.Embed(
         title=f"Command Permissions (Page 1/{len(pages)})",
         description=pages[0],
-        color=discord.Color.blurple()
+        color=discord.Color.blurple(),
     )
     view.message = await ctx.send(embed=embed, view=view)
 
-@bot.command(name="blocklist", description="List all blocked users, channels, and roles.")
-@commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
+
+@bot.command(
+    name="blocklist", description="List all blocked users, channels, and roles."
+)
+@commands.check(
+    lambda ctx: (
+        str(ctx.author.id) in bot_info.data["owners"]
+        or ctx.author.guild_permissions.administrator
+    )
+)
 async def blocklist(ctx: commands.Context):
     async with bot.db.acquire() as conn:
-        records = await conn.fetch("SELECT type, entity_id, reason, added_by, added_at FROM blocklist")
-        global_blocked_records = await conn.fetch("SELECT discord_id, reason FROM global_blocked_users")
-        server_blocked_records = await conn.fetch("SELECT guild_id, reason FROM global_blocked_servers")
+        records = await conn.fetch(
+            "SELECT type, entity_id, reason, added_by, added_at FROM blocklist"
+        )
+        global_blocked_records = await conn.fetch(
+            "SELECT discord_id, reason FROM global_blocked_users"
+        )
+        server_blocked_records = await conn.fetch(
+            "SELECT guild_id, reason FROM global_blocked_servers"
+        )
         if not (records or global_blocked_records or server_blocked_records):
             await ctx.send("The blocklist is empty.")
             return
         formatted_records = []
         for record in records:
-            entity_id = record['entity_id']
-            entity_type = record['type']
-            reason = record['reason']
-            added_by_user = ctx.guild.get_member(record['added_by'])
-            added_by_name_unknown = await bot.fetch_user(record['added_by'])
-            added_by_name = added_by_user.mention if added_by_user else added_by_name_unknown.mention
+            entity_id = record["entity_id"]
+            entity_type = record["type"]
+            reason = record["reason"]
+            added_by_user = ctx.guild.get_member(record["added_by"])
+            added_by_name_unknown = await bot.fetch_user(record["added_by"])
+            added_by_name = (
+                added_by_user.mention
+                if added_by_user
+                else added_by_name_unknown.mention
+            )
             added_at = f"<t:{int(record['added_at'].timestamp())}:R>"
             if entity_type == "user":
                 user = ctx.guild.get_member(entity_id)
-                entity_name = f"{user.name}#{user.discriminator} ({user.mention})" if user else entity_id
+                entity_name = (
+                    f"{user.name}#{user.discriminator} ({user.mention})"
+                    if user
+                    else entity_id
+                )
             elif entity_type == "channel":
                 channel = ctx.guild.get_channel(entity_id)
-                entity_name = f"{channel.name} ({channel.mention})" if channel else entity_id
+                entity_name = (
+                    f"{channel.name} ({channel.mention})" if channel else entity_id
+                )
             elif entity_type == "role":
                 role = ctx.guild.get_role(entity_id)
                 entity_name = f"{role.name} ({role.mention})" if role else entity_id
             else:
                 entity_name = entity_id
-            formatted_records.append(f"**Type:** {entity_type.capitalize()} | **Name:** {entity_name} | **Reason:** `{reason}` | **Added by:** {added_by_name} | **Added at:** {added_at}")
+            formatted_records.append(
+                f"**Type:** {entity_type.capitalize()} | **Name:** {entity_name} | **Reason:** `{reason}` | **Added by:** {added_by_name} | **Added at:** {added_at}"
+            )
         formatted_text = "\n".join(formatted_records) if formatted_records else "None"
         embed = discord.Embed(title="Blocklist", color=discord.Color.red())
         embed.add_field(name="Blocked Entries", value=formatted_text, inline=False)
-        if str(ctx.author.id) in bot_info.data['owners']:
-            formatted_global_records = "\n".join(f"**User ID:** {record['discord_id']} | **Reason:** `{record['reason']}`" for record in global_blocked_records)
-            formatted_server_records = "\n".join(f"**Server ID:** {record['guild_id']} | **Reason:** `{record['reason']}`" for record in server_blocked_records)
-            embed.add_field(name="Global/Server Blocklist", value=f"**Global:**\n{formatted_global_records}\n\n**Server:**\n{formatted_server_records}", inline=False)
-        embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
-        embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url if ctx.author.avatar else None)
+        if str(ctx.author.id) in bot_info.data["owners"]:
+            formatted_global_records = "\n".join(
+                f"**User ID:** {record['discord_id']} | **Reason:** `{record['reason']}`"
+                for record in global_blocked_records
+            )
+            formatted_server_records = "\n".join(
+                f"**Server ID:** {record['guild_id']} | **Reason:** `{record['reason']}`"
+                for record in server_blocked_records
+            )
+            embed.add_field(
+                name="Global/Server Blocklist",
+                value=f"**Global:**\n{formatted_global_records}\n\n**Server:**\n{formatted_server_records}",
+                inline=False,
+            )
+        embed.set_author(
+            name=f"{ctx.author.name}#{ctx.author.discriminator}",
+            icon_url=ctx.author.display_avatar.url,
+            url=f"https://discord.com/users/{ctx.author.id}",
+        )
+        embed.set_footer(
+            text=f"Requested by {ctx.author}",
+            icon_url=ctx.author.display_avatar.url if ctx.author.avatar else None,
+        )
         await ctx.send(embed=embed)
 
-@bot.command(name="allowlist", description="List all allowed users, channels, and roles.")
-@commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
+
+@bot.command(
+    name="allowlist", description="List all allowed users, channels, and roles."
+)
+@commands.check(
+    lambda ctx: (
+        str(ctx.author.id) in bot_info.data["owners"]
+        or ctx.author.guild_permissions.administrator
+    )
+)
 async def allowlist(ctx: commands.Context):
     async with bot.db.acquire() as conn:
-        records = await conn.fetch("SELECT type, entity_id, reason, added_by, added_at FROM allowlist")
+        records = await conn.fetch(
+            "SELECT type, entity_id, reason, added_by, added_at FROM allowlist"
+        )
         if not records:
             await ctx.send("The allowlist is empty.")
             return
         formatted_records = []
         for record in records:
-            entity_id = record['entity_id']
-            entity_type = record['type']
-            reason = record['reason']
-            added_by_user = ctx.guild.get_member(record['added_by'])
-            added_by_name_unknown = await bot.fetch_user(record['added_by'])
-            added_by_name = added_by_user.mention if added_by_user else added_by_name_unknown.mention
+            entity_id = record["entity_id"]
+            entity_type = record["type"]
+            reason = record["reason"]
+            added_by_user = ctx.guild.get_member(record["added_by"])
+            added_by_name_unknown = await bot.fetch_user(record["added_by"])
+            added_by_name = (
+                added_by_user.mention
+                if added_by_user
+                else added_by_name_unknown.mention
+            )
             added_at = f"<t:{int(record['added_at'].timestamp())}:R>"
             if entity_type == "user":
                 user = ctx.guild.get_member(entity_id)
-                entity_name = f"{user.name}#{user.discriminator} ({user.mention})" if user else entity_id
+                entity_name = (
+                    f"{user.name}#{user.discriminator} ({user.mention})"
+                    if user
+                    else entity_id
+                )
             elif entity_type == "channel":
                 channel = ctx.guild.get_channel(entity_id)
-                entity_name = f"{channel.name} ({channel.mention})" if channel else entity_id
+                entity_name = (
+                    f"{channel.name} ({channel.mention})" if channel else entity_id
+                )
             elif entity_type == "role":
                 role = ctx.guild.get_role(entity_id)
                 entity_name = f"{role.name} ({role.mention})" if role else entity_id
             else:
                 entity_name = entity_id
-            formatted_records.append(f"**Type:** {entity_type.capitalize()} | **Name:** {entity_name} | **Reason:** `{reason}` | **Added by:** {added_by_name} | **Added at:** {added_at}")
+            formatted_records.append(
+                f"**Type:** {entity_type.capitalize()} | **Name:** {entity_name} | **Reason:** `{reason}` | **Added by:** {added_by_name} | **Added at:** {added_at}"
+            )
         formatted_text = "\n".join(formatted_records) if formatted_records else "None"
         embed = discord.Embed(title="Allowlist", color=discord.Color.green())
         embed.add_field(name="Allowed Entries", value=formatted_text, inline=False)
-        embed.set_author(name=f"{ctx.author.name}#{ctx.author.discriminator}", icon_url=ctx.author.display_avatar.url, url=f"https://discord.com/users/{ctx.author.id}")
-        embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url if ctx.author.avatar else None)
+        embed.set_author(
+            name=f"{ctx.author.name}#{ctx.author.discriminator}",
+            icon_url=ctx.author.display_avatar.url,
+            url=f"https://discord.com/users/{ctx.author.id}",
+        )
+        embed.set_footer(
+            text=f"Requested by {ctx.author}",
+            icon_url=ctx.author.display_avatar.url if ctx.author.avatar else None,
+        )
         await ctx.send(embed=embed)
 
-@bot.command(name="block", description="Blocks a user, channel, or role from using the bot.")
-@commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
-async def block(ctx: commands.Context, type: str, target: str, *, reason = "No reason provided"):
+
+@bot.command(
+    name="block", description="Blocks a user, channel, or role from using the bot."
+)
+@commands.check(
+    lambda ctx: (
+        str(ctx.author.id) in bot_info.data["owners"]
+        or ctx.author.guild_permissions.administrator
+    )
+)
+async def block(
+    ctx: commands.Context, type: str, target: str, *, reason="No reason provided"
+):
     valid_types = ["global", "user", "channel", "role", "server"]
-    
+
     if type not in valid_types:
         await ctx.send(f"Invalid type. Valid types: {', '.join(valid_types)}")
         return
-    
-    if type in ["global", "server"] and str(ctx.author.id) not in bot_info.data['owners']:
+
+    if (
+        type in ["global", "server"]
+        and str(ctx.author.id) not in bot_info.data["owners"]
+    ):
         await ctx.send(f"{type.capitalize()} blocks can only be set by bot owners.")
         return
 
@@ -1243,7 +1663,9 @@ async def block(ctx: commands.Context, type: str, target: str, *, reason = "No r
             entity_id = int(target)
             converted_name = str(entity_id)
         except ValueError:
-            await ctx.send("Could not resolve target. Please provide a valid ID, mention, or name.")
+            await ctx.send(
+                "Could not resolve target. Please provide a valid ID, mention, or name."
+            )
             return
 
     if type in ["global", "user"] and entity_id == ctx.author.id:
@@ -1252,35 +1674,73 @@ async def block(ctx: commands.Context, type: str, target: str, *, reason = "No r
 
     async with bot.db.acquire() as conn:
         if type == "server":
-            exists = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM global_blocked_servers WHERE guild_id = $1)", entity_id)
+            exists = await conn.fetchval(
+                "SELECT EXISTS (SELECT 1 FROM global_blocked_servers WHERE guild_id = $1)",
+                entity_id,
+            )
             if exists:
-                await ctx.send(f"Server `{converted_name}` is already globally blocked.")
+                await ctx.send(
+                    f"Server `{converted_name}` is already globally blocked."
+                )
                 return
-            await conn.execute("INSERT INTO global_blocked_servers (guild_id, reason) VALUES ($1, $2) ON CONFLICT (guild_id) DO UPDATE SET reason = $2", entity_id, reason)
-            await ctx.send(f"Globally blocked server `{converted_name}`. Reason: `{reason}`")
+            await conn.execute(
+                "INSERT INTO global_blocked_servers (guild_id, reason) VALUES ($1, $2) ON CONFLICT (guild_id) DO UPDATE SET reason = $2",
+                entity_id,
+                reason,
+            )
+            await ctx.send(
+                f"Globally blocked server `{converted_name}`. Reason: `{reason}`"
+            )
 
         elif type == "global":
-            exists = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM global_blocked_users WHERE discord_id = $1)", entity_id)
+            exists = await conn.fetchval(
+                "SELECT EXISTS (SELECT 1 FROM global_blocked_users WHERE discord_id = $1)",
+                entity_id,
+            )
             if exists:
                 await ctx.send(f"User `{converted_name}` is already globally blocked.")
                 return
-            await conn.execute("INSERT INTO global_blocked_users (discord_id, reason) VALUES ($1, $2) ON CONFLICT (discord_id) DO UPDATE SET reason = $2", entity_id, reason)
-            await ctx.send(f"Globally blocked user `{converted_name}`. Reason: `{reason}`")
+            await conn.execute(
+                "INSERT INTO global_blocked_users (discord_id, reason) VALUES ($1, $2) ON CONFLICT (discord_id) DO UPDATE SET reason = $2",
+                entity_id,
+                reason,
+            )
+            await ctx.send(
+                f"Globally blocked user `{converted_name}`. Reason: `{reason}`"
+            )
 
         else:
-            exists = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM blocklist WHERE type = $1 AND entity_id = $2)", type, entity_id)
+            exists = await conn.fetchval(
+                "SELECT EXISTS (SELECT 1 FROM blocklist WHERE type = $1 AND entity_id = $2)",
+                type,
+                entity_id,
+            )
             if exists:
-                await ctx.send(f"{type.capitalize()} `{converted_name}` is already blocked.")
+                await ctx.send(
+                    f"{type.capitalize()} `{converted_name}` is already blocked."
+                )
                 return
             await conn.execute(
                 "INSERT INTO blocklist (type, entity_id, reason, added_by, added_at) "
                 "VALUES ($1, $2, $3, $4, $5) ON CONFLICT (type, entity_id) DO UPDATE SET reason = $3",
-                type, entity_id, reason, ctx.author.id, datetime.datetime.now()
+                type,
+                entity_id,
+                reason,
+                ctx.author.id,
+                datetime.datetime.now(),
             )
             await ctx.send(f"Blocked {type} `{converted_name}`. Reason: `{reason}`")
 
-@bot.command(name="unblock", description="Unblocks a user, channel, or role from using the bot.")
-@commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
+
+@bot.command(
+    name="unblock", description="Unblocks a user, channel, or role from using the bot."
+)
+@commands.check(
+    lambda ctx: (
+        str(ctx.author.id) in bot_info.data["owners"]
+        or ctx.author.guild_permissions.administrator
+    )
+)
 async def unblock(ctx: commands.Context, type: str, target: str):
     valid_types = ["global", "user", "channel", "role", "server"]
 
@@ -1288,7 +1748,10 @@ async def unblock(ctx: commands.Context, type: str, target: str):
         await ctx.send(f"Invalid type. Valid types: {', '.join(valid_types)}")
         return
 
-    if type in ["global", "server"] and str(ctx.author.id) not in bot_info.data['owners']:
+    if (
+        type in ["global", "server"]
+        and str(ctx.author.id) not in bot_info.data["owners"]
+    ):
         await ctx.send(f"{type.capitalize()} blocks can only be removed by bot owners.")
         return
 
@@ -1326,158 +1789,283 @@ async def unblock(ctx: commands.Context, type: str, target: str):
             entity_id = int(target)
             converted_name = str(entity_id)
         except ValueError:
-            await ctx.send("Could not resolve target. Please provide a valid ID, mention, or name.")
+            await ctx.send(
+                "Could not resolve target. Please provide a valid ID, mention, or name."
+            )
             return
 
     async with bot.db.acquire() as conn:
         if type == "server":
-            result = await conn.execute("DELETE FROM global_blocked_servers WHERE guild_id = $1", entity_id)
+            result = await conn.execute(
+                "DELETE FROM global_blocked_servers WHERE guild_id = $1", entity_id
+            )
             if result == "DELETE 0":
                 await ctx.send(f"Server `{converted_name}` is not globally blocked.")
             else:
                 await ctx.send(f"Unblocked server `{converted_name}`.")
 
         elif type == "global":
-            result = await conn.execute("DELETE FROM global_blocked_users WHERE discord_id = $1", entity_id)
+            result = await conn.execute(
+                "DELETE FROM global_blocked_users WHERE discord_id = $1", entity_id
+            )
             if result == "DELETE 0":
                 await ctx.send(f"User `{converted_name}` is not globally blocked.")
             else:
                 await ctx.send(f"Unblocked user `{converted_name}`.")
 
         else:
-            result = await conn.execute("DELETE FROM blocklist WHERE type = $1 AND entity_id = $2", type, entity_id)
+            result = await conn.execute(
+                "DELETE FROM blocklist WHERE type = $1 AND entity_id = $2",
+                type,
+                entity_id,
+            )
             if result == "DELETE 0":
-                await ctx.send(f"{type.capitalize()} `{converted_name}` is not blocked.")
+                await ctx.send(
+                    f"{type.capitalize()} `{converted_name}` is not blocked."
+                )
             else:
                 await ctx.send(f"Unblocked {type} `{converted_name}`.")
 
-@bot.command(name="allow", description="Allows a user, channel, or role to use the bot.")
-@commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
-async def allow(ctx: commands.Context, type: str, target: commands.MemberConverter | commands.GuildChannelConverter | commands.RoleConverter, *, reason = "No reason provided"):
+
+@bot.command(
+    name="allow", description="Allows a user, channel, or role to use the bot."
+)
+@commands.check(
+    lambda ctx: (
+        str(ctx.author.id) in bot_info.data["owners"]
+        or ctx.author.guild_permissions.administrator
+    )
+)
+async def allow(
+    ctx: commands.Context,
+    type: str,
+    target: commands.MemberConverter
+    | commands.GuildChannelConverter
+    | commands.RoleConverter,
+    *,
+    reason="No reason provided",
+):
     valid_types = ["user", "channel", "role"]
     if type not in valid_types:
         await ctx.send("Invalid type. Valid types: `user`, `channel`, or `role`.")
         return
-    converter = commands.MemberConverter() if type == "user" else commands.GuildChannelConverter() if type == "channel" else commands.RoleConverter()
+    converter = (
+        commands.MemberConverter()
+        if type == "user"
+        else commands.GuildChannelConverter()
+        if type == "channel"
+        else commands.RoleConverter()
+    )
     converted = await converter.convert(ctx, str(target))
     converted_name = converted.name if converted else target
     type_id = target.id if hasattr(target, "id") else target
     async with bot.db.acquire() as conn:
-        exists = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM allowlist WHERE type = $1 AND entity_id = $2)", type, type_id)
+        exists = await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM allowlist WHERE type = $1 AND entity_id = $2)",
+            type,
+            type_id,
+        )
         if exists:
             await ctx.send(f"{type.capitalize()} {converted_name} is already allowed.")
             return
-        await conn.execute("INSERT INTO allowlist (type, entity_id, reason, added_by, added_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (type, entity_id) DO NOTHING", type, type_id, reason, ctx.author.id, datetime.datetime.now())
+        await conn.execute(
+            "INSERT INTO allowlist (type, entity_id, reason, added_by, added_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (type, entity_id) DO NOTHING",
+            type,
+            type_id,
+            reason,
+            ctx.author.id,
+            datetime.datetime.now(),
+        )
     await ctx.send(f"Allowed {type} {converted_name}. Reason: `{reason}`")
 
-@bot.command(name="deny", description="Denies a user, channel, or role from using the bot. (Not to be confused with `block`.)")
-@commands.check(lambda ctx: str(ctx.author.id) in bot_info.data['owners'] or ctx.author.guild_permissions.administrator)
-async def deny(ctx: commands.Context, type: str, target: commands.MemberConverter | commands.GuildChannelConverter | commands.RoleConverter):
+
+@bot.command(
+    name="deny",
+    description="Denies a user, channel, or role from using the bot. (Not to be confused with `block`.)",
+)
+@commands.check(
+    lambda ctx: (
+        str(ctx.author.id) in bot_info.data["owners"]
+        or ctx.author.guild_permissions.administrator
+    )
+)
+async def deny(
+    ctx: commands.Context,
+    type: str,
+    target: commands.MemberConverter
+    | commands.GuildChannelConverter
+    | commands.RoleConverter,
+):
     valid_types = ["user", "channel", "role"]
     if type not in valid_types:
         await ctx.send("Invalid type. Valid types: `user`, `channel`, or `role`.")
         return
-    converter = commands.MemberConverter() if type == "user" else commands.GuildChannelConverter() if type == "channel" else commands.RoleConverter()
+    converter = (
+        commands.MemberConverter()
+        if type == "user"
+        else commands.GuildChannelConverter()
+        if type == "channel"
+        else commands.RoleConverter()
+    )
     converted = await converter.convert(ctx, str(target))
     converted_name = converted.name if converted else target
     type_id = target.id if hasattr(target, "id") else target
     async with bot.db.acquire() as conn:
-        exists = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM allowlist WHERE type = $1 AND entity_id = $2)", type, type_id)
+        exists = await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM allowlist WHERE type = $1 AND entity_id = $2)",
+            type,
+            type_id,
+        )
         if not exists:
             await ctx.send(f"{type.capitalize()} {converted_name} is not allowed.")
             return
-        await conn.execute("DELETE FROM allowlist WHERE type = $1 AND entity_id = $2", type, type_id)
+        await conn.execute(
+            "DELETE FROM allowlist WHERE type = $1 AND entity_id = $2", type, type_id
+        )
     await ctx.send(f"Denied {type} {converted_name}.")
 
-@bot.command(name="addpersonalprefix", description="Add a personal prefix for yourself.", aliases=["apersonalprefix", "apprefix", "app"])
+
+@bot.command(
+    name="addpersonalprefix",
+    description="Add a personal prefix for yourself.",
+    aliases=["apersonalprefix", "apprefix", "app"],
+)
 async def addpersonalprefix(ctx: commands.Context, prefix: str):
     response = await set_prefix(ctx.author.id, prefix, is_guild=False)
     await ctx.send(response)
 
-@bot.command(name="removepersonalprefix", description="Remove a personal prefix that you made.", aliases=["rmpersonalprefix", "rmpprefix", "rmpp"])
+
+@bot.command(
+    name="removepersonalprefix",
+    description="Remove a personal prefix that you made.",
+    aliases=["rmpersonalprefix", "rmpprefix", "rmpp"],
+)
 async def removepersonalprefix(ctx: commands.Context, prefix: str):
     async with bot.db.acquire() as conn:
-        current_prefixes = await conn.fetchval("SELECT prefixes FROM user_prefixes WHERE user_id = $1", ctx.author.id)
+        current_prefixes = await conn.fetchval(
+            "SELECT prefixes FROM user_prefixes WHERE user_id = $1", ctx.author.id
+        )
 
         if current_prefixes is None:
             await ctx.send("You have no personal prefixes set.")
             return
-        
+
         current_prefixes = list(current_prefixes)
 
         if prefix in current_prefixes:
             current_prefixes.remove(prefix)
-            await conn.execute("UPDATE user_prefixes SET prefixes = $1 WHERE user_id = $2", current_prefixes, ctx.author.id)
+            await conn.execute(
+                "UPDATE user_prefixes SET prefixes = $1 WHERE user_id = $2",
+                current_prefixes,
+                ctx.author.id,
+            )
             await ctx.send(f"Removed personal prefix `{prefix}`.")
         else:
             await ctx.send(f"Prefix `{prefix}` is not in your personal prefixes.")
 
-@bot.command(name="listpersonalprefixes", description="List your personal prefixes.", aliases=["lspersonalprefixes", "lspprefixes", "lspp"])
+
+@bot.command(
+    name="listpersonalprefixes",
+    description="List your personal prefixes.",
+    aliases=["lspersonalprefixes", "lspprefixes", "lspp"],
+)
 async def listpersonalprefixes(ctx: commands.Context):
     async with bot.db.acquire() as conn:
-        prefixes = await conn.fetchval("SELECT prefixes FROM user_prefixes WHERE user_id = $1", ctx.author.id)
+        prefixes = await conn.fetchval(
+            "SELECT prefixes FROM user_prefixes WHERE user_id = $1", ctx.author.id
+        )
 
         if prefixes is None or len(prefixes) == 0:
             await ctx.send("You have no personal prefixes set.")
         else:
-            await ctx.send(f"Your personal prefixes: {', '.join([f'`{p}`' for p in prefixes])}")
+            await ctx.send(
+                f"Your personal prefixes: {', '.join([f'`{p}`' for p in prefixes])}"
+            )
 
-@bot.command(name="addguildprefix", description="Add a guild prefix for the current guild.", aliases=["aguildprefix", "agprefix", "agp"])
+
+@bot.command(
+    name="addguildprefix",
+    description="Add a guild prefix for the current guild.",
+    aliases=["aguildprefix", "agprefix", "agp"],
+)
 @commands.has_permissions(manage_guild=True)
 async def addguildprefix(ctx: commands.Context, prefix: str):
     if ctx.guild is None:
         await ctx.send("This command can only be used in a server.")
         return
-    
+
     response = await set_prefix(ctx.guild.id, prefix, is_guild=True)
     await ctx.send(response)
 
 
-@bot.command(name="removeguildprefix", description="Remove a guild prefix.", aliases=["rmguildprefix", "rmgprefix", "rmgp"])
+@bot.command(
+    name="removeguildprefix",
+    description="Remove a guild prefix.",
+    aliases=["rmguildprefix", "rmgprefix", "rmgp"],
+)
 @commands.has_permissions(manage_guild=True)
 async def removeguildprefix(ctx: commands.Context, prefix: str):
     async with bot.db.acquire() as conn:
-        current_prefixes = await conn.fetchval("SELECT prefixes FROM guild_prefixes WHERE guild_id = $1", ctx.guild.id)
+        current_prefixes = await conn.fetchval(
+            "SELECT prefixes FROM guild_prefixes WHERE guild_id = $1", ctx.guild.id
+        )
 
         if current_prefixes is None:
             await ctx.send("This guild has no prefixes set.")
             return
-        
+
         current_prefixes = list(current_prefixes)
 
         if prefix in current_prefixes:
             current_prefixes.remove(prefix)
-            await conn.execute("UPDATE guild_prefixes SET prefixes = $1 WHERE guild_id = $2", current_prefixes, ctx.guild.id)
+            await conn.execute(
+                "UPDATE guild_prefixes SET prefixes = $1 WHERE guild_id = $2",
+                current_prefixes,
+                ctx.guild.id,
+            )
             await ctx.send(f"Removed guild prefix `{prefix}`.")
         else:
             await ctx.send(f"Prefix `{prefix}` is not in the guild prefixes.")
 
-@bot.command(name="listguildprefixes", description="List the guild prefixes.", aliases=["lsguildprefixes", "lsgprefixes", "lsgp"])
+
+@bot.command(
+    name="listguildprefixes",
+    description="List the guild prefixes.",
+    aliases=["lsguildprefixes", "lsgprefixes", "lsgp"],
+)
 async def listguildprefixes(ctx: commands.Context):
     async with bot.db.acquire() as conn:
-        prefixes = await conn.fetchval("SELECT prefixes FROM guild_prefixes WHERE guild_id = $1", ctx.guild.id)
+        prefixes = await conn.fetchval(
+            "SELECT prefixes FROM guild_prefixes WHERE guild_id = $1", ctx.guild.id
+        )
 
         if prefixes is None or len(prefixes) == 0:
-            await ctx.send(f"This guild has no prefixes set. Default prefix is `{bot_info.data["prefix"]}`.")
+            await ctx.send(
+                f"This guild has no prefixes set. Default prefix is `{bot_info.data['prefix']}`."
+            )
         else:
             await ctx.send(f"Guild prefixes: {', '.join([f'`{p}`' for p in prefixes])}")
 
+
 # Reloading extensions
-@bot.command(description='Reloads extensions.', pass_context=True)
+@bot.command(description="Reloads extensions.", pass_context=True)
 @bot_info.is_owner()
-async def reload(ctx, *, exs : str = None):
-    module_msg = 'd' # d
-    if(exs is None):
-         module_msg = await reload_extensions(extensions)
+async def reload(ctx, *, exs: str = None):
+    module_msg = "d"  # d
+    if exs is None:
+        module_msg = await reload_extensions(extensions)
     else:
         module_msg = await reload_extensions(exs.split())
     await ctx.send(module_msg)
+
+
 async def setup(bot):
- for ex in extensions:
-    try:
-        await bot.load_extension(ex)
-    except Exception as e:
-        print('Failed to load {} because: {}'.format(ex, e))
+    for ex in extensions:
+        try:
+            await bot.load_extension(ex)
+        except Exception as e:
+            print("Failed to load {} because: {}".format(ex, e))
+
 
 @bot.hybrid_command(name="eval", description="Evaluate code.", aliases=["exec"])
 @app_commands.describe(code="The code to evaluate.")
@@ -1503,38 +2091,41 @@ async def eval(ctx, *, code):
         "vc": ctx.voice_client,
         "author": ctx.author,
         "guild": ctx.guild,
-        "message": ctx.message
-
+        "message": ctx.message,
     }
     env.update(globals())
     stdout = io.StringIO()
-    
-    to_compile = f'async def func():\n{textwrap.indent(code, "  ")}'
+
+    to_compile = f"async def func():\n{textwrap.indent(code, '  ')}"
     try:
         exec(to_compile, env)
     except Exception as e:
         result = f"```py\n{e.__class__.__name__}: {e}\n```"
-    func = env['func']
+    func = env["func"]
     try:
         with contextlib.redirect_stdout(stdout):
             ret = await func()
     except Exception as e:
         result = stdout.getvalue()
-        embed = discord.Embed(title="Evaluation Error", description=f"```py\n{result}\n{traceback.format_exc()}```", color=discord.Color.red())
+        embed = discord.Embed(
+            title="Evaluation Error",
+            description=f"```py\n{result}\n{traceback.format_exc()}```",
+            color=discord.Color.red(),
+        )
         await ctx.send(embed=embed)
         logger.error(f"Error evaluating code: {e}")
         return
     else:
         result = stdout.getvalue() or "No output."
         if ret is not None:
-            result += f'\n--> {ret}'
+            result += f"\n--> {ret}"
         logger.info(f"Evaluated code: {code}")
-    
-    pages = [result[i:i+1980] for i in range(0, len(result), 1980)]
-    
+
+    pages = [result[i : i + 1980] for i in range(0, len(result), 1980)]
+
     if not pages:
         pages = ["```py\nNo output.\n```"]
-    
+
     class EvalView(discord.ui.View):
         def __init__(self, total_pages: int, original_author):
             super().__init__()
@@ -1544,39 +2135,49 @@ async def eval(ctx, *, code):
             self.message = None
             self.total_pages = total_pages
             self.update_button_states()
-        
+
         def update_button_states(self):
             self.children[0].disabled = self.current_page == 0
             self.children[1].disabled = self.current_page == self.total_pages - 1
-        
+
         async def interaction_check(self, interaction: discord.Interaction):
             if interaction.user != self.original_author:
-                await interaction.response.send_message("You can't control this pagination.", ephemeral=True)
+                await interaction.response.send_message(
+                    "You can't control this pagination.", ephemeral=True
+                )
                 return False
             return True
-        
+
         async def on_timeout(self):
             await self.message.edit(view=None)
 
         @discord.ui.button(label="⬅️", style=discord.ButtonStyle.primary, disabled=True)
-        async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async def previous(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
             if self.current_page > 0:
                 self.current_page -= 1
                 await self.update_page(interaction)
 
         @discord.ui.button(label="➡️", style=discord.ButtonStyle.primary, disabled=False)
-        async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async def next(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
             if self.current_page < self.total_pages - 1:
                 self.current_page += 1
                 await self.update_page(interaction)
 
         @discord.ui.button(label="🔁", style=discord.ButtonStyle.primary)
-        async def shuffle(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async def shuffle(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
             self.current_page = random.randint(0, self.total_pages - 1)
             await self.update_page(interaction)
-        
+
         @discord.ui.button(label="🔢", style=discord.ButtonStyle.primary)
-        async def jump(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async def jump(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
             class JumpView(discord.ui.Modal):
                 def __init__(self, paginator):
                     super().__init__(title="Jump to Page")
@@ -1584,10 +2185,10 @@ async def eval(ctx, *, code):
                     self.page_input = discord.ui.TextInput(
                         label="Page Number",
                         placeholder=f"Enter a number between 1 and {self.paginator.total_pages}",
-                        required=True
+                        required=True,
                     )
                     self.add_item(self.page_input)
-                
+
                 async def on_submit(self, interaction: discord.Interaction):
                     try:
                         page = int(self.page_input.value)
@@ -1595,43 +2196,62 @@ async def eval(ctx, *, code):
                             self.paginator.current_page = page - 1
                             await self.paginator.update_page(interaction)
                         else:
-                            await interaction.response.send_message("Invalid page number.", ephemeral=True)
+                            await interaction.response.send_message(
+                                "Invalid page number.", ephemeral=True
+                            )
                     except ValueError:
-                        await interaction.response.send_message("Please enter a valid number.", ephemeral=True)
-            
+                        await interaction.response.send_message(
+                            "Please enter a valid number.", ephemeral=True
+                        )
+
             await interaction.response.send_modal(JumpView(self))
 
         @discord.ui.button(label="⏹️", style=discord.ButtonStyle.danger)
-        async def _stop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async def _stop(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
             await interaction.response.edit_message(view=None)
             self.stop()
-        
+
         @discord.ui.button(label="🗑️", style=discord.ButtonStyle.danger)
-        async def clear(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async def clear(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
             await interaction.message.delete()
             self.stop()
-        
+
         async def update_page(self, interaction: discord.Interaction):
-            embed = discord.Embed(title="Evaluation Result", description=f"```py\n{pages[self.current_page]}\n```", color=discord.Color.og_blurple())
+            embed = discord.Embed(
+                title="Evaluation Result",
+                description=f"```py\n{pages[self.current_page]}\n```",
+                color=discord.Color.og_blurple(),
+            )
             embed.set_footer(text=f"Page {self.current_page + 1}/{self.total_pages}")
             self.update_button_states()
             await interaction.response.edit_message(embed=embed, view=self)
 
-    embed = discord.Embed(title="Evaluation Result", description=f"```py\n{pages[0]}\n```", color=discord.Color.og_blurple())
+    embed = discord.Embed(
+        title="Evaluation Result",
+        description=f"```py\n{pages[0]}\n```",
+        color=discord.Color.og_blurple(),
+    )
     embed.set_footer(text=f"Page 1/{len(pages)}")
 
     view = EvalView(total_pages=len(pages), original_author=ctx.author)
 
     view.message = await ctx.send(embed=embed, view=view)
 
+
 def cleanup_code(content: str) -> str:
-    if content.startswith('```') and content.endswith('```'):
+    if content.startswith("```") and content.endswith("```"):
         content = content[3:-3].strip()
 
-        if ' ' in content or '\n' in content:
-            first_space_or_newline = content.find(' ')
-            first_newline = content.find('\n')
-            if first_space_or_newline == -1 or (0 <= first_newline < first_space_or_newline):
+        if " " in content or "\n" in content:
+            first_space_or_newline = content.find(" ")
+            first_newline = content.find("\n")
+            if first_space_or_newline == -1 or (
+                0 <= first_newline < first_space_or_newline
+            ):
                 first_space_or_newline = first_newline
             if first_space_or_newline > -1:
                 content = content[first_space_or_newline:].strip()
@@ -1643,4 +2263,4 @@ def cleanup_code(content: str) -> str:
 setup_logger()
 
 # Start the bot
-bot.run(bot_info.data['login'], log_handler=None)
+bot.run(bot_info.data["login"], log_handler=None)

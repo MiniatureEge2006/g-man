@@ -42,7 +42,6 @@ pip install -r requirements.txt
 ```
 pip3 install -r requirements.txt
 ```
-<br> If the pip installation didn't work, try to install the packages seperately because I suck at finding a good compatible version for the requirements.txt file.
 ## Installation
 * Download/install all requirements.
 * Set up these folders with the following contents (if a folder doesn't exist, create it):
