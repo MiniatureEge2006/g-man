@@ -1,43 +1,66 @@
-import discord
-from discord.ext import commands
-from discord import app_commands
-import asyncpg
-import re
-import bot_info
-import asyncio
 import ast
-from typing import Callable, Dict, List, Set, Union
-import aiohttp
-import yt_dlp
+import asyncio
+import base64
+import hashlib
+import json
+import math
 import os
-import uuid
 import platform
-from pathlib import Path
-import subprocess
+import random
+import re
 import shlex
 import shutil
+import subprocess
+import uuid
 from datetime import datetime, timedelta
-import random
 from io import BytesIO
+from pathlib import Path
+from typing import Callable, Dict, List, Set, Union
 from urllib.parse import quote, unquote, urlparse
-import base64
-import json
-from jsonschema import validate, ValidationError
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
-import math
-import matplotlib.font_manager
-import hashlib
 from zoneinfo import ZoneInfo
-import dateparser
-import ollama
 
-IMAGE_TYPES = ('image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif')
-VIDEO_TYPES = ('video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska', 'video/x-msvideo', 'video/x-ms-wmv')
-AUDIO_TYPES = ('audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/ogg', 'audio/opus', 'audio/flac', 'audio/x-matroska', 'audio/x-ms-wma')
+import aiohttp
+import asyncpg
+import dateparser
+import discord
+import matplotlib.font_manager
+import ollama
+import yt_dlp
+from discord import app_commands
+from discord.ext import commands
+from jsonschema import ValidationError, validate
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+import bot_info
+
+IMAGE_TYPES = ("image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif")
+VIDEO_TYPES = (
+    "video/mp4",
+    "video/webm",
+    "video/quicktime",
+    "video/x-matroska",
+    "video/x-msvideo",
+    "video/x-ms-wmv",
+)
+AUDIO_TYPES = (
+    "audio/mpeg",
+    "audio/mp4",
+    "audio/wav",
+    "audio/ogg",
+    "audio/opus",
+    "audio/flac",
+    "audio/x-matroska",
+    "audio/x-ms-wma",
+)
 
 
 class TagPaginator(discord.ui.View):
-    def __init__(self, pages: List[discord.Embed], interaction: discord.Interaction, original_author):
+    def __init__(
+        self,
+        pages: List[discord.Embed],
+        interaction: discord.Interaction,
+        original_author,
+    ):
         super().__init__(timeout=60)
         self.pages = pages
         self.current_page = 0
@@ -47,7 +70,9 @@ class TagPaginator(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction):
         if interaction.user != self.original_author:
-            await interaction.response.send_message("You can't control this pagination.", ephemeral=True)
+            await interaction.response.send_message(
+                "You can't control this pagination.", ephemeral=True
+            )
             return False
         return True
 
@@ -55,42 +80,58 @@ class TagPaginator(discord.ui.View):
         await self.message.edit(view=None)
 
     async def update_message(self, interaction: discord.Interaction):
-        await interaction.response.edit_message(embed=self.pages[self.current_page], view=self)
+        await interaction.response.edit_message(
+            embed=self.pages[self.current_page], view=self
+        )
 
     @discord.ui.button(label="⏮️", style=discord.ButtonStyle.blurple)
-    async def first_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def first_page(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         self.current_page = 0
         await self.update_message(interaction)
 
     @discord.ui.button(label="⬅️", style=discord.ButtonStyle.blurple)
-    async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def prev_page(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         if self.current_page > 0:
             self.current_page -= 1
             await self.update_message(interaction)
 
     @discord.ui.button(label="➡️", style=discord.ButtonStyle.blurple)
-    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def next_page(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         if self.current_page < len(self.pages) - 1:
             self.current_page += 1
             await self.update_message(interaction)
 
     @discord.ui.button(label="⏭️", style=discord.ButtonStyle.blurple)
-    async def last_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def last_page(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         self.current_page = len(self.pages) - 1
         await self.update_message(interaction)
 
     @discord.ui.button(label="🔢", style=discord.ButtonStyle.green)
-    async def jump_to_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def jump_to_page(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         modal = JumpToPageModal(paginator_view=self)
         await interaction.response.send_modal(modal)
 
     @discord.ui.button(label="🗑️", style=discord.ButtonStyle.red)
-    async def delete_message(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def delete_message(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         await interaction.message.delete()
         self.stop()
 
     @discord.ui.button(label="⏹️", style=discord.ButtonStyle.gray)
-    async def hide_components(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def hide_components(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         await interaction.message.edit(view=None)
         self.stop()
 
@@ -105,7 +146,7 @@ class JumpToPageModal(discord.ui.Modal, title="Jump to Page"):
         placeholder="Enter the page number...",
         required=True,
         min_length=1,
-        max_length=5
+        max_length=5,
     )
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -115,9 +156,14 @@ class JumpToPageModal(discord.ui.Modal, title="Jump to Page"):
                 self.paginator_view.current_page = page_number
                 await self.paginator_view.update_message(interaction)
             else:
-                await interaction.response.send_message("Invalid page number.", ephemeral=True)
+                await interaction.response.send_message(
+                    "Invalid page number.", ephemeral=True
+                )
         except ValueError:
-            await interaction.response.send_message("Please enter a valid number.", ephemeral=True)
+            await interaction.response.send_message(
+                "Please enter a valid number.", ephemeral=True
+            )
+
 
 class Paginator(discord.ui.View):
     def __init__(self, pages: list, author):
@@ -129,7 +175,9 @@ class Paginator(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction):
         if interaction.user != self.author:
-            await interaction.response.send_message("You can't control this pagination.", ephemeral=True)
+            await interaction.response.send_message(
+                "You can't control this pagination.", ephemeral=True
+            )
             return False
         return True
 
@@ -141,50 +189,77 @@ class Paginator(discord.ui.View):
         self.current_page = page_index
         content, embeds, files_metadata = self.pages[page_index]
 
-        files = [
-            discord.File(BytesIO(meta["data"]), filename=meta["filename"])
-            for meta in files_metadata
-        ] if files_metadata else []
+        files = (
+            [
+                discord.File(BytesIO(meta["data"]), filename=meta["filename"])
+                for meta in files_metadata
+            ]
+            if files_metadata
+            else []
+        )
 
         return content, embeds, files
 
     @discord.ui.button(label="⏮️", style=discord.ButtonStyle.blurple)
-    async def first_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def first_page(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         await self.show_page(0)
         content, embeds, files = await self.show_page(0)
-        await interaction.response.edit_message(content=content, embeds=embeds, view=self, attachments=files)
+        await interaction.response.edit_message(
+            content=content, embeds=embeds, view=self, attachments=files
+        )
 
     @discord.ui.button(label="⬅️", style=discord.ButtonStyle.blurple)
-    async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def prev_page(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         if self.current_page > 0:
             content, embeds, files = await self.show_page(self.current_page - 1)
-            await interaction.response.edit_message(content=content, embeds=embeds, view=self, attachments=files)
+            await interaction.response.edit_message(
+                content=content, embeds=embeds, view=self, attachments=files
+            )
 
     @discord.ui.button(label="➡️", style=discord.ButtonStyle.blurple)
-    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def next_page(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         if self.current_page < len(self.pages) - 1:
             content, embeds, files = await self.show_page(self.current_page + 1)
-            await interaction.response.edit_message(content=content, embeds=embeds, view=self, attachments=files)
+            await interaction.response.edit_message(
+                content=content, embeds=embeds, view=self, attachments=files
+            )
 
     @discord.ui.button(label="⏭️", style=discord.ButtonStyle.blurple)
-    async def last_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def last_page(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         content, embeds, files = await self.show_page(len(self.pages) - 1)
-        await interaction.response.edit_message(content=content, embeds=embeds, view=self, attachments=files)
+        await interaction.response.edit_message(
+            content=content, embeds=embeds, view=self, attachments=files
+        )
 
     @discord.ui.button(label="🔢", style=discord.ButtonStyle.green)
-    async def jump_to_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def jump_to_page(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         modal = JumpToPageModal2(paginator_view=self)
         await interaction.response.send_modal(modal)
 
     @discord.ui.button(label="🗑️", style=discord.ButtonStyle.red)
-    async def delete_message(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def delete_message(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         await interaction.message.delete()
         self.stop()
 
     @discord.ui.button(label="⏹️", style=discord.ButtonStyle.gray)
-    async def hide_components(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def hide_components(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         await interaction.message.edit(view=None)
         self.stop()
+
 
 class JumpToPageModal2(discord.ui.Modal, title="Jump to Page"):
     def __init__(self, paginator_view: Paginator):
@@ -195,7 +270,7 @@ class JumpToPageModal2(discord.ui.Modal, title="Jump to Page"):
             label="Page Number",
             placeholder=f"Enter page number (1-{len(self.paginator_view.pages)})",
             min_length=1,
-            max_length=5
+            max_length=5,
         )
         self.add_item(self.page)
 
@@ -208,63 +283,64 @@ class JumpToPageModal2(discord.ui.Modal, title="Jump to Page"):
                     content=content,
                     embeds=embeds,
                     view=self.paginator_view,
-                    attachments=files
+                    attachments=files,
                 )
             else:
                 await interaction.response.send_message(
                     f"Invalid page number. Must be between 1 and {len(self.paginator_view.pages)}",
-                    ephemeral=True
+                    ephemeral=True,
                 )
         except ValueError:
-            await interaction.response.send_message("Please enter a valid number.", ephemeral=True)
+            await interaction.response.send_message(
+                "Please enter a valid number.", ephemeral=True
+            )
 
 
 class DiscordGenerator:
     @staticmethod
     def _build_embed(**kwargs) -> discord.Embed:
-        color = kwargs.get('color')
+        color = kwargs.get("color")
         if isinstance(color, str):
             try:
-                color = int(color.strip('#'), 16)
+                color = int(color.strip("#"), 16)
             except ValueError:
                 color = None
         embed = discord.Embed(
-            title=kwargs.get('title'),
-            description=kwargs.get('description'),
-            color=color
+            title=kwargs.get("title"),
+            description=kwargs.get("description"),
+            color=color,
         )
 
-
-        if 'fields' in kwargs:
-            for field in kwargs['fields']:
+        if "fields" in kwargs:
+            for field in kwargs["fields"]:
                 embed.add_field(
-                    name=field.get('name', ''),
-                    value=field.get('value', ''),
-                    inline=field.get('inline', True)
+                    name=field.get("name", ""),
+                    value=field.get("value", ""),
+                    inline=field.get("inline", True),
                 )
-        if 'author' in kwargs:
+        if "author" in kwargs:
             embed.set_author(
-                name=kwargs['author'].get('name'),
-                icon_url=kwargs['author'].get('icon_url'),
-                url=kwargs['author'].get('url')
+                name=kwargs["author"].get("name"),
+                icon_url=kwargs["author"].get("icon_url"),
+                url=kwargs["author"].get("url"),
             )
-        if 'footer' in kwargs:
+        if "footer" in kwargs:
             embed.set_footer(
-                text=kwargs['footer'].get('text'),
-                icon_url=kwargs['footer'].get('icon_url')
+                text=kwargs["footer"].get("text"),
+                icon_url=kwargs["footer"].get("icon_url"),
             )
-        if 'timestamp' in kwargs:
+        if "timestamp" in kwargs:
             try:
-                timestamp = kwargs['timestamp']
+                timestamp = kwargs["timestamp"]
                 if isinstance(timestamp, str):
                     timestamp = datetime.fromisoformat(timestamp)
                 embed.timestamp = timestamp
             except Exception:
                 pass
-        if 'thumbnail' in kwargs:
-            embed.set_thumbnail(url=kwargs['thumbnail'].get('url'))
-        if 'image' in kwargs:
-            embed.set_image(url=kwargs['image'].get('url'))
+        if "thumbnail" in kwargs:
+            embed.set_thumbnail(url=kwargs["thumbnail"].get("url"))
+        if "image" in kwargs:
+            embed.set_image(url=kwargs["image"].get("url"))
         return embed
 
     @staticmethod
@@ -279,24 +355,25 @@ class DiscordGenerator:
         data.update(kwargs)
 
         options = []
-        for opt in data.get('options', []):
-            options.append(discord.SelectOption(
-                label=opt['label'],
-                value=opt.get('value', opt['label']),
-                description=opt.get('description'),
-                emoji=opt.get('emoji'),
-                default=opt.get('default', False)
-            ))
+        for opt in data.get("options", []):
+            options.append(
+                discord.SelectOption(
+                    label=opt["label"],
+                    value=opt.get("value", opt["label"]),
+                    description=opt.get("description"),
+                    emoji=opt.get("emoji"),
+                    default=opt.get("default", False),
+                )
+            )
 
         return discord.ui.Select(
-            custom_id=data.get('custom_id'),
-            placeholder=data.get('placeholder'),
-            min_values=data.get('min', 1),
-            max_values=data.get('max', 1),
+            custom_id=data.get("custom_id"),
+            placeholder=data.get("placeholder"),
+            min_values=data.get("min", 1),
+            max_values=data.get("max", 1),
             options=options,
-            disabled=data.get('disabled', False)
+            disabled=data.get("disabled", False),
         )
-
 
     @staticmethod
     def create_button(source: Union[str, dict], **kwargs) -> discord.ui.Button:
@@ -310,23 +387,22 @@ class DiscordGenerator:
         data.update(kwargs)
 
         return discord.ui.Button(
-            label=data.get('label'),
-            style=DiscordGenerator.parse_button_style(data.get('style', 'primary')),
-            custom_id=data.get('custom_id'),
-            url=data.get('url'),
-            disabled=data.get('disabled', False),
-            emoji=data.get('emoji')
+            label=data.get("label"),
+            style=DiscordGenerator.parse_button_style(data.get("style", "primary")),
+            custom_id=data.get("custom_id"),
+            url=data.get("url"),
+            disabled=data.get("disabled", False),
+            emoji=data.get("emoji"),
         )
-
 
     @staticmethod
     def parse_button_style(style):
         styles = {
-            'primary': discord.ButtonStyle.primary,
-            'secondary': discord.ButtonStyle.secondary,
-            'success': discord.ButtonStyle.success,
-            'danger': discord.ButtonStyle.danger,
-            'link': discord.ButtonStyle.link
+            "primary": discord.ButtonStyle.primary,
+            "secondary": discord.ButtonStyle.secondary,
+            "success": discord.ButtonStyle.success,
+            "danger": discord.ButtonStyle.danger,
+            "link": discord.ButtonStyle.link,
         }
         return styles.get(style.lower(), discord.ButtonStyle.primary)
 
@@ -335,279 +411,281 @@ class MediaProcessor:
     def __init__(self):
         self.media_cache: Dict[str, str] = {}
         self.active_processes: Set[asyncio.subprocess.Process] = set()
-        self.temp_dir = Path(os.getenv('TEMP', '/tmp')) / 'gscript'
+        self.temp_dir = Path(os.getenv("TEMP", "/tmp")) / "gscript"
         self.temp_dir.mkdir(exist_ok=True)
         self.temp_files = set()
         self.session = None
         self.command_specs = {
-            'load': {
-                'url': {'required': True, 'type': str},
-                'media_key': {'required': True, 'type': str}
+            "load": {
+                "url": {"required": True, "type": str},
+                "media_key": {"required": True, "type": str},
             },
-            'reverse': {
-                'input_key': {'required': True, 'type': str},
-                'output_key': {'required': True, 'type': str}
+            "reverse": {
+                "input_key": {"required": True, "type": str},
+                "output_key": {"required": True, "type": str},
             },
-            'concat': {
-                'output_key': {'required': True, 'type': str},
+            "concat": {
+                "output_key": {"required": True, "type": str},
                 # Input keys are handled as remaining positional args
             },
-            'convert': {
-                'input_key': {'required': True, 'type': str},
-                'format': {'required': True, 'type': str},
-                'output_key': {'required': True, 'type': str}
+            "convert": {
+                "input_key": {"required": True, "type": str},
+                "format": {"required": True, "type": str},
+                "output_key": {"required": True, "type": str},
             },
-            'render': {
-                'media_key': {'required': True, 'type': str},
+            "render": {
+                "media_key": {"required": True, "type": str},
                 # Format and filename are handled as remaining positional args
             },
-            'contrast': {
-                'input_key': {'required': True, 'type': str},
-                'contrast_level': {'required': True, 'type': float},
-                'output_key': {'required': True, 'type': str}
+            "contrast": {
+                "input_key": {"required": True, "type": str},
+                "contrast_level": {"required": True, "type": float},
+                "output_key": {"required": True, "type": str},
             },
-            'opacity': {
-                'input_key': {'required': True, 'type': str},
-                'opacity_level': {'required': True, 'type': float},
-                'output_key': {'required': True, 'type': str}
+            "opacity": {
+                "input_key": {"required": True, "type": str},
+                "opacity_level": {"required": True, "type": float},
+                "output_key": {"required": True, "type": str},
             },
-            'saturate': {
-                'input_key': {'required': True, 'type': str},
-                'saturation_level': {'required': True, 'type': float},
-                'output_key': {'required': True, 'type': str}
+            "saturate": {
+                "input_key": {"required": True, "type": str},
+                "saturation_level": {"required": True, "type": float},
+                "output_key": {"required": True, "type": str},
             },
-            'hue': {
-                'input_key': {'required': True, 'type': str},
-                'hue_shift': {'required': True, 'type': str},
-                'output_key': {'required': True, 'type': str}
+            "hue": {
+                "input_key": {"required": True, "type": str},
+                "hue_shift": {"required": True, "type": str},
+                "output_key": {"required": True, "type": str},
             },
-            'brightness': {
-                'input_key': {'required': True, 'type': str},
-                'brightness_level': {'required': True, 'type': float},
-                'output_key': {'required': True, 'type': str}
+            "brightness": {
+                "input_key": {"required": True, "type": str},
+                "brightness_level": {"required": True, "type": float},
+                "output_key": {"required": True, "type": str},
             },
-            'gamma': {
-                'input_key': {'required': True, 'type': str},
-                'gamma_level': {'required': True, 'type': float},
-                'output_key': {'required': True, 'type': str}
+            "gamma": {
+                "input_key": {"required": True, "type": str},
+                "gamma_level": {"required": True, "type": float},
+                "output_key": {"required": True, "type": str},
             },
-            'clone': {
-                'input_key': {'required': True, 'type': str},
-                'output_key': {'required': True, 'type': str}
+            "clone": {
+                "input_key": {"required": True, "type": str},
+                "output_key": {"required": True, "type": str},
             },
-            'fps': {
-                'input_key': {'required': True, 'type': str},
-                'fps_value': {'required': True, 'type': str},
-                'output_key': {'required': True, 'type': str}
+            "fps": {
+                "input_key": {"required": True, "type": str},
+                "fps_value": {"required": True, "type": str},
+                "output_key": {"required": True, "type": str},
             },
-            'grayscale': {
-                'input_key': {'required': True, 'type': str},
-                'output_key': {'required': True, 'type': str}
+            "grayscale": {
+                "input_key": {"required": True, "type": str},
+                "output_key": {"required": True, "type": str},
             },
-            'sepia': {
-                'input_key': {'required': True, 'type': str},
-                'output_key': {'required': True, 'type': str}
+            "sepia": {
+                "input_key": {"required": True, "type": str},
+                "output_key": {"required": True, "type": str},
             },
-            'invert': {
-                'input_key': {'required': True, 'type': str},
-                'output_key': {'required': True, 'type': str}
+            "invert": {
+                "input_key": {"required": True, "type": str},
+                "output_key": {"required": True, "type": str},
             },
-            'resize': {
-                'input_key': {'required': True, 'type': str},
-                'width': {'required': True, 'type': str},  # Can be "iw/2" etc.
-                'height': {'required': True, 'type': str},
-                'output_key': {'required': True, 'type': str}
+            "resize": {
+                "input_key": {"required": True, "type": str},
+                "width": {"required": True, "type": str},  # Can be "iw/2" etc.
+                "height": {"required": True, "type": str},
+                "output_key": {"required": True, "type": str},
             },
-            'crop': {
-                'input_key': {'required': True, 'type': str},
-                'x': {'required': True, 'type': str},
-                'y': {'required': True, 'type': str},
-                'width': {'required': True, 'type': str},
-                'height': {'required': True, 'type': str},
-                'output_key': {'required': True, 'type': str}
+            "crop": {
+                "input_key": {"required": True, "type": str},
+                "x": {"required": True, "type": str},
+                "y": {"required": True, "type": str},
+                "width": {"required": True, "type": str},
+                "height": {"required": True, "type": str},
+                "output_key": {"required": True, "type": str},
             },
-            'rotate': {
-                'input_key': {'required': True, 'type': str},
-                'angle': {'required': True, 'type': str},
-                'output_key': {'required': True, 'type': str}
+            "rotate": {
+                "input_key": {"required": True, "type": str},
+                "angle": {"required": True, "type": str},
+                "output_key": {"required": True, "type": str},
             },
-            'trim': {
-                'input_key': {'required': True, 'type': str},
-                'start_time': {'required': True, 'type': str},
-                'end_time': {'required': True, 'type': str},
-                'output_key': {'required': True, 'type': str}
+            "trim": {
+                "input_key": {"required": True, "type": str},
+                "start_time": {"required": True, "type": str},
+                "end_time": {"required": True, "type": str},
+                "output_key": {"required": True, "type": str},
             },
-            'speed': {
-                'input_key': {'required': True, 'type': str},
-                'speed': {'required': True, 'type': float},
-                'output_key': {'required': True, 'type': str}
+            "speed": {
+                "input_key": {"required": True, "type": str},
+                "speed": {"required": True, "type": float},
+                "output_key": {"required": True, "type": str},
             },
-            'volume': {
-                'input_key': {'required': True, 'type': str},
-                'volume_level': {'required': True, 'type': float},
-                'output_key': {'required': True, 'type': str}
+            "volume": {
+                "input_key": {"required": True, "type": str},
+                "volume_level": {"required": True, "type": float},
+                "output_key": {"required": True, "type": str},
             },
-            'overlay': {
-                'base_key': {'required': True, 'type': str},
-                'overlay_key': {'required': True, 'type': str},
-                'x': {'required': True, 'type': str},
-                'y': {'required': True, 'type': str},
-                'output_key': {'required': True, 'type': str},
-                'loop_media': {'default': False, 'type': bool},
-                'loop_overlay': {'default': False, 'type': bool},
-                'preserve_length': {'default': True, 'type': bool}
+            "overlay": {
+                "base_key": {"required": True, "type": str},
+                "overlay_key": {"required": True, "type": str},
+                "x": {"required": True, "type": str},
+                "y": {"required": True, "type": str},
+                "output_key": {"required": True, "type": str},
+                "loop_media": {"default": False, "type": bool},
+                "loop_overlay": {"default": False, "type": bool},
+                "preserve_length": {"default": True, "type": bool},
             },
-            'text': {
-                'input_key': {'required': True, 'type': str},
-                'text': {'required': True, 'type': str},
-                'x': {'default': '0', 'type': str},
-                'y': {'default': '0', 'type': str},
-                'color': {'default': 'black', 'type': str},
-                'output_key': {'required': True, 'type': str},
-                'font_size': {'default': 64, 'type': int},
-                'font': {'default': 'arial', 'type': str},
-                'outline_color': {'required': False, 'type': str},
-                'outline_width': {'required': False, 'type': int},
-                'shadow_color': {'required': False, 'type': str},
-                'shadow_offset': {'required': False, 'type': int},
-                'shadow_blur': {'required': False, 'type': int},
-                'wrap_width': {'required': False, 'type': int},
-                'line_spacing': {'required': False, 'type': int}
+            "text": {
+                "input_key": {"required": True, "type": str},
+                "text": {"required": True, "type": str},
+                "x": {"default": "0", "type": str},
+                "y": {"default": "0", "type": str},
+                "color": {"default": "black", "type": str},
+                "output_key": {"required": True, "type": str},
+                "font_size": {"default": 64, "type": int},
+                "font": {"default": "arial", "type": str},
+                "outline_color": {"required": False, "type": str},
+                "outline_width": {"required": False, "type": int},
+                "shadow_color": {"required": False, "type": str},
+                "shadow_offset": {"required": False, "type": int},
+                "shadow_blur": {"required": False, "type": int},
+                "wrap_width": {"required": False, "type": int},
+                "line_spacing": {"required": False, "type": int},
             },
-            'caption': {
-                'input_key': {'required': True, 'type': str},
-                'text': {'required': True, 'type': str},
-                'output_key': {'required': True, 'type': str},
-                'font_size': {'default': 0, 'type': int},
-                'font': {'default': 'Futura Condensed Extra Bold', 'type': str},
-                'color': {'default': '#000000', 'type': str},
-                'background_color': {'default': '#FFFFFF', 'type': str},
-                'padding': {'default': 0, 'type': int},
-                'outline_color': {'required': False, 'type': str},
-                'outline_width': {'required': False, 'type': int},
-                'shadow_color': {'required': False, 'type': str},
-                'shadow_offset': {'default': 2, 'type': int},
-                'shadow_blur': {'default': 0, 'type': int},
-                'wrap_width': {'required': False, 'type': int},
-                'line_spacing': {'default': 5, 'type': int}
+            "caption": {
+                "input_key": {"required": True, "type": str},
+                "text": {"required": True, "type": str},
+                "output_key": {"required": True, "type": str},
+                "font_size": {"default": 0, "type": int},
+                "font": {"default": "Futura Condensed Extra Bold", "type": str},
+                "color": {"default": "#000000", "type": str},
+                "background_color": {"default": "#FFFFFF", "type": str},
+                "padding": {"default": 0, "type": int},
+                "outline_color": {"required": False, "type": str},
+                "outline_width": {"required": False, "type": int},
+                "shadow_color": {"required": False, "type": str},
+                "shadow_offset": {"default": 2, "type": int},
+                "shadow_blur": {"default": 0, "type": int},
+                "wrap_width": {"required": False, "type": int},
+                "line_spacing": {"default": 5, "type": int},
             },
-            'audioputreplace': {
-                'input_key': {'required': True, 'type': str},
-                'audio_key': {'required': True, 'type': str},
-                'output_key': {'required': True, 'type': str},
-                'preserve_length': {'default': True, 'type': bool},
-                'force_video': {'default': False, 'type': bool},
-                'loop_media': {'default': False, 'type': bool}
+            "audioputreplace": {
+                "input_key": {"required": True, "type": str},
+                "audio_key": {"required": True, "type": str},
+                "output_key": {"required": True, "type": str},
+                "preserve_length": {"default": True, "type": bool},
+                "force_video": {"default": False, "type": bool},
+                "loop_media": {"default": False, "type": bool},
             },
-            'audioputmix': {
-                'input_key': {'required': True, 'type': str},
-                'audio_key': {'required': True, 'type': str},
-                'output_key': {'required': True, 'type': str},
-                'volume': {'default': 1.0, 'type': float},
-                'preserve_length': {'default': True, 'type': bool},
-                'loop_audio': {'default': False, 'type': bool},
-                'loop_media': {'default': False, 'type': bool}
+            "audioputmix": {
+                "input_key": {"required": True, "type": str},
+                "audio_key": {"required": True, "type": str},
+                "output_key": {"required": True, "type": str},
+                "volume": {"default": 1.0, "type": float},
+                "preserve_length": {"default": True, "type": bool},
+                "loop_audio": {"default": False, "type": bool},
+                "loop_media": {"default": False, "type": bool},
             },
-            'tremolo': {
-                'input_key': {'required': True, 'type': str},
-                'frequency': {'default': 5.0, 'type': float},
-                'depth': {'default': 0.5, 'type': float},
-                'output_key': {'required': True, 'type': str}
+            "tremolo": {
+                "input_key": {"required": True, "type": str},
+                "frequency": {"default": 5.0, "type": float},
+                "depth": {"default": 0.5, "type": float},
+                "output_key": {"required": True, "type": str},
             },
-            'vibrato': {
-                'input_key': {'required': True, 'type': str},
-                'frequency': {'default': 5.0, 'type': float},
-                'depth': {'default': 0.5, 'type': float},
-                'output_key': {'required': True, 'type': str}
+            "vibrato": {
+                "input_key": {"required": True, "type": str},
+                "frequency": {"default": 5.0, "type": float},
+                "depth": {"default": 0.5, "type": float},
+                "output_key": {"required": True, "type": str},
             },
-            'create': {
-                'media_key': {'required': True, 'type': str},
-                'width': {'required': True, 'type': str},
-                'height': {'required': True, 'type': str},
-                'color': {'default': 'black', 'type': str}
+            "create": {
+                "media_key": {"required": True, "type": str},
+                "width": {"required": True, "type": str},
+                "height": {"required": True, "type": str},
+                "color": {"default": "black", "type": str},
             },
-            'fadein': {
-                'input_key': {'required': True, 'type': str},
-                'duration': {'required': True, 'type': str},
-                'color': {'default': '#000000', 'type': str},
-                'audio': {'default': True, 'type': bool},
-                'output_key': {'required': True, 'type': str}
+            "fadein": {
+                "input_key": {"required": True, "type": str},
+                "duration": {"required": True, "type": str},
+                "color": {"default": "#000000", "type": str},
+                "audio": {"default": True, "type": bool},
+                "output_key": {"required": True, "type": str},
             },
-            'fadeout': {
-                'input_key': {'required': True, 'type': str},
-                'start_time': {'required': True, 'type': float},
-                'duration': {'required': True, 'type': str},
-                'color': {'default': '#000000', 'type': str},
-                'audio': {'default': True, 'type': bool},
-                'output_key': {'required': True, 'type': str}
+            "fadeout": {
+                "input_key": {"required": True, "type": str},
+                "start_time": {"required": True, "type": float},
+                "duration": {"required": True, "type": str},
+                "color": {"default": "#000000", "type": str},
+                "audio": {"default": True, "type": bool},
+                "output_key": {"required": True, "type": str},
             },
-            'colorkey': {
-                'input_key': {'required': True, 'type': str},
-                'color': {'default': 'black', 'type': str},
-                'similarity': {'default': 0.01, 'type': float},
-                'blend': {'default': 0.0, 'type': float},
-                'output_key': {'required': True, 'type': str}
+            "colorkey": {
+                "input_key": {"required": True, "type": str},
+                "color": {"default": "black", "type": str},
+                "similarity": {"default": 0.01, "type": float},
+                "blend": {"default": 0.0, "type": float},
+                "output_key": {"required": True, "type": str},
             },
-            'chromakey': {
-                'input_key': {'required': True, 'type': str},
-                'color': {'default': 'black', 'type': str},
-                'similarity': {'default': 0.01, 'type': float},
-                'blend': {'default': 0.0, 'type': float},
-                'output_key': {'required': True, 'type': str}
+            "chromakey": {
+                "input_key": {"required": True, "type": str},
+                "color": {"default": "black", "type": str},
+                "similarity": {"default": 0.01, "type": float},
+                "blend": {"default": 0.0, "type": float},
+                "output_key": {"required": True, "type": str},
             },
-            'dobetween': {
-                'input_key': {'required': True, 'type': str},
-                'start_time': {'required': True, 'type': str},
-                'end_time': {'required': True, 'type': str},
-                'output_key': {'required': True, 'type': str},
-                'segment_key': {'default': 'segment', 'type': str}
+            "dobetween": {
+                "input_key": {"required": True, "type": str},
+                "start_time": {"required": True, "type": str},
+                "end_time": {"required": True, "type": str},
+                "output_key": {"required": True, "type": str},
+                "segment_key": {"default": "segment", "type": str},
             },
-            'setframecount': {
-                'input_key': {'required': True, 'type': str},
-                'frame_count': {'required': True, 'type': int},
-                'output_key': {'required': True, 'type': str}
-            }
+            "setframecount": {
+                "input_key": {"required": True, "type": str},
+                "frame_count": {"required": True, "type": int},
+                "output_key": {"required": True, "type": str},
+            },
         }
         self.gscript_commands = {
-            'load': self._load_media,
-            'reverse': self._reverse_media,
-            'concat': self._concat_media,
-            'render': self._render_media,
-            'convert': self._convert_media,
-            'contrast': self._adjust_contrast,
-            'opacity': self._adjust_opacity,
-            'saturate': self._adjust_saturation,
-            'hue': self._adjust_hue,
-            'brightness': self._adjust_brightness,
-            'gamma': self._adjust_gamma,
-            'clone': self._clone_media,
-            'fps': self._change_fps,
-            'grayscale': self._apply_grayscale,
-            'sepia': self._apply_sepia,
-            'invert': self._invert_media,
-            'resize': self._resize_media,
-            'crop': self._crop_media,
-            'rotate': self._rotate_media,
-            'trim': self._trim_media,
-            'speed': self._change_speed,
-            'volume': self._adjust_volume,
-            'overlay': self._overlay_media,
-            'text': self._text,
-            'caption': self._apply_caption,
-            'audioputreplace': self._replace_audio,
-            'audioputmix': self._mix_audio,
-            'tremolo': self._tremolo,
-            'vibrato': self._vibrato,
-            'create': self._create_image,
-            'fadein': self._fadein_media,
-            'fadeout': self._fadeout_media,
-            'colorkey': self._colorkey,
-            'chromakey': self._chromakey,
-            'dobetween': self._dobetween_media,
-            'setframecount': self._setframecount
+            "load": self._load_media,
+            "reverse": self._reverse_media,
+            "concat": self._concat_media,
+            "render": self._render_media,
+            "convert": self._convert_media,
+            "contrast": self._adjust_contrast,
+            "opacity": self._adjust_opacity,
+            "saturate": self._adjust_saturation,
+            "hue": self._adjust_hue,
+            "brightness": self._adjust_brightness,
+            "gamma": self._adjust_gamma,
+            "clone": self._clone_media,
+            "fps": self._change_fps,
+            "grayscale": self._apply_grayscale,
+            "sepia": self._apply_sepia,
+            "invert": self._invert_media,
+            "resize": self._resize_media,
+            "crop": self._crop_media,
+            "rotate": self._rotate_media,
+            "trim": self._trim_media,
+            "speed": self._change_speed,
+            "volume": self._adjust_volume,
+            "overlay": self._overlay_media,
+            "text": self._text,
+            "caption": self._apply_caption,
+            "audioputreplace": self._replace_audio,
+            "audioputmix": self._mix_audio,
+            "tremolo": self._tremolo,
+            "vibrato": self._vibrato,
+            "create": self._create_image,
+            "fadein": self._fadein_media,
+            "fadeout": self._fadeout_media,
+            "colorkey": self._colorkey,
+            "chromakey": self._chromakey,
+            "dobetween": self._dobetween_media,
+            "setframecount": self._setframecount,
         }
 
-    async def _handle_error(self, operation: str, error: Exception, details: str = "") -> str:
+    async def _handle_error(
+        self, operation: str, error: Exception, details: str = ""
+    ) -> str:
         error_type = type(error).__name__
         error_msg = str(error) or "No error details available"
 
@@ -625,7 +703,6 @@ class MediaProcessor:
     async def ensure_session(self):
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession()
-
 
     async def cleanup(self):
         if self.session and not self.session.closed:
@@ -654,7 +731,7 @@ class MediaProcessor:
                 pass
 
         try:
-            for item in self.temp_dir.glob('*'):
+            for item in self.temp_dir.glob("*"):
                 try:
                     if item.is_file():
                         item.unlink()
@@ -669,13 +746,11 @@ class MediaProcessor:
         self.active_processes.clear()
         self.temp_files.clear()
 
-
-    def _get_temp_path(self, extension: str = '') -> Path:
+    def _get_temp_path(self, extension: str = "") -> Path:
         path = self.temp_dir / f"{uuid.uuid4()}{f'.{extension}' if extension else ''}"
         self.temp_files.add(str(path))
         path.touch(exist_ok=True)
         return path
-
 
     async def _get_media_dimensions(self, media_key: str) -> tuple[int, int]:
         if media_key not in self.media_cache:
@@ -683,99 +758,142 @@ class MediaProcessor:
 
         file_path = self.media_cache[media_key]
 
-
         cmd = [
-            'ffprobe', '-v', 'error',
-            '-select_streams', 'v:0',
-            '-show_entries', 'stream=width,height',
-            '-of', 'json',
-            file_path
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height",
+            "-of",
+            "json",
+            file_path,
         ]
 
         success, output = await self._run_ffprobe(cmd)
         if success and output:
             try:
                 data = json.loads(output)
-                stream = data['streams'][0]
-                return (int(stream['width']), int(stream['height']))
+                stream = data["streams"][0]
+                return (int(stream["width"]), int(stream["height"]))
             except:
                 return (0, 0)
         return (0, 0)
 
-    async def _resolve_dimension(self, dim_str: str, context_key: str = None, overlay_key: str = None) -> int:
+    async def _resolve_dimension(
+        self, dim_str: str, context_key: str = None, overlay_key: str = None
+    ) -> int:
         try:
             try:
                 return int(float(dim_str))
             except ValueError:
                 pass
 
-
             ctx_w, ctx_h = (0, 0)
             if context_key and context_key in self.media_cache:
                 dims = await self._get_media_dimensions(context_key) or (0, 0)
                 ctx_w, ctx_h = dims
 
-
             var_map = {
-                'iw': ctx_w, 'W': ctx_w, 'width': ctx_w, 'main_w': ctx_w,
-                'ih': ctx_h, 'H': ctx_h, 'height': ctx_h, 'main_h': ctx_h,
-                'ow': 0, 'oh': 0, 'w': 0, 'h': 0
+                "iw": ctx_w,
+                "W": ctx_w,
+                "width": ctx_w,
+                "main_w": ctx_w,
+                "ih": ctx_h,
+                "H": ctx_h,
+                "height": ctx_h,
+                "main_h": ctx_h,
+                "ow": 0,
+                "oh": 0,
+                "w": 0,
+                "h": 0,
             }
 
-
-            if '_' in dim_str or any(c.isalpha() and c.islower() for c in dim_str if not c in ['w','h']):
-                parts = dim_str.split('_') if '_' in dim_str else [dim_str[:-1], dim_str[-1]]
-                if len(parts) >= 2 and parts[-1] in ['w', 'h']:
-                    media_key = '_'.join(parts[:-1]) if '_' in dim_str else dim_str[:-1]
+            if "_" in dim_str or any(
+                c.isalpha() and c.islower() for c in dim_str if not c in ["w", "h"]
+            ):
+                parts = (
+                    dim_str.split("_")
+                    if "_" in dim_str
+                    else [dim_str[:-1], dim_str[-1]]
+                )
+                if len(parts) >= 2 and parts[-1] in ["w", "h"]:
+                    media_key = "_".join(parts[:-1]) if "_" in dim_str else dim_str[:-1]
                     dimension = parts[-1]
 
                     if media_key in self.media_cache:
-                        media_w, media_h = await self._get_media_dimensions(media_key) or (0, 0)
-                        if dimension == 'w':
+                        media_w, media_h = await self._get_media_dimensions(
+                            media_key
+                        ) or (0, 0)
+                        if dimension == "w":
                             dim_str = str(media_w)
-                        elif dimension == 'h':
+                        elif dimension == "h":
                             dim_str = str(media_h)
-
 
             if overlay_key and overlay_key in self.media_cache:
                 overlay_dims = await self._get_media_dimensions(overlay_key) or (0, 0)
-                var_map.update({
-                    'ow': overlay_dims[0], 'w': overlay_dims[0],
-                    'oh': overlay_dims[1], 'h': overlay_dims[1]
-                })
-
+                var_map.update(
+                    {
+                        "ow": overlay_dims[0],
+                        "w": overlay_dims[0],
+                        "oh": overlay_dims[1],
+                        "h": overlay_dims[1],
+                    }
+                )
 
             for var, val in var_map.items():
                 dim_str = dim_str.replace(var, str(val))
 
+            if "(" in dim_str:
+                mode, args_str = (
+                    dim_str.split("(")[0].lower(),
+                    dim_str.split(")")[0].split("(")[1],
+                )
+                args = [
+                    await self._resolve_dimension(arg.strip(), context_key, overlay_key)
+                    for arg in args_str.split(",")
+                ]
 
-            if '(' in dim_str:
-                mode, args_str = dim_str.split('(')[0].lower(), dim_str.split(')')[0].split('(')[1]
-                args = [await self._resolve_dimension(arg.strip(), context_key, overlay_key) for arg in args_str.split(',')]
-
-                if mode == 'fill': return max(args)
-                if mode == 'contain': return min(args)
-                if mode == 'cover':
-                    scale = max(args[0]/ctx_w, args[1]/ctx_h) if ctx_w and ctx_h else 1
+                if mode == "fill":
+                    return max(args)
+                if mode == "contain":
+                    return min(args)
+                if mode == "cover":
+                    scale = (
+                        max(args[0] / ctx_w, args[1] / ctx_h) if ctx_w and ctx_h else 1
+                    )
                     return int(scale * ctx_w)
-                if mode == 'stretch': return args[0]
-                if mode == 'center':
-                    return (ctx_w - args[0]) // 2 if any(c in dim_str.lower() for c in ['w','width']) else (ctx_h - args[0]) // 2
+                if mode == "stretch":
+                    return args[0]
+                if mode == "center":
+                    return (
+                        (ctx_w - args[0]) // 2
+                        if any(c in dim_str.lower() for c in ["w", "width"])
+                        else (ctx_h - args[0]) // 2
+                    )
 
+            if "%" in dim_str:
+                base = (
+                    ctx_w
+                    if any(c in dim_str.lower() for c in ["w", "width", "x"])
+                    else ctx_h
+                )
+                return int(base * float(dim_str.replace("%", ""))) / 100
 
-            if '%' in dim_str:
-                base = ctx_w if any(c in dim_str.lower() for c in ['w','width','x']) else ctx_h
-                return int(base * float(dim_str.replace('%', ''))) / 100
-
-
-            return int(float(eval(dim_str, {'__builtins__': None}, {}))) if any(op in dim_str for op in '+-*/') else int(float(dim_str))
+            return (
+                int(float(eval(dim_str, {"__builtins__": None}, {})))
+                if any(op in dim_str for op in "+-*/")
+                else int(float(dim_str))
+            )
 
         except Exception:
             return 0
 
-
-    async def _resolve_timestamp(self, input_key: str, time_val: Union[str, float]) -> str:
-        if not isinstance(time_val, str) or not time_val.endswith('%'):
+    async def _resolve_timestamp(
+        self, input_key: str, time_val: Union[str, float]
+    ) -> str:
+        if not isinstance(time_val, str) or not time_val.endswith("%"):
             return str(time_val)
 
         if input_key not in self.media_cache:
@@ -785,52 +903,52 @@ class MediaProcessor:
         _, _, duration, _ = await self._probe_media_info(path)
 
         try:
-            pct = float(time_val.strip('%'))
+            pct = float(time_val.strip("%"))
             return str(duration * (pct / 100.0))
         except Exception:
             return "0"
 
-
-
-    def _parse_color(self, color_str: str, size: tuple = None) -> Union[tuple, Image.Image]:
-        if color_str.lower() in ('random', 'rand'):
+    def _parse_color(
+        self, color_str: str, size: tuple = None
+    ) -> Union[tuple, Image.Image]:
+        if color_str.lower() in ("random", "rand"):
             if size is None:
                 return self._generate_random_color()
             else:
                 angle = random.randint(0, 359)
-                color_str = f'linear-gradient({angle}deg, random, random)'
+                color_str = f"linear-gradient({angle}deg, random, random)"
 
-        if color_str.startswith('#'):
+        if color_str.startswith("#"):
             return self._hex_to_rgb(color_str)
 
-        if not color_str.startswith(('linear-gradient(', 'radial-gradient(')):
+        if not color_str.startswith(("linear-gradient(", "radial-gradient(")):
             return self._parse_single_color(color_str)
 
         color_str = self._replace_random_in_gradient(color_str)
         base_str = color_str
 
-        body = base_str[base_str.index('(')+1 : base_str.rindex(')')]
-        parts = [p.strip().strip('"').strip("'") for p in body.split(',')]
+        body = base_str[base_str.index("(") + 1 : base_str.rindex(")")]
+        parts = [p.strip().strip('"').strip("'") for p in body.split(",")]
 
         angle = 90.0
         colors_and_stops = []
         for part in parts:
-            if part.endswith('deg'):
+            if part.endswith("deg"):
                 try:
                     angle = float(part[:-3]) % 360
                 except ValueError:
                     angle = 90.0
                 continue
-            if '%' in part:
+            if "%" in part:
                 tokens = part.split()
                 if len(tokens) == 2:
                     col_str, pct_str = tokens
                 else:
-                    col_str, pct_str = part.rsplit('%', 1)
+                    col_str, pct_str = part.rsplit("%", 1)
                     col_str = col_str.strip()
                     pct_str = pct_str.strip()
                 try:
-                    stop = float(pct_str.strip('%')) / 100.0
+                    stop = float(pct_str.strip("%")) / 100.0
                 except ValueError:
                     stop = None
                 colors_and_stops.append((col_str.strip(), stop))
@@ -840,25 +958,25 @@ class MediaProcessor:
         n = len(colors_and_stops)
         for i, (c, p) in enumerate(colors_and_stops):
             if p is None:
-                colors_and_stops[i] = (c, i/(n-1) if n>1 else 0.0)
+                colors_and_stops[i] = (c, i / (n - 1) if n > 1 else 0.0)
 
         width, height = size
-        img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+        img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
 
-        if base_str.startswith('linear-gradient('):
+        if base_str.startswith("linear-gradient("):
             rad = math.radians(angle)
             dx, dy = math.sin(rad), -math.cos(rad)
-            max_dist = math.sqrt((dx*width)**2 + (dy*height)**2)
+            max_dist = math.sqrt((dx * width) ** 2 + (dy * height) ** 2)
 
             for y_pos in range(height):
                 for x_pos in range(width):
-                    pos = (x_pos*dx + y_pos*dy) / max_dist
+                    pos = (x_pos * dx + y_pos * dy) / max_dist
                     pos = max(0, min(1, pos))
 
-                    for i in range(len(colors_and_stops)-1):
+                    for i in range(len(colors_and_stops) - 1):
                         start_pos = colors_and_stops[i][1]
-                        end_pos = colors_and_stops[i+1][1]
+                        end_pos = colors_and_stops[i + 1][1]
 
                         if start_pos <= pos <= end_pos:
                             if end_pos == start_pos:
@@ -867,7 +985,7 @@ class MediaProcessor:
                                 t = (pos - start_pos) / (end_pos - start_pos)
 
                             c1 = self._parse_single_color(colors_and_stops[i][0])
-                            c2 = self._parse_single_color(colors_and_stops[i+1][0])
+                            c2 = self._parse_single_color(colors_and_stops[i + 1][0])
 
                             r = int(c1[0] + (c2[0] - c1[0]) * t)
                             g = int(c1[1] + (c2[1] - c1[1]) * t)
@@ -877,18 +995,21 @@ class MediaProcessor:
                             draw.point((x_pos, y_pos), fill=(r, g, b, a))
                             break
 
-        elif base_str.startswith('radial-gradient('):
+        elif base_str.startswith("radial-gradient("):
             center_x, center_y = width // 2, height // 2
             max_radius = math.sqrt(center_x**2 + center_y**2)
 
             for y_pos in range(height):
                 for x_pos in range(width):
-                    dist = math.sqrt((x_pos-center_x)**2 + (y_pos-center_y)**2) / max_radius
+                    dist = (
+                        math.sqrt((x_pos - center_x) ** 2 + (y_pos - center_y) ** 2)
+                        / max_radius
+                    )
                     dist = max(0, min(1, dist))
 
-                    for i in range(len(colors_and_stops)-1):
+                    for i in range(len(colors_and_stops) - 1):
                         start_pos = colors_and_stops[i][1]
-                        end_pos = colors_and_stops[i+1][1]
+                        end_pos = colors_and_stops[i + 1][1]
 
                         if start_pos <= dist <= end_pos:
                             if end_pos == start_pos:
@@ -897,7 +1018,7 @@ class MediaProcessor:
                                 t = (dist - start_pos) / (end_pos - start_pos)
 
                             c1 = self._parse_single_color(colors_and_stops[i][0])
-                            c2 = self._parse_single_color(colors_and_stops[i+1][0])
+                            c2 = self._parse_single_color(colors_and_stops[i + 1][0])
 
                             r = int(c1[0] + (c2[0] - c1[0]) * t)
                             g = int(c1[1] + (c2[1] - c1[1]) * t)
@@ -910,9 +1031,9 @@ class MediaProcessor:
         return img
 
     def _replace_random_in_gradient(self, gradient_str: str) -> str:
-        parts = gradient_str.split('(')
+        parts = gradient_str.split("(")
         prefix = parts[0]
-        body = '('.join(parts[1:])
+        body = "(".join(parts[1:])
 
         color_parts = []
         current_part = []
@@ -920,28 +1041,28 @@ class MediaProcessor:
         for char in body:
             if char in ('"', "'"):
                 in_quotes = not in_quotes
-            if char == ',' and not in_quotes:
-                color_parts.append(''.join(current_part).strip())
+            if char == "," and not in_quotes:
+                color_parts.append("".join(current_part).strip())
                 current_part = []
             else:
                 current_part.append(char)
         if current_part:
-            color_parts.append(''.join(current_part).strip().rstrip(')'))
+            color_parts.append("".join(current_part).strip().rstrip(")"))
 
         processed_parts = []
         for part in color_parts:
-            if part.endswith('deg'):
+            if part.endswith("deg"):
                 processed_parts.append(part)
                 continue
 
-            if '%' in part:
-                color_part, percent_part = part.rsplit('%', 1)
+            if "%" in part:
+                color_part, percent_part = part.rsplit("%", 1)
                 color_part = color_part.strip()
-                if color_part.lower() in ('random', 'rand'):
+                if color_part.lower() in ("random", "rand"):
                     color_part = self._rgb_to_hex(self._generate_random_color())
                 processed_parts.append(f"{color_part}%{percent_part}")
             else:
-                if part.lower() in ('random', 'rand'):
+                if part.lower() in ("random", "rand"):
                     part = self._rgb_to_hex(self._generate_random_color())
                 processed_parts.append(part)
 
@@ -952,7 +1073,7 @@ class MediaProcessor:
             random.randint(0, 255),
             random.randint(0, 255),
             random.randint(0, 255),
-            alpha if alpha is not None else 255
+            alpha if alpha is not None else 255,
         )
 
     def _rgb_to_hex(self, color: tuple) -> str:
@@ -961,34 +1082,36 @@ class MediaProcessor:
         return f"#{color[0]:02x}{color[1]:02x}{color[2]:02x}"
 
     def _hex_to_rgb(self, hex_str: str) -> tuple:
-        hex_str = hex_str.lstrip('#')
+        hex_str = hex_str.lstrip("#")
         length = len(hex_str)
         if length == 3:  # RGB
-            return tuple(int(c*2, 16) for c in hex_str) + (255,)
+            return tuple(int(c * 2, 16) for c in hex_str) + (255,)
         elif length == 4:  # RGBA
-            return tuple(int(c*2, 16) for c in hex_str[:3]) + (int(hex_str[3]*2, 16),)
+            return tuple(int(c * 2, 16) for c in hex_str[:3]) + (
+                int(hex_str[3] * 2, 16),
+            )
         elif length == 6:  # RRGGBB
-            return tuple(int(hex_str[i:i+2], 16) for i in (0, 2, 4)) + (255,)
+            return tuple(int(hex_str[i : i + 2], 16) for i in (0, 2, 4)) + (255,)
         elif length == 8:  # RRGGBBAA
-            return tuple(int(hex_str[i:i+2], 16) for i in (0, 2, 4, 6))
+            return tuple(int(hex_str[i : i + 2], 16) for i in (0, 2, 4, 6))
         return (0, 0, 0, 255)
 
     def _parse_single_color(self, color_str: str) -> tuple:
         color_str = color_str.strip().lower()
 
-        if color_str in ('none', 'transparent'):
+        if color_str in ("none", "transparent"):
             return (0, 0, 0, 0)
 
-        if color_str in ('random', 'rand'):
+        if color_str in ("random", "rand"):
             return self._generate_random_color()
 
-        if color_str.startswith('#'):
+        if color_str.startswith("#"):
             return self._hex_to_rgb(color_str)
 
-        if color_str.startswith(('rgb(', 'rgba(')):
+        if color_str.startswith(("rgb(", "rgba(")):
             try:
-                values_str = color_str.split('(')[1].split(')')[0]
-                values = [v.strip() for v in values_str.split(',')]
+                values_str = color_str.split("(")[1].split(")")[0]
+                values = [v.strip() for v in values_str.split(",")]
 
                 r = int(values[0])
                 g = int(values[1])
@@ -1006,38 +1129,43 @@ class MediaProcessor:
             except (ValueError, IndexError):
                 pass
 
-        if ',' in color_str or ' ' in color_str:
-            separators = ',' if ',' in color_str else ' '
+        if "," in color_str or " " in color_str:
+            separators = "," if "," in color_str else " "
             try:
                 parts = [p.strip() for p in color_str.split(separators)]
                 if len(parts) >= 3:
                     r = int(parts[0])
                     g = int(parts[1])
                     b = int(parts[2])
-                    a = 255 if len(parts) < 4 else int(float(parts[3])) * 255 if float(parts[3]) <= 1.0 else int(parts[3])
+                    a = (
+                        255
+                        if len(parts) < 4
+                        else int(float(parts[3])) * 255
+                        if float(parts[3]) <= 1.0
+                        else int(parts[3])
+                    )
                     return (r, g, b, a)
             except (ValueError, IndexError):
                 pass
 
         return {
-            'white': (255, 255, 255, 255),
-            'black': (0, 0, 0, 255),
-            'red': (255, 0, 0, 255),
-            'green': (0, 255, 0, 255),
-            'blue': (0, 0, 255, 255),
-            'yellow': (255, 255, 0, 255),
-            'cyan': (0, 255, 255, 255),
-            'magenta': (255, 0, 255, 255),
-            'orange': (255, 165, 0, 255),
-            'purple': (128, 0, 128, 255),
-            'pink': (255, 192, 203, 255),
-            'brown': (165, 42, 42, 255),
-            'gray': (128, 128, 128, 255),
-            'grey': (128, 128, 128, 255),
-            'silver': (192, 192, 192, 255),
-            'gold': (255, 215, 0, 255),
+            "white": (255, 255, 255, 255),
+            "black": (0, 0, 0, 255),
+            "red": (255, 0, 0, 255),
+            "green": (0, 255, 0, 255),
+            "blue": (0, 0, 255, 255),
+            "yellow": (255, 255, 0, 255),
+            "cyan": (0, 255, 255, 255),
+            "magenta": (255, 0, 255, 255),
+            "orange": (255, 165, 0, 255),
+            "purple": (128, 0, 128, 255),
+            "pink": (255, 192, 203, 255),
+            "brown": (165, 42, 42, 255),
+            "gray": (128, 128, 128, 255),
+            "grey": (128, 128, 128, 255),
+            "silver": (192, 192, 192, 255),
+            "gold": (255, 215, 0, 255),
         }.get(color_str, (0, 0, 0, 255))
-
 
     async def _parse_command_args(self, cmd: str, args: list[str]) -> dict:
         try:
@@ -1050,9 +1178,9 @@ class MediaProcessor:
 
             def str2bool(v: str) -> bool:
                 v = str(v).strip().lower()
-                if v in ('true', '1', 'yes', 'on'):
+                if v in ("true", "1", "yes", "on"):
                     return True
-                if v in ('false', '0', 'no', 'off'):
+                if v in ("false", "0", "no", "off"):
                     return False
                 raise ValueError(f"Invalid boolean value: '{v}'")
 
@@ -1062,51 +1190,56 @@ class MediaProcessor:
                         return str2bool(val)
                     return typ(val)
                 except ValueError as e:
-                    raise ValueError(f"Invalid {typ.__name__} value: '{val}' ({str(e)})")
+                    raise ValueError(
+                        f"Invalid {typ.__name__} value: '{val}' ({str(e)})"
+                    )
+
             for param, param_spec in spec.items():
-                if param in ('input_keys', 'extra_args'):
+                if param in ("input_keys", "extra_args"):
                     continue
 
-                if not remaining_args and param_spec.get('required', False):
+                if not remaining_args and param_spec.get("required", False):
                     raise ValueError(f"Missing required argument: '{param}'")
                 if not remaining_args:
                     continue
 
-                if '=' in remaining_args[0] and not remaining_args[0].startswith(('http://', 'https://')):
+                if "=" in remaining_args[0] and not remaining_args[0].startswith(
+                    ("http://", "https://")
+                ):
                     break
 
                 value = remaining_args.pop(0)
                 try:
-                    parsed[param] = convert(value, param_spec['type'])
+                    parsed[param] = convert(value, param_spec["type"])
                 except Exception as e:
                     raise ValueError(f"{param}={value} ({str(e)})")
 
-            if cmd == 'concat':
+            if cmd == "concat":
                 if not remaining_args:
                     raise ValueError("concat requires at least one input key")
-                parsed['input_keys'] = remaining_args
+                parsed["input_keys"] = remaining_args
                 remaining_args = []
-            elif cmd == 'render':
-                parsed['extra_args'] = remaining_args
+            elif cmd == "render":
+                parsed["extra_args"] = remaining_args
                 remaining_args = []
 
             for arg in remaining_args:
-                if '=' in arg:
+                if "=" in arg:
                     try:
-                        key, value = arg.split('=', 1)
+                        key, value = arg.split("=", 1)
                         key = key.strip().lower()
                         if key not in spec:
                             raise ValueError(f"Unknown argument: '{key}'")
-                        parsed[key] = convert(value, spec[key]['type'])
+                        parsed[key] = convert(value, spec[key]["type"])
                     except ValueError as e:
                         raise ValueError(f"Invalid argument format: '{arg}' ({str(e)})")
 
             for param, param_spec in spec.items():
-                if param not in parsed and 'default' in param_spec:
-                    parsed[param] = param_spec['default']
+                if param not in parsed and "default" in param_spec:
+                    parsed[param] = param_spec["default"]
 
             for param, param_spec in spec.items():
-                if param_spec.get('required', False) and param not in parsed:
+                if param_spec.get("required", False) and param not in parsed:
                     raise ValueError(f"Missing required argument: '{param}'")
 
             return parsed
@@ -1114,20 +1247,17 @@ class MediaProcessor:
         except Exception as e:
             raise ValueError(f"{cmd} command error: {str(e)}")
 
-
     async def _run_ffmpeg(self, cmd: list) -> tuple:
-        if platform.system() == 'Windows':
-            cmd[0] = 'ffmpeg.exe'
+        if platform.system() == "Windows":
+            cmd[0] = "ffmpeg.exe"
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             creationflags=(
-                subprocess.CREATE_NO_WINDOW
-                if platform.system() == 'Windows'
-                else 0
-            )
+                subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
+            ),
         )
 
         self.active_processes.add(proc)
@@ -1135,11 +1265,11 @@ class MediaProcessor:
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
             if proc.returncode != 0:
-                error_msg = stderr.decode('utf-8', errors='replace').strip()
-                if platform.system() == 'Windows':
-                    error_msg = error_msg.replace('\r\n', '\n')
+                error_msg = stderr.decode("utf-8", errors="replace").strip()
+                if platform.system() == "Windows":
+                    error_msg = error_msg.replace("\r\n", "\n")
                 return False, f"Error: FFmpeg error: {error_msg}"
-            return True, stdout.decode('utf-8', errors='replace').strip()
+            return True, stdout.decode("utf-8", errors="replace").strip()
         except asyncio.TimeoutError:
             proc.kill()
             return False, "Error: FFmpeg processing took longer than 120 seconds."
@@ -1149,32 +1279,39 @@ class MediaProcessor:
             self.active_processes.discard(proc)
 
     async def _run_ffprobe(self, cmd: list) -> tuple:
-        if platform.system() == 'Windows':
-            cmd[0] = 'ffprobe.exe'
+        if platform.system() == "Windows":
+            cmd[0] = "ffprobe.exe"
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            creationflags=subprocess.CREATE_NO_WINDOW if platform.system() == 'Windows' else 0
+            creationflags=subprocess.CREATE_NO_WINDOW
+            if platform.system() == "Windows"
+            else 0,
         )
 
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=20)
             if proc.returncode != 0:
-                error_msg = stderr.decode('utf-8', errors='replace').strip()
+                error_msg = stderr.decode("utf-8", errors="replace").strip()
                 return False, f"Error: FFprobe error: {error_msg}"
-            return True, stdout.decode('utf-8', errors='replace').strip()
+            return True, stdout.decode("utf-8", errors="replace").strip()
         except Exception as e:
             return False, f"Error: {str(e)}"
 
     async def _probe_media_info(self, path: Path) -> tuple:
         cmd = [
-            'ffprobe', '-v', 'error',
-            '-show_entries', 'stream=codec_type,width,height,duration',
-            '-show_entries', 'format=duration',
-            '-of', 'json',
-            str(path)
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "stream=codec_type,width,height,duration",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "json",
+            str(path),
         ]
 
         success, output = await self._run_ffprobe(cmd)
@@ -1183,22 +1320,19 @@ class MediaProcessor:
 
         try:
             data = json.loads(output)
-            streams = data.get('streams', [])
-            format_info = data.get('format', {})
-
+            streams = data.get("streams", [])
+            format_info = data.get("format", {})
 
             width, height = 1, 1
             for stream in streams:
-                if stream.get('codec_type') == 'video':
-                    width = max(int(stream.get('width', 1)), 1)
-                    height = max(int(stream.get('height', 1)), 1)
+                if stream.get("codec_type") == "video":
+                    width = max(int(stream.get("width", 1)), 1)
+                    height = max(int(stream.get("height", 1)), 1)
                     break
 
+            duration = max(float(format_info.get("duration", 0)), 0.0)
 
-            duration = max(float(format_info.get('duration', 0)), 0.0)
-
-
-            has_audio = any(s.get('codec_type') == 'audio' for s in streams)
+            has_audio = any(s.get("codec_type") == "audio" for s in streams)
 
             return (width, height, duration, has_audio)
 
@@ -1218,11 +1352,13 @@ class MediaProcessor:
             while i < len(lines):
                 line = lines[i]
                 try:
-                    if line.lower().startswith('dobetween'):
+                    if line.lower().startswith("dobetween"):
                         try:
                             parts = line.split()
                             if len(parts) < 5:
-                                raise ValueError("dobetween requires input_key, start_time, end_time, output_key")
+                                raise ValueError(
+                                    "dobetween requires input_key, start_time, end_time, output_key"
+                                )
 
                             input_key = parts[1]
                             start = parts[2]
@@ -1231,7 +1367,7 @@ class MediaProcessor:
                             sub_script = []
                             i += 1
 
-                            while i < len(lines) and not lines[i].lower() == 'end':
+                            while i < len(lines) and not lines[i].lower() == "end":
                                 sub_script.append(lines[i])
                                 i += 1
 
@@ -1243,7 +1379,8 @@ class MediaProcessor:
                                 start_time=start,
                                 end_time=end,
                                 output_key=output_key,
-                                sub_script='\n'.join(sub_script))
+                                sub_script="\n".join(sub_script),
+                            )
                             if result.startswith("media://"):
                                 produced_outputs.add(output_key)
                                 output_files.append(result[8:])
@@ -1253,7 +1390,11 @@ class MediaProcessor:
                             last_output_key = output_key
                             i += 1
                         except Exception as e:
-                            errors.append(await self._handle_error("dobetween", e, f"in line: {line}"))
+                            errors.append(
+                                await self._handle_error(
+                                    "dobetween", e, f"in line: {line}"
+                                )
+                            )
                             i += 1
                             continue
                     else:
@@ -1274,8 +1415,8 @@ class MediaProcessor:
 
                             result = await func(**parsed)
 
-                            if 'output_key' in parsed:
-                                last_output_key = parsed['output_key']
+                            if "output_key" in parsed:
+                                last_output_key = parsed["output_key"]
                                 produced_outputs.add(last_output_key)
                                 final_output_key = last_output_key
                             if result.startswith("media://"):
@@ -1285,12 +1426,18 @@ class MediaProcessor:
 
                             i += 1
                         except Exception as e:
-                            errors.append(await self._handle_error("command", e, f"in line: {line}"))
+                            errors.append(
+                                await self._handle_error(
+                                    "command", e, f"in line: {line}"
+                                )
+                            )
                             i += 1
                             continue
 
                 except Exception as e:
-                    errors.append(await self._handle_error("processing", e, f"in line: {line}"))
+                    errors.append(
+                        await self._handle_error("processing", e, f"in line: {line}")
+                    )
                     i += 1
                     continue
             if final_output_key and not errors:
@@ -1306,25 +1453,24 @@ class MediaProcessor:
 
     async def _load_media(self, **kwargs) -> str:
         try:
-            if 'url' not in kwargs:
+            if "url" not in kwargs:
                 raise ValueError("Missing 'url' parameter")
-            if 'media_key' not in kwargs:
+            if "media_key" not in kwargs:
                 raise ValueError("Missing 'media_key' parameter")
             return await self._load_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("load", e)
 
-
     async def _load_media_impl(self, **kwargs) -> str:
-        url = kwargs['url']
-        media_key = kwargs['media_key']
+        url = kwargs["url"]
+        media_key = kwargs["media_key"]
         try:
             temp_file = self._get_temp_path()
             ydl_opts = {
-                'quiet': True,
-                'no_warnings': True,
-                'outtmpl': f'{temp_file}.%(ext)s',
-                'noplaylist': True
+                "quiet": True,
+                "no_warnings": True,
+                "outtmpl": f"{temp_file}.%(ext)s",
+                "noplaylist": True,
             }
 
             def sync_ydl_download():
@@ -1332,16 +1478,16 @@ class MediaProcessor:
                     info = ydl.extract_info(url, download=True)
                     return ydl.prepare_filename(info)
 
-            downloaded_path = await asyncio.get_event_loop().run_in_executor(None, sync_ydl_download)
+            downloaded_path = await asyncio.get_event_loop().run_in_executor(
+                None, sync_ydl_download
+            )
             downloaded_path = Path(downloaded_path)
 
             if not downloaded_path.exists():
                 raise RuntimeError("Downloaded file not found")
 
-
             ext = downloaded_path.suffix[1:]
             final_temp_file = self._get_temp_path(ext)
-
 
             shutil.move(str(downloaded_path), final_temp_file)
             downloaded_path.unlink(missing_ok=True)
@@ -1356,11 +1502,10 @@ class MediaProcessor:
                     if resp.status != 200:
                         return f"HTTP Error {resp.status}"
 
-
-                    ext = Path(url.split('?')[0]).suffix[1:] or 'tmp'
+                    ext = Path(url.split("?")[0]).suffix[1:] or "tmp"
                     temp_file = self._get_temp_path(ext)
 
-                    with temp_file.open('wb') as f:
+                    with temp_file.open("wb") as f:
                         async for chunk in resp.content.iter_chunked(8192):
                             f.write(chunk)
 
@@ -1372,43 +1517,56 @@ class MediaProcessor:
 
     async def _reverse_media(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
             return await self._reverse_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("reverse", e)
 
     async def _reverse_media_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        output_key = kwargs["output_key"]
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
         input_path = Path(self.media_cache[input_key])
         output_file = self._get_temp_path(input_path.suffix[1:])
         suffix = input_path.suffix.lower()
-        if suffix in ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv'):
+        if suffix in (".mp4", ".mov", ".webm", ".mkv", ".avi", ".wmv"):
             cmd = [
-                'ffmpeg', '-hide_banner',
-                '-i', input_path.as_posix(),
-                '-vf', 'reverse',
-                '-af', 'areverse',
-                '-y', output_file.as_posix()
+                "ffmpeg",
+                "-hide_banner",
+                "-i",
+                input_path.as_posix(),
+                "-vf",
+                "reverse",
+                "-af",
+                "areverse",
+                "-y",
+                output_file.as_posix(),
             ]
-        elif suffix in '.gif':
+        elif suffix in ".gif":
             cmd = [
-                'ffmpeg', '-hide_banner',
-                '-i', input_path.as_posix(),
-                '-vf', 'reverse',
-                '-y', output_file.as_posix()
+                "ffmpeg",
+                "-hide_banner",
+                "-i",
+                input_path.as_posix(),
+                "-vf",
+                "reverse",
+                "-y",
+                output_file.as_posix(),
             ]
         else:
             cmd = [
-                'ffmpeg', '-hide_banner',
-                '-i', input_path.as_posix(),
-                '-af', 'areverse',
-                '-y', output_file.as_posix()
+                "ffmpeg",
+                "-hide_banner",
+                "-i",
+                input_path.as_posix(),
+                "-af",
+                "areverse",
+                "-y",
+                output_file.as_posix(),
             ]
 
         success, error = await self._run_ffmpeg(cmd)
@@ -1419,17 +1577,17 @@ class MediaProcessor:
 
     async def _concat_media(self, **kwargs) -> str:
         try:
-            if 'input_keys' not in kwargs:
+            if "input_keys" not in kwargs:
                 raise ValueError("Missing 'input_keys' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
             return await self._concat_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("concat", e)
 
     async def _concat_media_impl(self, **kwargs) -> str:
-        input_keys = kwargs.get('input_keys')
-        output_key = kwargs['output_key']
+        input_keys = kwargs.get("input_keys")
+        output_key = kwargs["output_key"]
 
         if not input_keys or not isinstance(input_keys, list):
             return "Error: No input files specified"
@@ -1440,9 +1598,16 @@ class MediaProcessor:
 
         input_paths = [Path(self.media_cache[k]) for k in input_keys]
 
-        is_video = lambda p: p.suffix.lower() in ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv')
-        is_audio = lambda p: p.suffix.lower() in ('.mp3', '.wav', '.ogg', '.opus', '.flac', '.m4a', '.wma', '.mka')
-        is_image = lambda p: p.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp', '.gif')
+        is_video = lambda p: (
+            p.suffix.lower() in (".mp4", ".mov", ".webm", ".mkv", ".avi", ".wmv")
+        )
+        is_audio = lambda p: (
+            p.suffix.lower()
+            in (".mp3", ".wav", ".ogg", ".opus", ".flac", ".m4a", ".wma", ".mka")
+        )
+        is_image = lambda p: (
+            p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".gif")
+        )
 
         media_info = []
         all_gifs = True
@@ -1451,48 +1616,47 @@ class MediaProcessor:
             suffix = path.suffix.lower()
             if is_video(path):
                 w, h, dur, has_audio = await self._probe_media_info(path)
-                media_info.append({
-                    'type': 'video',
-                    'path': path,
-                    'width': w,
-                    'height': h,
-                    'duration': dur,
-                    'has_audio': has_audio
-                })
+                media_info.append(
+                    {
+                        "type": "video",
+                        "path": path,
+                        "width": w,
+                        "height": h,
+                        "duration": dur,
+                        "has_audio": has_audio,
+                    }
+                )
                 all_gifs = False
             elif is_audio(path):
                 info = await self._probe_media_info(path)
                 duration = float(info[2]) if info[2] else 3.0
-                media_info.append({
-                    'type': 'audio',
-                    'path': path,
-                    'duration': duration
-                })
+                media_info.append({"type": "audio", "path": path, "duration": duration})
                 all_gifs = False
             elif is_image(path):
-                if suffix == '.gif':
+                if suffix == ".gif":
                     _, _, dur, _ = await self._probe_media_info(path)
                     duration = float(dur) if dur else 0.5
                 else:
                     duration = 0.5
-                media_info.append({
-                    'type': 'image',
-                    'path': path,
-                    'duration': duration
-                })
-                if suffix != '.gif':
+                media_info.append({"type": "image", "path": path, "duration": duration})
+                if suffix != ".gif":
                     all_gifs = False
             else:
                 return f"Error: Unsupported file type '{suffix}'"
 
         output_format = (
-            '.gif' if all(i['type'] == 'image' and i['path'].suffix.lower() == '.gif' for i in media_info) else
-            '.mp3' if all(i['type'] == 'audio' for i in media_info) else
-            '.mp4'
+            ".gif"
+            if all(
+                i["type"] == "image" and i["path"].suffix.lower() == ".gif"
+                for i in media_info
+            )
+            else ".mp3"
+            if all(i["type"] == "audio" for i in media_info)
+            else ".mp4"
         )
         output_file = self._get_temp_path(output_format[1:])
 
-        ffmpeg_cmd = ['ffmpeg', '-hide_banner']
+        ffmpeg_cmd = ["ffmpeg", "-hide_banner"]
         filter_complex = []
         map_args = []
 
@@ -1502,74 +1666,87 @@ class MediaProcessor:
 
         target_width, target_height = 512, 512
         for info in media_info:
-            if info['type'] in ('video', 'image'):
-                if info['type'] == 'video':
-                    target_width, target_height = info['width'], info['height']
+            if info["type"] in ("video", "image"):
+                if info["type"] == "video":
+                    target_width, target_height = info["width"], info["height"]
                 break
 
         scale_filter = f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2,setsar=1:1"
 
         for idx, info in enumerate(media_info):
-            path = info['path']
-            media_type = info['type']
-            duration = info['duration']
+            path = info["path"]
+            media_type = info["type"]
+            duration = info["duration"]
             suffix = path.suffix.lower()
 
-            if media_type == 'image':
-                ffmpeg_cmd += ['-t', str(duration), '-i', str(path)]
-                if suffix == '.gif' and all_gifs:
-                    filter_complex.append(f"[{idx}:v]setpts=PTS-STARTPTS,fps=10,setsar=1:1[v{idx}]")
+            if media_type == "image":
+                ffmpeg_cmd += ["-t", str(duration), "-i", str(path)]
+                if suffix == ".gif" and all_gifs:
+                    filter_complex.append(
+                        f"[{idx}:v]setpts=PTS-STARTPTS,fps=10,setsar=1:1[v{idx}]"
+                    )
                 else:
-                    filter_complex.append(f"[{idx}:v]{scale_filter},format=rgb24,fps=15[v{idx}]")
+                    filter_complex.append(
+                        f"[{idx}:v]{scale_filter},format=rgb24,fps=15[v{idx}]"
+                    )
                 v_streams.append(f"[v{idx}]")
                 current_time += duration
 
-            elif media_type == 'video':
-                ffmpeg_cmd += ['-i', str(path)]
+            elif media_type == "video":
+                ffmpeg_cmd += ["-i", str(path)]
                 if all_gifs:
-                    filter_complex.append(f"[{idx}:v]setpts=PTS-STARTPTS,fps=10[v{idx}]")
+                    filter_complex.append(
+                        f"[{idx}:v]setpts=PTS-STARTPTS,fps=10[v{idx}]"
+                    )
                 else:
                     filter_complex.append(f"[{idx}:v]{scale_filter}[v{idx}]")
                 v_streams.append(f"[v{idx}]")
-                if info['has_audio']:
+                if info["has_audio"]:
                     a_streams.append(f"[{idx}:a]")
-                current_time += info['duration']
+                current_time += info["duration"]
 
-            elif media_type == 'audio':
-                ffmpeg_cmd += ['-i', str(path)]
+            elif media_type == "audio":
+                ffmpeg_cmd += ["-i", str(path)]
                 filter_complex.append(f"[{idx}:a]asetpts=PTS+{current_time}/TB[a{idx}]")
                 a_streams.append(f"[a{idx}]")
                 current_time += duration
 
-        if not v_streams and any(i['type'] in ('image', 'video') for i in media_info):
-            ffmpeg_cmd += ['-f', 'lavfi', '-i', f'color=c=black:s={target_width}x{target_height}:d={current_time}']
+        if not v_streams and any(i["type"] in ("image", "video") for i in media_info):
+            ffmpeg_cmd += [
+                "-f",
+                "lavfi",
+                "-i",
+                f"color=c=black:s={target_width}x{target_height}:d={current_time}",
+            ]
             filter_complex.append(f"[{len(input_paths)}:v]format=rgb24,fps=15[v0]")
-            v_streams.append('[v0]')
+            v_streams.append("[v0]")
 
         if all_gifs and v_streams:
-            total_duration = sum(info['duration'] for info in media_info)
-            v_concat = ''.join(v_streams) + f'concat=n={len(v_streams)}:v=1:a=0[v]'
+            total_duration = sum(info["duration"] for info in media_info)
+            v_concat = "".join(v_streams) + f"concat=n={len(v_streams)}:v=1:a=0[v]"
             filter_complex.append(v_concat)
-            filter_complex.append(f"[v]trim=duration={total_duration},setpts=PTS-STARTPTS[vg]")
-            map_args += ['-map', '[vg]', '-c:v', 'gif', '-final_delay', '500']
+            filter_complex.append(
+                f"[v]trim=duration={total_duration},setpts=PTS-STARTPTS[vg]"
+            )
+            map_args += ["-map", "[vg]", "-c:v", "gif", "-final_delay", "500"]
 
         elif v_streams:
-            v_concat = ''.join(v_streams) + f'concat=n={len(v_streams)}:v=1:a=0[v]'
+            v_concat = "".join(v_streams) + f"concat=n={len(v_streams)}:v=1:a=0[v]"
             filter_complex.append(v_concat)
-            map_args += ['-map', '[v]', '-pix_fmt', 'yuv420p']
+            map_args += ["-map", "[v]", "-pix_fmt", "yuv420p"]
 
         if a_streams:
-            a_concat = ''.join(a_streams) + f'concat=n={len(a_streams)}:v=0:a=1[a]'
+            a_concat = "".join(a_streams) + f"concat=n={len(a_streams)}:v=0:a=1[a]"
             filter_complex.append(a_concat)
-            map_args += ['-map', '[a]', '-b:a', '192k']
+            map_args += ["-map", "[a]", "-b:a", "192k"]
         elif v_streams:
-            map_args += ['-shortest']
+            map_args += ["-shortest"]
 
         if filter_complex:
-            ffmpeg_cmd += ['-filter_complex', ';'.join(filter_complex)]
+            ffmpeg_cmd += ["-filter_complex", ";".join(filter_complex)]
 
-        map_args += ['-fps_mode', 'vfr', '-async', '1']
-        ffmpeg_cmd += map_args + ['-y', output_file.as_posix()]
+        map_args += ["-fps_mode", "vfr", "-async", "1"]
+        ffmpeg_cmd += map_args + ["-y", output_file.as_posix()]
 
         success, error = await self._run_ffmpeg(ffmpeg_cmd)
         if success:
@@ -1579,15 +1756,15 @@ class MediaProcessor:
 
     async def _render_media(self, **kwargs) -> str:
         try:
-            if 'media_key' not in kwargs:
+            if "media_key" not in kwargs:
                 raise ValueError("Missing 'media_key' parameter")
             return await self._render_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("render", e)
 
     async def _render_media_impl(self, **kwargs) -> str:
-        media_key = kwargs['media_key']
-        extra_args = kwargs.get('extra_args', [])
+        media_key = kwargs["media_key"]
+        extra_args = kwargs.get("extra_args", [])
         path = Path(self.media_cache[media_key])
         if not path.exists():
             return f"Error: File for {media_key} missing"
@@ -1596,39 +1773,65 @@ class MediaProcessor:
         output_filename = None
 
         for arg in extra_args:
-            if arg.startswith(('video/', 'audio/', 'image/')) or arg in ('mp4', 'mov', 'webm', 'mkv', 'avi', 'wmv', 'gif', 'png', 'jpg', 'jpeg', 'webp', 'mp3', 'ogg', 'wav', 'opus', 'flac', 'm4a', 'wma', 'mka'):
+            if arg.startswith(("video/", "audio/", "image/")) or arg in (
+                "mp4",
+                "mov",
+                "webm",
+                "mkv",
+                "avi",
+                "wmv",
+                "gif",
+                "png",
+                "jpg",
+                "jpeg",
+                "webp",
+                "mp3",
+                "ogg",
+                "wav",
+                "opus",
+                "flac",
+                "m4a",
+                "wma",
+                "mka",
+            ):
                 output_format = arg
             else:
                 output_filename = arg
 
         if output_format:
             new_ext = {
-                'video/mp4': 'mp4',
-                'video/quicktime': 'mov',
-                'video/webm': 'webm',
-                'video/x-matroska': 'mkv',
-                'video/x-msvideo': 'avi',
-                'video/x-ms-wmv': 'wmv',
-                'image/gif': 'gif',
-                'image/png': 'png',
-                'image/jpg': 'jpg',
-                'image/jpeg': 'jpeg',
-                'image/webp': 'webp',
-                'audio/mpeg': 'mp3',
-                'audio/ogg': 'ogg',
-                'audio/wav': 'wav',
-                'audio/opus': 'opus',
-                'audio/flac': 'flac',
-                'audio/mp4': 'm4a',
-                'audio/x-ms-wma': 'wma',
-                'audio/x-matroska': 'mka'
-            }.get(output_format, output_format.split('/')[-1] if '/' in output_format else output_format)
+                "video/mp4": "mp4",
+                "video/quicktime": "mov",
+                "video/webm": "webm",
+                "video/x-matroska": "mkv",
+                "video/x-msvideo": "avi",
+                "video/x-ms-wmv": "wmv",
+                "image/gif": "gif",
+                "image/png": "png",
+                "image/jpg": "jpg",
+                "image/jpeg": "jpeg",
+                "image/webp": "webp",
+                "audio/mpeg": "mp3",
+                "audio/ogg": "ogg",
+                "audio/wav": "wav",
+                "audio/opus": "opus",
+                "audio/flac": "flac",
+                "audio/mp4": "m4a",
+                "audio/x-ms-wma": "wma",
+                "audio/x-matroska": "mka",
+            }.get(
+                output_format,
+                output_format.split("/")[-1] if "/" in output_format else output_format,
+            )
 
             new_path = self._get_temp_path(new_ext)
             cmd = [
-                'ffmpeg', '-hide_banner',
-                '-i', path.as_posix(),
-                '-y', new_path.as_posix()
+                "ffmpeg",
+                "-hide_banner",
+                "-i",
+                path.as_posix(),
+                "-y",
+                new_path.as_posix(),
             ]
 
             success, error = await self._run_ffmpeg(cmd)
@@ -1651,20 +1854,20 @@ class MediaProcessor:
 
     async def _convert_media(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
-            if 'format' not in kwargs:
+            if "format" not in kwargs:
                 raise ValueError("Missing 'format' parameter")
             return await self._convert_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("convert", e)
 
     async def _convert_media_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        output_key = kwargs['output_key']
-        output_format = kwargs['format'].lower()
+        input_key = kwargs["input_key"]
+        output_key = kwargs["output_key"]
+        output_format = kwargs["format"].lower()
 
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
@@ -1672,22 +1875,20 @@ class MediaProcessor:
         input_path = Path(self.media_cache[input_key])
         output_file = self._get_temp_path(output_format)
 
-        cmd = ['ffmpeg', '-hide_banner', '-i', input_path.as_posix()]
-
+        cmd = ["ffmpeg", "-hide_banner", "-i", input_path.as_posix()]
 
         format_filters = {
-            'gif': ['-vf', 'split[o],palettegen,[o]paletteuse'],
-            'png': ['-vframes', '1'],
-            'jpg': ['-vframes', '1'],
-            'jpeg': ['-vframes', '1'],
-            'webp': ['-vframes', '1']
+            "gif": ["-vf", "split[o],palettegen,[o]paletteuse"],
+            "png": ["-vframes", "1"],
+            "jpg": ["-vframes", "1"],
+            "jpeg": ["-vframes", "1"],
+            "webp": ["-vframes", "1"],
         }
 
         if output_format in format_filters:
             cmd.extend(format_filters[output_format])
 
-
-        cmd.extend(['-y', output_file.as_posix()])
+        cmd.extend(["-y", output_file.as_posix()])
 
         success, error = await self._run_ffmpeg(cmd)
 
@@ -1698,35 +1899,51 @@ class MediaProcessor:
 
     async def _adjust_contrast(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
-            if 'contrast_level' not in kwargs:
+            if "contrast_level" not in kwargs:
                 raise ValueError("Missing 'contrast_level' parameter")
             return await self._adjust_contrast_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("contrast", e)
 
     async def _adjust_contrast_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        contrast_level = kwargs['contrast_level']
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        contrast_level = kwargs["contrast_level"]
+        output_key = kwargs["output_key"]
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
         input_path = Path(self.media_cache[input_key])
         suffix = input_path.suffix.lower()
-        allowed_suffixes = ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv', '.gif', '.png', '.jpg', '.jpeg', '.webp')
+        allowed_suffixes = (
+            ".mp4",
+            ".mov",
+            ".webm",
+            ".mkv",
+            ".avi",
+            ".wmv",
+            ".gif",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".webp",
+        )
         if suffix not in allowed_suffixes:
             return f"Error: {input_key} is not a video or image file."
         output_file = self._get_temp_path(input_path.suffix[1:])
 
         cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', input_path.as_posix(),
-            '-vf', f'eq=contrast={contrast_level}',
-            '-y', output_file.as_posix()
+            "ffmpeg",
+            "-hide_banner",
+            "-i",
+            input_path.as_posix(),
+            "-vf",
+            f"eq=contrast={contrast_level}",
+            "-y",
+            output_file.as_posix(),
         ]
         success, error = await self._run_ffmpeg(cmd)
         if success:
@@ -1736,20 +1953,20 @@ class MediaProcessor:
 
     async def _adjust_opacity(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
-            if 'opacity_level' not in kwargs:
+            if "opacity_level" not in kwargs:
                 raise ValueError("Missing 'opacity_level' parameter")
             return await self._adjust_opacity_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("opacity", e)
 
     async def _adjust_opacity_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        opacity_level = max(0.0, min(1.0, float(kwargs['opacity_level'])))
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        opacity_level = max(0.0, min(1.0, float(kwargs["opacity_level"])))
+        output_key = kwargs["output_key"]
 
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
@@ -1758,15 +1975,18 @@ class MediaProcessor:
         output_file = self._get_temp_path(input_path.suffix[1:])
 
         cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', input_path.as_posix(),
-            '-vf', f'format=rgba,colorchannelmixer=aa={opacity_level}',
-            '-y', output_file.as_posix()
+            "ffmpeg",
+            "-hide_banner",
+            "-i",
+            input_path.as_posix(),
+            "-vf",
+            f"format=rgba,colorchannelmixer=aa={opacity_level}",
+            "-y",
+            output_file.as_posix(),
         ]
 
-
-        if input_path.suffix.lower() in ('.jpg', '.jpeg'):
-            output_file = output_file.with_suffix('.png')
+        if input_path.suffix.lower() in (".jpg", ".jpeg"):
+            output_file = output_file.with_suffix(".png")
             cmd[-1] = output_file.as_posix()
 
         success, error = await self._run_ffmpeg(cmd)
@@ -1777,20 +1997,20 @@ class MediaProcessor:
 
     async def _adjust_saturation(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
-            if 'saturation_level' not in kwargs:
+            if "saturation_level" not in kwargs:
                 raise ValueError("Missing 'saturation_level' parameter")
             return await self._adjust_saturation_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("saturate", e)
 
     async def _adjust_saturation_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        saturation_level = kwargs['saturation_level']
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        saturation_level = kwargs["saturation_level"]
+        output_key = kwargs["output_key"]
 
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
@@ -1799,10 +2019,14 @@ class MediaProcessor:
         output_file = self._get_temp_path(input_path.suffix[1:])
 
         cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', input_path.as_posix(),
-            '-vf', f'eq=saturation={saturation_level}',
-            '-y', output_file.as_posix()
+            "ffmpeg",
+            "-hide_banner",
+            "-i",
+            input_path.as_posix(),
+            "-vf",
+            f"eq=saturation={saturation_level}",
+            "-y",
+            output_file.as_posix(),
         ]
 
         success, error = await self._run_ffmpeg(cmd)
@@ -1813,20 +2037,20 @@ class MediaProcessor:
 
     async def _adjust_hue(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
-            if 'hue_shift' not in kwargs:
+            if "hue_shift" not in kwargs:
                 raise ValueError("Missing 'hue_shift' parameter")
             return await self._adjust_hue_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("hue", e)
 
     async def _adjust_hue_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        hue_shift = kwargs['hue_shift']
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        hue_shift = kwargs["hue_shift"]
+        output_key = kwargs["output_key"]
 
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
@@ -1835,10 +2059,14 @@ class MediaProcessor:
         output_file = self._get_temp_path(input_path.suffix[1:])
 
         cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', input_path.as_posix(),
-            '-vf', f'hue=h={hue_shift}',
-            '-y', output_file.as_posix()
+            "ffmpeg",
+            "-hide_banner",
+            "-i",
+            input_path.as_posix(),
+            "-vf",
+            f"hue=h={hue_shift}",
+            "-y",
+            output_file.as_posix(),
         ]
 
         success, error = await self._run_ffmpeg(cmd)
@@ -1849,20 +2077,20 @@ class MediaProcessor:
 
     async def _adjust_brightness(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
-            if 'brightness_level' not in kwargs:
+            if "brightness_level" not in kwargs:
                 raise ValueError("Missing 'brightness_level' parameter")
             return await self._adjust_brightness_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("brightness", e)
 
     async def _adjust_brightness_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        brightness_level = kwargs['brightness_level']
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        brightness_level = kwargs["brightness_level"]
+        output_key = kwargs["output_key"]
 
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
@@ -1871,10 +2099,14 @@ class MediaProcessor:
         output_file = self._get_temp_path(input_path.suffix[1:])
 
         cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', input_path.as_posix(),
-            '-vf', f'eq=brightness={brightness_level}',
-            '-y', output_file.as_posix()
+            "ffmpeg",
+            "-hide_banner",
+            "-i",
+            input_path.as_posix(),
+            "-vf",
+            f"eq=brightness={brightness_level}",
+            "-y",
+            output_file.as_posix(),
         ]
 
         success, error = await self._run_ffmpeg(cmd)
@@ -1885,20 +2117,20 @@ class MediaProcessor:
 
     async def _adjust_gamma(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
-            if 'gamma_level' not in kwargs:
+            if "gamma_level" not in kwargs:
                 raise ValueError("Missing 'gamma_level' parameter")
             return await self._adjust_gamma_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("gamma", e)
 
     async def _adjust_gamma_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        gamma_level = kwargs['gamma_level']
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        gamma_level = kwargs["gamma_level"]
+        output_key = kwargs["output_key"]
 
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
@@ -1907,10 +2139,14 @@ class MediaProcessor:
         output_file = self._get_temp_path(input_path.suffix[1:])
 
         cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', input_path.as_posix(),
-            '-vf', f'eq=gamma={gamma_level}',
-            '-y', output_file.as_posix()
+            "ffmpeg",
+            "-hide_banner",
+            "-i",
+            input_path.as_posix(),
+            "-vf",
+            f"eq=gamma={gamma_level}",
+            "-y",
+            output_file.as_posix(),
         ]
 
         success, error = await self._run_ffmpeg(cmd)
@@ -1921,24 +2157,23 @@ class MediaProcessor:
 
     async def _clone_media(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
             return await self._clone_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("clone", e)
 
     async def _clone_media_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        output_key = kwargs["output_key"]
 
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
         input_path = Path(self.media_cache[input_key])
         output_file = self._get_temp_path(input_path.suffix[1:])
-
 
         shutil.copy(input_path, output_file)
 
@@ -1947,20 +2182,20 @@ class MediaProcessor:
 
     async def _change_fps(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
-            if 'fps_value' not in kwargs:
+            if "fps_value" not in kwargs:
                 raise ValueError("Missing 'fps_value' parameter")
             return await self._change_fps_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("fps", e)
 
     async def _change_fps_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        fps_value = kwargs['fps_value']
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        fps_value = kwargs["fps_value"]
+        output_key = kwargs["output_key"]
 
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
@@ -1969,10 +2204,14 @@ class MediaProcessor:
         output_file = self._get_temp_path(input_path.suffix[1:])
 
         cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', input_path.as_posix(),
-            '-vf', f'fps={fps_value}',
-            '-y', output_file.as_posix()
+            "ffmpeg",
+            "-hide_banner",
+            "-i",
+            input_path.as_posix(),
+            "-vf",
+            f"fps={fps_value}",
+            "-y",
+            output_file.as_posix(),
         ]
 
         success, error = await self._run_ffmpeg(cmd)
@@ -1983,17 +2222,17 @@ class MediaProcessor:
 
     async def _apply_grayscale(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
             return await self._apply_grayscale_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("grayscale", e)
 
     async def _apply_grayscale_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        output_key = kwargs["output_key"]
 
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
@@ -2002,10 +2241,14 @@ class MediaProcessor:
         output_file = self._get_temp_path(input_path.suffix[1:])
 
         cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', input_path.as_posix(),
-            '-vf', 'format=gray',
-            '-y', output_file.as_posix()
+            "ffmpeg",
+            "-hide_banner",
+            "-i",
+            input_path.as_posix(),
+            "-vf",
+            "format=gray",
+            "-y",
+            output_file.as_posix(),
         ]
 
         success, error = await self._run_ffmpeg(cmd)
@@ -2016,17 +2259,17 @@ class MediaProcessor:
 
     async def _apply_sepia(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
             return await self._apply_sepia_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("sepia", e)
 
     async def _apply_sepia_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        output_key = kwargs["output_key"]
 
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
@@ -2035,10 +2278,14 @@ class MediaProcessor:
         output_file = self._get_temp_path(input_path.suffix[1:])
 
         cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', input_path.as_posix(),
-            '-vf', 'colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131',
-            '-y', output_file.as_posix()
+            "ffmpeg",
+            "-hide_banner",
+            "-i",
+            input_path.as_posix(),
+            "-vf",
+            "colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131",
+            "-y",
+            output_file.as_posix(),
         ]
 
         success, error = await self._run_ffmpeg(cmd)
@@ -2049,17 +2296,17 @@ class MediaProcessor:
 
     async def _invert_media(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
             return await self._invert_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("invert", e)
 
     async def _invert_media_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        output_key = kwargs["output_key"]
 
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
@@ -2068,10 +2315,14 @@ class MediaProcessor:
         output_file = self._get_temp_path(input_path.suffix[1:])
 
         cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', input_path.as_posix(),
-            '-vf', 'negate',
-            '-y', output_file.as_posix()
+            "ffmpeg",
+            "-hide_banner",
+            "-i",
+            input_path.as_posix(),
+            "-vf",
+            "negate",
+            "-y",
+            output_file.as_posix(),
         ]
 
         success, error = await self._run_ffmpeg(cmd)
@@ -2082,23 +2333,23 @@ class MediaProcessor:
 
     async def _resize_media(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
-            if 'width' not in kwargs:
+            if "width" not in kwargs:
                 raise ValueError("Missing 'width' parameter")
-            if 'height' not in kwargs:
+            if "height" not in kwargs:
                 raise ValueError("Missing 'height' parameter")
             return await self._resize_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("resize", e)
 
     async def _resize_media_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        width_expr = kwargs.get('width', 0)
-        height_expr = kwargs.get('height', 0)
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        width_expr = kwargs.get("width", 0)
+        height_expr = kwargs.get("height", 0)
+        output_key = kwargs["output_key"]
         if not all([input_key, width_expr, height_expr, output_key]):
             return "Error: Missing required parameters"
         if input_key not in self.media_cache:
@@ -2106,7 +2357,19 @@ class MediaProcessor:
 
         input_path = Path(self.media_cache[input_key])
         suffix = input_path.suffix.lower()
-        allowed_suffixes = ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv', '.gif', '.png', '.jpg', '.jpeg', '.webp')
+        allowed_suffixes = (
+            ".mp4",
+            ".mov",
+            ".webm",
+            ".mkv",
+            ".avi",
+            ".wmv",
+            ".gif",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".webp",
+        )
         if suffix not in allowed_suffixes:
             return f"Error: {input_key} is not a video or image file."
         output_file = self._get_temp_path(input_path.suffix[1:])
@@ -2115,10 +2378,14 @@ class MediaProcessor:
         height = await self._resolve_dimension(height_expr, input_key)
 
         cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', input_path.as_posix(),
-            '-vf', f'scale={width}:{height}',
-            '-y', output_file.as_posix()
+            "ffmpeg",
+            "-hide_banner",
+            "-i",
+            input_path.as_posix(),
+            "-vf",
+            f"scale={width}:{height}",
+            "-y",
+            output_file.as_posix(),
         ]
         success, error = await self._run_ffmpeg(cmd)
         if success:
@@ -2128,44 +2395,60 @@ class MediaProcessor:
 
     async def _crop_media(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
-            if 'x' not in kwargs:
+            if "x" not in kwargs:
                 raise ValueError("Missing 'x' parameter")
-            if 'y' not in kwargs:
+            if "y" not in kwargs:
                 raise ValueError("Missing 'y' parameter")
-            if 'width' not in kwargs:
+            if "width" not in kwargs:
                 raise ValueError("Missing 'width' parameter")
-            if 'height' not in kwargs:
+            if "height" not in kwargs:
                 raise ValueError("Missing 'height' parameter")
             return await self._crop_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("crop", e)
 
     async def _crop_media_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        x = kwargs['x']
-        y = kwargs['y']
-        width = await self._resolve_dimension(kwargs['width'], context_key=input_key)
-        height = await self._resolve_dimension(kwargs['height'], context_key=input_key)
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        x = kwargs["x"]
+        y = kwargs["y"]
+        width = await self._resolve_dimension(kwargs["width"], context_key=input_key)
+        height = await self._resolve_dimension(kwargs["height"], context_key=input_key)
+        output_key = kwargs["output_key"]
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
         input_path = Path(self.media_cache[input_key])
         suffix = input_path.suffix.lower()
-        allowed_suffixes = ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv', '.gif', '.png', '.jpg', '.jpeg', '.webp')
+        allowed_suffixes = (
+            ".mp4",
+            ".mov",
+            ".webm",
+            ".mkv",
+            ".avi",
+            ".wmv",
+            ".gif",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".webp",
+        )
         if suffix not in allowed_suffixes:
             return f"Error: {input_key} is not a video or image file."
         output_file = self._get_temp_path(input_path.suffix[1:])
 
         cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', input_path.as_posix(),
-            '-vf', f'crop={width}:{height}:{x}:{y}',
-            '-y', output_file.as_posix()
+            "ffmpeg",
+            "-hide_banner",
+            "-i",
+            input_path.as_posix(),
+            "-vf",
+            f"crop={width}:{height}:{x}:{y}",
+            "-y",
+            output_file.as_posix(),
         ]
         success, error = await self._run_ffmpeg(cmd)
         if success:
@@ -2175,35 +2458,51 @@ class MediaProcessor:
 
     async def _rotate_media(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
-            if 'angle' not in kwargs:
+            if "angle" not in kwargs:
                 raise ValueError("Missing 'angle' parameter")
             return await self._rotate_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("rotate", e)
 
     async def _rotate_media_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        angle = kwargs['angle']
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        angle = kwargs["angle"]
+        output_key = kwargs["output_key"]
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
         input_path = Path(self.media_cache[input_key])
         suffix = input_path.suffix.lower()
-        allowed_suffixes = ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv', '.gif', '.png', '.jpg', '.jpeg', '.webp')
+        allowed_suffixes = (
+            ".mp4",
+            ".mov",
+            ".webm",
+            ".mkv",
+            ".avi",
+            ".wmv",
+            ".gif",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".webp",
+        )
         if suffix not in allowed_suffixes:
             return f"Error: {input_key} is not a video or image file."
         output_file = self._get_temp_path(input_path.suffix[1:])
 
         cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', input_path.as_posix(),
-            '-vf', f'rotate={angle}',
-            '-y', output_file.as_posix()
+            "ffmpeg",
+            "-hide_banner",
+            "-i",
+            input_path.as_posix(),
+            "-vf",
+            f"rotate={angle}",
+            "-y",
+            output_file.as_posix(),
         ]
         success, error = await self._run_ffmpeg(cmd)
         if success:
@@ -2211,26 +2510,29 @@ class MediaProcessor:
             return f"media://{output_file.as_posix()}"
         return error
 
-
     async def _trim_media(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
-            if 'start_time' not in kwargs:
+            if "start_time" not in kwargs:
                 raise ValueError("Missing 'start_time' parameter")
-            if 'end_time' not in kwargs:
+            if "end_time" not in kwargs:
                 raise ValueError("Missing 'end_time' parameter")
             return await self._trim_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("trim", e)
 
     async def _trim_media_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        start_time = await self._resolve_timestamp(kwargs['input_key'], kwargs['start_time'])
-        end_time = await self._resolve_timestamp(kwargs['input_key'], kwargs['end_time'])
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        start_time = await self._resolve_timestamp(
+            kwargs["input_key"], kwargs["start_time"]
+        )
+        end_time = await self._resolve_timestamp(
+            kwargs["input_key"], kwargs["end_time"]
+        )
+        output_key = kwargs["output_key"]
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
@@ -2238,11 +2540,16 @@ class MediaProcessor:
         output_file = self._get_temp_path(input_path.suffix[1:])
 
         cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', input_path.as_posix(),
-            '-ss', start_time,
-            '-to', end_time,
-            '-y', output_file.as_posix()
+            "ffmpeg",
+            "-hide_banner",
+            "-i",
+            input_path.as_posix(),
+            "-ss",
+            start_time,
+            "-to",
+            end_time,
+            "-y",
+            output_file.as_posix(),
         ]
         success, error = await self._run_ffmpeg(cmd)
         if success:
@@ -2252,20 +2559,20 @@ class MediaProcessor:
 
     async def _change_speed(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
-            if 'speed' not in kwargs:
+            if "speed" not in kwargs:
                 raise ValueError("Missing 'speed' parameter")
             return await self._change_speed_impl(**kwargs)
         except ValueError as e:
             return f"Speed error: {str(e)}"
 
     async def _change_speed_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        speed = kwargs['speed']
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        speed = kwargs["speed"]
+        output_key = kwargs["output_key"]
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
@@ -2276,28 +2583,42 @@ class MediaProcessor:
             speed = float(speed)
         except ValueError:
             return f"Error: invalid speed value `{speed}`. Must be a number."
-        if suffix in ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv'):
+        if suffix in (".mp4", ".mov", ".webm", ".mkv", ".avi", ".wmv"):
             cmd = [
-                'ffmpeg', '-hide_banner',
-                '-i', input_path.as_posix(),
-                '-filter_complex', f'[0:v]setpts={1/speed}*PTS[v];[0:a]atempo={speed}[a]',
-                '-map', '[v]',
-                '-map', '[a]',
-                '-y', output_file.as_posix()
+                "ffmpeg",
+                "-hide_banner",
+                "-i",
+                input_path.as_posix(),
+                "-filter_complex",
+                f"[0:v]setpts={1 / speed}*PTS[v];[0:a]atempo={speed}[a]",
+                "-map",
+                "[v]",
+                "-map",
+                "[a]",
+                "-y",
+                output_file.as_posix(),
             ]
-        elif suffix in '.gif':
+        elif suffix in ".gif":
             cmd = [
-                'ffmpeg', '-hide_banner',
-                '-i', input_path.as_posix(),
-                '-vf', f'setpts={1/speed}*PTS',
-                '-y', output_file.as_posix()
+                "ffmpeg",
+                "-hide_banner",
+                "-i",
+                input_path.as_posix(),
+                "-vf",
+                f"setpts={1 / speed}*PTS",
+                "-y",
+                output_file.as_posix(),
             ]
         else:
             cmd = [
-                'ffmpeg', '-hide_banner',
-                '-i', input_path.as_posix(),
-                '-af', f'atempo={speed}',
-                '-y', output_file.as_posix()
+                "ffmpeg",
+                "-hide_banner",
+                "-i",
+                input_path.as_posix(),
+                "-af",
+                f"atempo={speed}",
+                "-y",
+                output_file.as_posix(),
             ]
         success, error = await self._run_ffmpeg(cmd)
         if success:
@@ -2307,35 +2628,54 @@ class MediaProcessor:
 
     async def _adjust_volume(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
-            if 'volume_level' not in kwargs:
+            if "volume_level" not in kwargs:
                 raise ValueError("Missing 'volume_level' parameter")
             return await self._adjust_volume_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("volume", e)
 
     async def _adjust_volume_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        volume_level = kwargs['volume_level']
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        volume_level = kwargs["volume_level"]
+        output_key = kwargs["output_key"]
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
         input_path = Path(self.media_cache[input_key])
         suffix = input_path.suffix.lower()
-        allowed_suffixes = ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv', '.mp3', '.ogg', '.wav', '.opus', '.flac', '.m4a', '.wma', '.mka')
+        allowed_suffixes = (
+            ".mp4",
+            ".mov",
+            ".webm",
+            ".mkv",
+            ".avi",
+            ".wmv",
+            ".mp3",
+            ".ogg",
+            ".wav",
+            ".opus",
+            ".flac",
+            ".m4a",
+            ".wma",
+            ".mka",
+        )
         if suffix not in allowed_suffixes:
             return f"Error: {input_key} is not a video or audio file."
         output_file = self._get_temp_path(input_path.suffix[1:])
 
         cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', input_path.as_posix(),
-            '-af', f'volume={volume_level}',
-            '-y', output_file.as_posix()
+            "ffmpeg",
+            "-hide_banner",
+            "-i",
+            input_path.as_posix(),
+            "-af",
+            f"volume={volume_level}",
+            "-y",
+            output_file.as_posix(),
         ]
         success, error = await self._run_ffmpeg(cmd)
         if success:
@@ -2345,29 +2685,29 @@ class MediaProcessor:
 
     async def _overlay_media(self, **kwargs) -> str:
         try:
-            if 'base_key' not in kwargs:
+            if "base_key" not in kwargs:
                 raise ValueError("Missing 'base_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
-            if 'overlay_key' not in kwargs:
+            if "overlay_key" not in kwargs:
                 raise ValueError("Missing 'overlay_key' parameter")
-            if 'x' not in kwargs:
+            if "x" not in kwargs:
                 raise ValueError("Missing 'x' parameter")
-            if 'y' not in kwargs:
+            if "y" not in kwargs:
                 raise ValueError("Missing 'y' parameter")
             return await self._overlay_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("overlay", e)
 
     async def _overlay_media_impl(self, **kwargs) -> str:
-        base_key = kwargs['base_key']
-        overlay_key = kwargs['overlay_key']
-        x = kwargs['x']
-        y = kwargs['y']
-        output_key = kwargs['output_key']
-        loop_media = kwargs.get('loop_media', False)
-        loop_overlay = kwargs.get('loop_overlay', False)
-        preserve_length = kwargs.get('preserve_length', True)
+        base_key = kwargs["base_key"]
+        overlay_key = kwargs["overlay_key"]
+        x = kwargs["x"]
+        y = kwargs["y"]
+        output_key = kwargs["output_key"]
+        loop_media = kwargs.get("loop_media", False)
+        loop_overlay = kwargs.get("loop_overlay", False)
+        preserve_length = kwargs.get("preserve_length", True)
 
         if base_key not in self.media_cache or overlay_key not in self.media_cache:
             return f"Error: One of the media keys not found"
@@ -2375,22 +2715,28 @@ class MediaProcessor:
         base_path = Path(self.media_cache[base_key])
         overlay_path = Path(self.media_cache[overlay_key])
 
-        is_base_gif = base_path.suffix.lower() == '.gif'
-        is_overlay_gif = overlay_path.suffix.lower() == '.gif'
-        is_base_static_image = base_path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp') and not is_base_gif
-        is_overlay_static_image = overlay_path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp') and not is_overlay_gif
+        is_base_gif = base_path.suffix.lower() == ".gif"
+        is_overlay_gif = overlay_path.suffix.lower() == ".gif"
+        is_base_static_image = (
+            base_path.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")
+            and not is_base_gif
+        )
+        is_overlay_static_image = (
+            overlay_path.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")
+            and not is_overlay_gif
+        )
 
         base_dims = await self._get_media_dimensions(base_key)
         if not base_dims:
             return "Error: Could not get base dimensions"
         width, height = base_dims
 
-        animated_exts = ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv')
+        animated_exts = (".mp4", ".mov", ".webm", ".mkv", ".avi", ".wmv")
         base_is_animated = base_path.as_posix().endswith(animated_exts)
         overlay_is_animated = overlay_path.as_posix().endswith(animated_exts)
 
         if is_base_gif and is_overlay_gif:
-            out_ext = 'gif'
+            out_ext = "gif"
         elif base_is_animated:
             out_ext = base_path.suffix.lower()[1:]
         elif overlay_is_animated:
@@ -2400,31 +2746,43 @@ class MediaProcessor:
 
         output_file = self._get_temp_path(out_ext)
 
-        cmd = ['ffmpeg', '-hide_banner', '-y']
+        cmd = ["ffmpeg", "-hide_banner", "-y"]
 
         if is_base_static_image:
-            cmd += ['-loop', '1', '-framerate', '30']
+            cmd += ["-loop", "1", "-framerate", "30"]
         elif loop_media:
-            cmd += ['-stream_loop', '-1']
-        cmd += ['-i', base_path.as_posix()]
+            cmd += ["-stream_loop", "-1"]
+        cmd += ["-i", base_path.as_posix()]
 
         if is_overlay_static_image:
-            cmd += ['-loop', '1', '-framerate', '30']
+            cmd += ["-loop", "1", "-framerate", "30"]
         elif loop_overlay:
-            cmd += ['-stream_loop', '-1']
-        cmd += ['-i', overlay_path.as_posix()]
+            cmd += ["-stream_loop", "-1"]
+        cmd += ["-i", overlay_path.as_posix()]
 
-        _, _, base_duration, has_audio_base = await self._probe_media_info(base_path) or (None, None, 0.0, False)
-        _, _, overlay_duration, has_audio_overlay = await self._probe_media_info(overlay_path) or (None, None, 0.0, False)
+        _, _, base_duration, has_audio_base = await self._probe_media_info(
+            base_path
+        ) or (None, None, 0.0, False)
+        _, _, overlay_duration, has_audio_overlay = await self._probe_media_info(
+            overlay_path
+        ) or (None, None, 0.0, False)
 
         base_duration = float(base_duration) if base_duration else 0.0
         overlay_duration = float(overlay_duration) if overlay_duration else 0.0
 
         duration = None
         if preserve_length and not (loop_media or loop_overlay):
-            if is_base_static_image and not is_overlay_static_image and overlay_duration > 0:
+            if (
+                is_base_static_image
+                and not is_overlay_static_image
+                and overlay_duration > 0
+            ):
                 duration = overlay_duration
-            elif not is_base_static_image and is_overlay_static_image and base_duration > 0:
+            elif (
+                not is_base_static_image
+                and is_overlay_static_image
+                and base_duration > 0
+            ):
                 duration = base_duration
             elif is_base_static_image and is_overlay_static_image:
                 duration = 1.0
@@ -2439,46 +2797,58 @@ class MediaProcessor:
             should_apply_shortest = True
 
         filters = []
-        input_format = 'rgba' if out_ext == 'gif' else 'yuva420p'
+        input_format = "rgba" if out_ext == "gif" else "yuva420p"
 
         filters.append(f"[1:v]format={input_format}[ov]")
         filters.append(f"[0:v][ov]overlay=x={x}:y={y}[tmp]")
 
-        if out_ext in ('mp4', 'mkv', 'mov', 'webm', 'avi', 'wmv'):
+        if out_ext in ("mp4", "mkv", "mov", "webm", "avi", "wmv"):
             out_w = (width + 1) // 2 * 2
             out_h = (height + 1) // 2 * 2
-            pad_color = "black@0" if base_path.suffix.lower() in ('.png', '.webp', '.gif') else "black"
-            filters.append(f"[tmp]pad=width={out_w}:height={out_h}:x=(ow-iw)/2:y=(oh-ih)/2:color={pad_color}[v]")
+            pad_color = (
+                "black@0"
+                if base_path.suffix.lower() in (".png", ".webp", ".gif")
+                else "black"
+            )
+            filters.append(
+                f"[tmp]pad=width={out_w}:height={out_h}:x=(ow-iw)/2:y=(oh-ih)/2:color={pad_color}[v]"
+            )
         else:
             filters.append(f"[tmp]format=rgba[v]")
 
         if has_audio_base and has_audio_overlay:
             filters.append(f"[0:a][1:a]amix=inputs=2:duration=longest[a]")
-            cmd += ['-filter_complex', ';'.join(filters)]
-            cmd += ['-map', '[v]', '-map', '[a]']
+            cmd += ["-filter_complex", ";".join(filters)]
+            cmd += ["-map", "[v]", "-map", "[a]"]
         else:
-            cmd += ['-filter_complex', ';'.join(filters)]
-            cmd += ['-map', '[v]']
-            if has_audio_base and out_ext not in ('gif', 'png', 'webp', 'jpg', 'jpeg'):
-                cmd += ['-map', '0:a']
-            elif has_audio_overlay and out_ext not in ('gif', 'png', 'webp', 'jpg', 'jpeg'):
-                cmd += ['-map', '1:a']
+            cmd += ["-filter_complex", ";".join(filters)]
+            cmd += ["-map", "[v]"]
+            if has_audio_base and out_ext not in ("gif", "png", "webp", "jpg", "jpeg"):
+                cmd += ["-map", "0:a"]
+            elif has_audio_overlay and out_ext not in (
+                "gif",
+                "png",
+                "webp",
+                "jpg",
+                "jpeg",
+            ):
+                cmd += ["-map", "1:a"]
             else:
-                cmd += ['-an']
+                cmd += ["-an"]
 
-        if out_ext == 'gif':
-            cmd += ['-f', 'gif', '-gifflags', '+transdiff']
-        elif out_ext == 'png':
-            cmd += ['-f', 'image2', '-update', '1', '-frames:v', '1']
-        elif out_ext == 'webp':
-            cmd += ['-f', 'webp', '-loop', '0']
-        elif out_ext == 'mp4':
-            cmd += ['-movflags', '+faststart']
+        if out_ext == "gif":
+            cmd += ["-f", "gif", "-gifflags", "+transdiff"]
+        elif out_ext == "png":
+            cmd += ["-f", "image2", "-update", "1", "-frames:v", "1"]
+        elif out_ext == "webp":
+            cmd += ["-f", "webp", "-loop", "0"]
+        elif out_ext == "mp4":
+            cmd += ["-movflags", "+faststart"]
 
         if duration > 0:
-            cmd += ['-t', str(duration)]
+            cmd += ["-t", str(duration)]
         elif should_apply_shortest:
-            cmd += ['-shortest']
+            cmd += ["-shortest"]
 
         cmd.append(output_file.as_posix())
 
@@ -2489,51 +2859,55 @@ class MediaProcessor:
         return error
 
     async def load_font(self, font_name: str, font_size: int) -> ImageFont.FreeTypeFont:
+        try:
+            font = await asyncio.to_thread(
+                ImageFont.truetype, font=font_name, size=font_size
+            )
+            return font
+        except Exception:
+            pass
+
+        try:
+            matches = []
+            for f in matplotlib.font_manager.fontManager.ttflist:
+                if f.name.lower() == font_name.lower():
+                    matches.append(f.fname)
+                    try:
+                        font = await asyncio.to_thread(
+                            ImageFont.truetype, f.fname, font_size
+                        )
+                        return font
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+
+        system_paths = [
+            f"C:/Windows/Fonts/{font_name.replace(' ', '')}.ttf",
+            f"C:/Windows/Fonts/{font_name.replace(' ', '')}.otf",
+            f"/Library/Fonts/{font_name}.ttf",
+            f"/Library/Fonts/{font_name}.otf",
+            f"/usr/share/fonts/truetype/{font_name.replace(' ', '')}.ttf",
+            f"/usr/local/share/fonts/{font_name.replace(' ', '')}.ttf",
+            f"/usr/share/fonts/custom{font_name.replace(' ', '')}.ttf",
+            f"/usr/share/fonts/custom{font_name.replace(' ', '')}.otf",
+        ]
+        for path in system_paths:
             try:
-                font = await asyncio.to_thread(ImageFont.truetype, font=font_name, size=font_size)
+                font = await asyncio.to_thread(ImageFont.truetype, path, font_size)
                 return font
             except Exception:
                 pass
 
-            try:
-                matches = []
-                for f in matplotlib.font_manager.fontManager.ttflist:
-                    if f.name.lower() == font_name.lower():
-                        matches.append(f.fname)
-                        try:
-                            font = await asyncio.to_thread(ImageFont.truetype, f.fname, font_size)
-                            return font
-                        except Exception:
-                            continue
-            except Exception:
-                pass
-
-            system_paths = [
-                f"C:/Windows/Fonts/{font_name.replace(' ', '')}.ttf",
-                f"C:/Windows/Fonts/{font_name.replace(' ', '')}.otf",
-                f"/Library/Fonts/{font_name}.ttf",
-                f"/Library/Fonts/{font_name}.otf",
-                f"/usr/share/fonts/truetype/{font_name.replace(' ', '')}.ttf",
-                f"/usr/local/share/fonts/{font_name.replace(' ', '')}.ttf",
-                f"/usr/share/fonts/custom{font_name.replace(' ', '')}.ttf",
-                f"/usr/share/fonts/custom{font_name.replace(' ', '')}.otf"
-            ]
-            for path in system_paths:
-                try:
-                    font = await asyncio.to_thread(ImageFont.truetype, path, font_size)
-                    return font
-                except Exception:
-                    pass
-
-            return await asyncio.to_thread(ImageFont.load_default)
+        return await asyncio.to_thread(ImageFont.load_default)
 
     async def _text(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
-            if 'text' not in kwargs:
+            if "text" not in kwargs:
                 raise ValueError("Missing 'text' parameter")
             return await self._text_impl(**kwargs)
         except Exception as e:
@@ -2557,44 +2931,46 @@ class MediaProcessor:
                 if not codepoints:
                     return None
 
-                codepoint = '-'.join(codepoints)
+                codepoint = "-".join(codepoints)
                 url = f"https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/72x72/{codepoint}.png"
 
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url) as resp:
                         if resp.status == 200:
                             emoji_data = await resp.read()
-                            emoji_img = await asyncio.to_thread(Image.open, BytesIO(emoji_data))
-                            return await asyncio.to_thread(emoji_img.convert, 'RGBA')
+                            emoji_img = await asyncio.to_thread(
+                                Image.open, BytesIO(emoji_data)
+                            )
+                            return await asyncio.to_thread(emoji_img.convert, "RGBA")
             except Exception:
                 return None
 
         try:
-            input_key = kwargs['input_key']
-            text = kwargs['text']
-            x_raw = kwargs.get('x', '0')
-            y_raw = kwargs.get('y', '0')
-            font_size = kwargs['font_size']
-            color = kwargs['color']
-            output_key = kwargs['output_key']
-            font_name = kwargs['font']
+            input_key = kwargs["input_key"]
+            text = kwargs["text"]
+            x_raw = kwargs.get("x", "0")
+            y_raw = kwargs.get("y", "0")
+            font_size = kwargs["font_size"]
+            color = kwargs["color"]
+            output_key = kwargs["output_key"]
+            font_name = kwargs["font"]
 
-            outline_color = kwargs.get('outline_color', None)
-            outline_width = kwargs.get('outline_width', None)
+            outline_color = kwargs.get("outline_color", None)
+            outline_width = kwargs.get("outline_width", None)
 
-            shadow_color = kwargs.get('shadow_color', None)
-            shadow_offset = kwargs.get('shadow_offset', 2)
-            shadow_blur = kwargs.get('shadow_blur', 0)
+            shadow_color = kwargs.get("shadow_color", None)
+            shadow_offset = kwargs.get("shadow_offset", 2)
+            shadow_blur = kwargs.get("shadow_blur", 0)
 
-            wrap_width = kwargs.get('wrap_width', None)
-            line_spacing = kwargs.get('line_spacing', 5)
+            wrap_width = kwargs.get("wrap_width", None)
+            line_spacing = kwargs.get("line_spacing", 5)
 
             if input_key not in self.media_cache:
                 return f"Error: {input_key} not found"
 
             input_path = Path(self.media_cache[input_key])
             base_img = await asyncio.to_thread(Image.open, input_path)
-            base_img = await asyncio.to_thread(base_img.convert, 'RGBA')
+            base_img = await asyncio.to_thread(base_img.convert, "RGBA")
 
             font = await self.load_font(font_name, font_size)
             if not isinstance(font, ImageFont.FreeTypeFont):
@@ -2603,7 +2979,7 @@ class MediaProcessor:
             draw = await asyncio.to_thread(ImageDraw.Draw, base_img)
 
             def wrap_text(draw, text, font, max_width):
-                words = text.split(' ')
+                words = text.split(" ")
                 lines = []
                 current_line = ""
                 for word in words:
@@ -2623,7 +2999,10 @@ class MediaProcessor:
                 lines = [text]
 
             text_width = max(get_text_size(font, line)[0] for line in lines)
-            text_height_total = sum(get_text_size(font, line)[1] + line_spacing for line in lines) - line_spacing
+            text_height_total = (
+                sum(get_text_size(font, line)[1] + line_spacing for line in lines)
+                - line_spacing
+            )
 
             if str(x_raw).lower() == "center":
                 x = (base_img.width - text_width) // 2
@@ -2635,39 +3014,55 @@ class MediaProcessor:
             else:
                 y = await self._resolve_dimension(y_raw, input_key)
 
-
-            txt_layer = await asyncio.to_thread(Image.new, 'L', base_img.size, 0)
+            txt_layer = await asyncio.to_thread(Image.new, "L", base_img.size, 0)
             txt_draw = await asyncio.to_thread(ImageDraw.Draw, txt_layer)
 
             cur_y = y
             for line in lines:
                 line_width, line_height = get_text_size(font, line)
-                cur_x = (base_img.width - line_width) // 2 if str(x_raw).lower() == "center" else x
+                cur_x = (
+                    (base_img.width - line_width) // 2
+                    if str(x_raw).lower() == "center"
+                    else x
+                )
                 char_x = cur_x
                 i = 0
                 while i < len(line):
                     char = line[i]
-                    if ord(char) >= 0x1F600 and ord(char) <= 0x1F64F or ord(char) >= 0x1F300 and ord(char) <= 0x1F5FF:
+                    if (
+                        ord(char) >= 0x1F600
+                        and ord(char) <= 0x1F64F
+                        or ord(char) >= 0x1F300
+                        and ord(char) <= 0x1F5FF
+                    ):
                         emoji_end = i + 1
-                        while emoji_end < len(line) and (line[emoji_end] in '\uFE0F\u200D' or 0x1F3FB <= ord(line[emoji_end]) <= 0x1F3FF):
+                        while emoji_end < len(line) and (
+                            line[emoji_end] in "\ufe0f\u200d"
+                            or 0x1F3FB <= ord(line[emoji_end]) <= 0x1F3FF
+                        ):
                             emoji_end += 1
                         emoji = line[i:emoji_end]
                         emoji_img = await download_twemoji(emoji)
                         if emoji_img:
                             emoji_size = int(font_size)
-                            emoji_img = await asyncio.to_thread(emoji_img.resize, (emoji_size, emoji_size))
-                            await asyncio.to_thread(txt_layer.paste, emoji_img, (char_x, cur_y), emoji_img)
+                            emoji_img = await asyncio.to_thread(
+                                emoji_img.resize, (emoji_size, emoji_size)
+                            )
+                            await asyncio.to_thread(
+                                txt_layer.paste, emoji_img, (char_x, cur_y), emoji_img
+                            )
                             char_x += emoji_size
                             i = emoji_end
                             continue
-                    await asyncio.to_thread(txt_draw.text, (char_x, cur_y), char, font=font, fill=255)
+                    await asyncio.to_thread(
+                        txt_draw.text, (char_x, cur_y), char, font=font, fill=255
+                    )
                     char_x += get_text_size(font, char)[0]
                     i += 1
                 cur_y += line_height + line_spacing
 
-
             if shadow_color:
-                shadow_layer = await asyncio.to_thread(Image.new, 'L', base_img.size, 0)
+                shadow_layer = await asyncio.to_thread(Image.new, "L", base_img.size, 0)
                 shadow_draw = await asyncio.to_thread(ImageDraw.Draw, shadow_layer)
                 ox = int(shadow_offset)
                 oy = int(shadow_offset)
@@ -2675,70 +3070,132 @@ class MediaProcessor:
                 cur_y = y
                 for line in lines:
                     line_width, line_height = get_text_size(font, line)
-                    cur_x = (base_img.width - line_width) // 2 if str(x_raw).lower() == "center" else x
-                    await asyncio.to_thread(shadow_draw.text, (cur_x+ox, cur_y+oy), line, font=font, fill=255)
+                    cur_x = (
+                        (base_img.width - line_width) // 2
+                        if str(x_raw).lower() == "center"
+                        else x
+                    )
+                    await asyncio.to_thread(
+                        shadow_draw.text,
+                        (cur_x + ox, cur_y + oy),
+                        line,
+                        font=font,
+                        fill=255,
+                    )
                     cur_y += line_height + line_spacing
 
                 if shadow_blur > 0:
-                    shadow_layer = await asyncio.to_thread(shadow_layer.filter, ImageFilter.GaussianBlur(radius=shadow_blur))
+                    shadow_layer = await asyncio.to_thread(
+                        shadow_layer.filter,
+                        ImageFilter.GaussianBlur(radius=shadow_blur),
+                    )
 
-                shadow_img = await asyncio.to_thread(Image.new, 'RGBA', base_img.size, (0,0,0,0))
-                shadow_color_parsed = await asyncio.to_thread(self._parse_color, shadow_color, base_img.size)
+                shadow_img = await asyncio.to_thread(
+                    Image.new, "RGBA", base_img.size, (0, 0, 0, 0)
+                )
+                shadow_color_parsed = await asyncio.to_thread(
+                    self._parse_color, shadow_color, base_img.size
+                )
 
                 if isinstance(shadow_color_parsed, tuple):
-                    await asyncio.to_thread(shadow_img.paste, shadow_color_parsed, (0, 0), mask=shadow_layer)
+                    await asyncio.to_thread(
+                        shadow_img.paste, shadow_color_parsed, (0, 0), mask=shadow_layer
+                    )
                 else:
-                    await asyncio.to_thread(shadow_img.paste, shadow_color_parsed, (0, 0), mask=shadow_layer)
+                    await asyncio.to_thread(
+                        shadow_img.paste, shadow_color_parsed, (0, 0), mask=shadow_layer
+                    )
 
-                base_img = await asyncio.to_thread(Image.alpha_composite, base_img, shadow_img)
-
+                base_img = await asyncio.to_thread(
+                    Image.alpha_composite, base_img, shadow_img
+                )
 
             if outline_color:
                 if outline_width is None:
                     outline_width = max(1, font_size // 20)
 
-                outline_layer = await asyncio.to_thread(Image.new, 'L', base_img.size, 0)
+                outline_layer = await asyncio.to_thread(
+                    Image.new, "L", base_img.size, 0
+                )
                 outline_draw = await asyncio.to_thread(ImageDraw.Draw, outline_layer)
 
-                for dx in range(-outline_width, outline_width+1):
-                    for dy in range(-outline_width, outline_width+1):
-                        if dx*dx + dy*dy <= outline_width*outline_width:
+                for dx in range(-outline_width, outline_width + 1):
+                    for dy in range(-outline_width, outline_width + 1):
+                        if dx * dx + dy * dy <= outline_width * outline_width:
                             cur_y = y
                             for line in lines:
                                 line_width, line_height = get_text_size(font, line)
-                                cur_x = (base_img.width - line_width) // 2 if str(x_raw).lower() == "center" else x
-                                await asyncio.to_thread(outline_draw.text, (cur_x+dx, cur_y+dy), line, font=font, fill=255)
+                                cur_x = (
+                                    (base_img.width - line_width) // 2
+                                    if str(x_raw).lower() == "center"
+                                    else x
+                                )
+                                await asyncio.to_thread(
+                                    outline_draw.text,
+                                    (cur_x + dx, cur_y + dy),
+                                    line,
+                                    font=font,
+                                    fill=255,
+                                )
                                 cur_y += line_height + line_spacing
 
-                outline_img = await asyncio.to_thread(Image.new, 'RGBA', base_img.size, (0,0,0,0))
-                outline_color_parsed = await asyncio.to_thread(self._parse_color, outline_color, base_img.size)
+                outline_img = await asyncio.to_thread(
+                    Image.new, "RGBA", base_img.size, (0, 0, 0, 0)
+                )
+                outline_color_parsed = await asyncio.to_thread(
+                    self._parse_color, outline_color, base_img.size
+                )
 
                 if isinstance(outline_color_parsed, tuple):
-                    await asyncio.to_thread(outline_img.paste, outline_color_parsed, (0, 0), mask=outline_layer)
+                    await asyncio.to_thread(
+                        outline_img.paste,
+                        outline_color_parsed,
+                        (0, 0),
+                        mask=outline_layer,
+                    )
                 else:
-                    await asyncio.to_thread(outline_img.paste, outline_color_parsed, (0, 0), mask=outline_layer)
+                    await asyncio.to_thread(
+                        outline_img.paste,
+                        outline_color_parsed,
+                        (0, 0),
+                        mask=outline_layer,
+                    )
 
-                base_img = await asyncio.to_thread(Image.alpha_composite, base_img, outline_img)
-
+                base_img = await asyncio.to_thread(
+                    Image.alpha_composite, base_img, outline_img
+                )
 
             bbox = txt_layer.getbbox()
             if not bbox:
                 return "Error: Text bounding box could not be determined"
 
-
-            gradient_img = await asyncio.to_thread(self._parse_color, color, (bbox[2]-bbox[0], bbox[3]-bbox[1]))
+            gradient_img = await asyncio.to_thread(
+                self._parse_color, color, (bbox[2] - bbox[0], bbox[3] - bbox[1])
+            )
             result = await asyncio.to_thread(base_img.copy)
 
             if isinstance(gradient_img, Image.Image):
-                gradient_layer = await asyncio.to_thread(Image.new, 'RGBA', base_img.size, (0,0,0,0))
-                gradient_crop = await asyncio.to_thread(gradient_img.crop, (0, 0, bbox[2]-bbox[0], bbox[3]-bbox[1]))
-                await asyncio.to_thread(gradient_layer.paste, gradient_crop, (bbox[0], bbox[1]))
-                await asyncio.to_thread(result.paste, gradient_layer, (0, 0), mask=txt_layer)
+                gradient_layer = await asyncio.to_thread(
+                    Image.new, "RGBA", base_img.size, (0, 0, 0, 0)
+                )
+                gradient_crop = await asyncio.to_thread(
+                    gradient_img.crop, (0, 0, bbox[2] - bbox[0], bbox[3] - bbox[1])
+                )
+                await asyncio.to_thread(
+                    gradient_layer.paste, gradient_crop, (bbox[0], bbox[1])
+                )
+                await asyncio.to_thread(
+                    result.paste, gradient_layer, (0, 0), mask=txt_layer
+                )
             else:
-                solid_color = await asyncio.to_thread(Image.new, 'RGBA', base_img.size, gradient_img)
-                await asyncio.to_thread(result.paste, solid_color, (0, 0), mask=txt_layer)
+                solid_color = await asyncio.to_thread(
+                    Image.new, "RGBA", base_img.size, gradient_img
+                )
+                await asyncio.to_thread(
+                    result.paste, solid_color, (0, 0), mask=txt_layer
+                )
 
-            output_file = self._get_temp_path('png')
+            output_file = self._get_temp_path("png")
             await asyncio.to_thread(result.save, output_file)
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
@@ -2748,43 +3205,50 @@ class MediaProcessor:
 
     async def _apply_caption(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
-            if 'text' not in kwargs:
+            if "text" not in kwargs:
                 raise ValueError("Missing 'text' parameter")
             return await self._apply_caption_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("caption", e)
 
     async def _apply_caption_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        text = kwargs['text']
-        output_key = kwargs['output_key']
-        padding = kwargs.get('padding', 0)
+        input_key = kwargs["input_key"]
+        text = kwargs["text"]
+        output_key = kwargs["output_key"]
+        padding = kwargs.get("padding", 0)
         auto_padding = padding == 0
-        font_size = kwargs.get('font_size', 0)
+        font_size = kwargs.get("font_size", 0)
         auto_font_size = font_size == 0
-        font = kwargs.get('font', 'Futura Condensed Extra Bold')
-        color = kwargs.get('color', '#000000')
-        background_color = kwargs.get('background_color', '#FFFFFF')
-        outline_color = kwargs.get('outline_color')
-        outline_width = kwargs.get('outline_width')
-        shadow_color = kwargs.get('shadow_color')
-        shadow_offset = kwargs.get('shadow_offset', 2)
-        shadow_blur = kwargs.get('shadow_blur', 0)
-        wrap_width = kwargs.get('wrap_width', 0)
+        font = kwargs.get("font", "Futura Condensed Extra Bold")
+        color = kwargs.get("color", "#000000")
+        background_color = kwargs.get("background_color", "#FFFFFF")
+        outline_color = kwargs.get("outline_color")
+        outline_width = kwargs.get("outline_width")
+        shadow_color = kwargs.get("shadow_color")
+        shadow_offset = kwargs.get("shadow_offset", 2)
+        shadow_blur = kwargs.get("shadow_blur", 0)
+        wrap_width = kwargs.get("wrap_width", 0)
         auto_wrap_width = not wrap_width or wrap_width <= 0
-        line_spacing = kwargs.get('line_spacing', 5)
+        line_spacing = kwargs.get("line_spacing", 5)
 
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
         input_path = Path(self.media_cache[input_key])
-        is_video = input_path.suffix.lower() in ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv')
-        is_gif = input_path.suffix.lower() == '.gif'
-        is_webp = input_path.suffix.lower() == '.webp'
+        is_video = input_path.suffix.lower() in (
+            ".mp4",
+            ".mov",
+            ".webm",
+            ".mkv",
+            ".avi",
+            ".wmv",
+        )
+        is_gif = input_path.suffix.lower() == ".gif"
+        is_webp = input_path.suffix.lower() == ".webp"
 
         width, height, _, _ = await self._probe_media_info(input_path)
         if width == 0 or height == 0:
@@ -2804,7 +3268,7 @@ class MediaProcessor:
                 return bbox[2] - bbox[0], bbox[3] - bbox[1]
 
             def wrap_text(text, font, max_width):
-                words = text.split(' ')
+                words = text.split(" ")
                 lines = []
                 current_line = ""
                 for word in words:
@@ -2828,31 +3292,36 @@ class MediaProcessor:
                 line_height = ascent + descent
                 return (line_height + line_spacing) * len(lines) - line_spacing
 
-            total_text_height = await asyncio.to_thread(measure_multiline_text, font_obj, lines)
+            total_text_height = await asyncio.to_thread(
+                measure_multiline_text, font_obj, lines
+            )
 
             buffer = int(font_size * 0.3)
             if auto_padding:
                 padding = total_text_height + buffer
 
         padding = int(padding)
-        bg_img = await asyncio.to_thread(self._parse_color, background_color, (width, padding))
+        bg_img = await asyncio.to_thread(
+            self._parse_color, background_color, (width, padding)
+        )
         if isinstance(bg_img, tuple):
-            bg_img = await asyncio.to_thread(Image.new, 'RGBA', (width, padding), bg_img)
-        caption_file = self._get_temp_path('png')
+            bg_img = await asyncio.to_thread(
+                Image.new, "RGBA", (width, padding), bg_img
+            )
+        caption_file = self._get_temp_path("png")
         await asyncio.to_thread(bg_img.save, caption_file)
-
 
         text_key = f"{output_key}_text"
         await self._create_image(
             media_key=text_key,
             width=str(width),
             height=str(padding),
-            color='transparent'
+            color="transparent",
         )
         await self._text(
             input_key=text_key,
             text=text,
-            x='center',
+            x="center",
             y=str((padding - total_text_height) // 2),
             color=color,
             output_key=text_key,
@@ -2864,43 +3333,62 @@ class MediaProcessor:
             shadow_offset=shadow_offset,
             shadow_blur=shadow_blur,
             wrap_width=wrap_width,
-            line_spacing=line_spacing
+            line_spacing=line_spacing,
         )
 
         output_file = self._get_temp_path(input_path.suffix[1:])
         overlay_height = padding
         padded_height = max(height + overlay_height, height + overlay_height + 2)
         cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', str(input_path),
-            '-i', str(caption_file),
-            '-i', self.media_cache[text_key],
-            '-filter_complex',
-            '[1:v][2:v]overlay=0:0[bgtext];'
-            f'[0:v]pad=width={width}:height={padded_height}:y={overlay_height}:color=black,setsar=1:1[padded];'
-            '[padded][bgtext]overlay=0:0,setsar=1:1[v]',
-            *(['-frames:v', '1'] if not is_video and not is_gif else []),
-            '-map', '[v]',
-            '-map', '0:a?'
+            "ffmpeg",
+            "-hide_banner",
+            "-i",
+            str(input_path),
+            "-i",
+            str(caption_file),
+            "-i",
+            self.media_cache[text_key],
+            "-filter_complex",
+            "[1:v][2:v]overlay=0:0[bgtext];"
+            f"[0:v]pad=width={width}:height={padded_height}:y={overlay_height}:color=black,setsar=1:1[padded];"
+            "[padded][bgtext]overlay=0:0,setsar=1:1[v]",
+            *(["-frames:v", "1"] if not is_video and not is_gif else []),
+            "-map",
+            "[v]",
+            "-map",
+            "0:a?",
         ]
 
         if is_webp:
-            cmd.extend([
-                '-c:v', 'libwebp',
-                '-lossless', '0',
-                '-compression_level', '6',
-                '-loop', '0',
-                '-f', 'webp'
-            ])
+            cmd.extend(
+                [
+                    "-c:v",
+                    "libwebp",
+                    "-lossless",
+                    "0",
+                    "-compression_level",
+                    "6",
+                    "-loop",
+                    "0",
+                    "-f",
+                    "webp",
+                ]
+            )
         else:
-            cmd.extend([
-                '-preset', 'fast',
-                '-crf', '23',
-                '-pix_fmt', 'yuv420p',
-                '-movflags', '+faststart'
-            ])
+            cmd.extend(
+                [
+                    "-preset",
+                    "fast",
+                    "-crf",
+                    "23",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-movflags",
+                    "+faststart",
+                ]
+            )
 
-        cmd.extend(['-y', output_file.as_posix()])
+        cmd.extend(["-y", output_file.as_posix()])
         success, error = await self._run_ffmpeg(cmd)
         if success:
             self.media_cache[output_key] = str(output_file)
@@ -2909,71 +3397,82 @@ class MediaProcessor:
 
     async def _replace_audio(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
-            if 'audio_key' not in kwargs:
+            if "audio_key" not in kwargs:
                 raise ValueError("Missing 'audio_key' parameter")
             return await self._replace_audio_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("audioputreplace", e)
 
     async def _replace_audio_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        audio_key = kwargs['audio_key']
-        output_key = kwargs['output_key']
-        preserve_length = kwargs['preserve_length']
-        force_video = kwargs['force_video']
-        loop_media = kwargs['loop_media']
+        input_key = kwargs["input_key"]
+        audio_key = kwargs["audio_key"]
+        output_key = kwargs["output_key"]
+        preserve_length = kwargs["preserve_length"]
+        force_video = kwargs["force_video"]
+        loop_media = kwargs["loop_media"]
         if input_key not in self.media_cache or audio_key not in self.media_cache:
             return "Error: Missing input media"
 
         media_path = Path(self.media_cache[input_key])
         audio_path = Path(self.media_cache[audio_key])
-        is_image = media_path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp')
-        is_video = media_path.suffix.lower() in ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv')
+        is_image = media_path.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")
+        is_video = media_path.suffix.lower() in (
+            ".mp4",
+            ".mov",
+            ".webm",
+            ".mkv",
+            ".avi",
+            ".wmv",
+        )
 
-        output_ext = 'mp4' if (is_image or force_video or is_video) else media_path.suffix[1:]
+        output_ext = (
+            "mp4" if (is_image or force_video or is_video) else media_path.suffix[1:]
+        )
         output_file = self._get_temp_path(output_ext)
 
-        cmd = ['ffmpeg', '-hide_banner', '-y']
+        cmd = ["ffmpeg", "-hide_banner", "-y"]
 
         if is_image:
-            cmd.extend(['-loop', '1', '-i', media_path.as_posix()])
+            cmd.extend(["-loop", "1", "-i", media_path.as_posix()])
         else:
             if loop_media:
-                cmd.extend(['-stream_loop', '-1'])
-            cmd.extend(['-i', media_path.as_posix()])
+                cmd.extend(["-stream_loop", "-1"])
+            cmd.extend(["-i", media_path.as_posix()])
 
-        cmd.extend(['-i', audio_path.as_posix()])
+        cmd.extend(["-i", audio_path.as_posix()])
 
         if is_image or force_video or is_video:
-            cmd.extend([
-                '-filter_complex',
-                '[0:v]scale=ceil(iw/2)*2:ceil(ih/2)*2[v]',
-                '-map', '[v]',
-                '-map', '1:a:0',
-                '-c:v', 'libx264',
-                '-preset', 'fast',
-                '-crf', '23',
-                '-pix_fmt', 'yuv420p',
-                '-movflags', '+faststart'
-            ])
+            cmd.extend(
+                [
+                    "-filter_complex",
+                    "[0:v]scale=ceil(iw/2)*2:ceil(ih/2)*2[v]",
+                    "-map",
+                    "[v]",
+                    "-map",
+                    "1:a:0",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "fast",
+                    "-crf",
+                    "23",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-movflags",
+                    "+faststart",
+                ]
+            )
         else:
-            cmd.extend([
-                '-map', '0:v:0',
-                '-map', '1:a:0',
-                '-c:v', 'copy'
-            ])
+            cmd.extend(["-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy"])
 
-        cmd.extend([
-            '-c:a', 'aac',
-            '-b:a', '192k'
-        ])
+        cmd.extend(["-c:a", "aac", "-b:a", "192k"])
 
         if preserve_length:
-            cmd.append('-shortest')
+            cmd.append("-shortest")
 
         cmd.append(output_file.as_posix())
 
@@ -2985,35 +3484,53 @@ class MediaProcessor:
 
     async def _mix_audio(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
-            if 'audio_key' not in kwargs:
+            if "audio_key" not in kwargs:
                 raise ValueError("Missing 'audio_key' parameter")
             return await self._mix_audio_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("audioputmix", e)
 
     async def _mix_audio_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        audio_key = kwargs['audio_key']
-        output_key = kwargs['output_key']
-        volume = kwargs['volume']
-        loop_audio = kwargs['loop_audio']
-        preserve_length = kwargs['preserve_length']
-        loop_media = kwargs['loop_media']
+        input_key = kwargs["input_key"]
+        audio_key = kwargs["audio_key"]
+        output_key = kwargs["output_key"]
+        volume = kwargs["volume"]
+        loop_audio = kwargs["loop_audio"]
+        preserve_length = kwargs["preserve_length"]
+        loop_media = kwargs["loop_media"]
 
         if input_key not in self.media_cache or audio_key not in self.media_cache:
             return "Error: Missing input media"
 
         media_path = Path(self.media_cache[input_key])
         audio_path = Path(self.media_cache[audio_key])
-        is_image = media_path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp')
-        is_audio = media_path.suffix.lower() in ('.mp3', '.wav', '.ogg', '.opus', '.flac', '.m4a', '.mka', '.wma')
-        is_video = media_path.suffix.lower() in ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv')
+        is_image = media_path.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")
+        is_audio = media_path.suffix.lower() in (
+            ".mp3",
+            ".wav",
+            ".ogg",
+            ".opus",
+            ".flac",
+            ".m4a",
+            ".mka",
+            ".wma",
+        )
+        is_video = media_path.suffix.lower() in (
+            ".mp4",
+            ".mov",
+            ".webm",
+            ".mkv",
+            ".avi",
+            ".wmv",
+        )
 
-        output_ext = 'mp4' if (is_image or is_video or not is_audio) else media_path.suffix[1:]
+        output_ext = (
+            "mp4" if (is_image or is_video or not is_audio) else media_path.suffix[1:]
+        )
         output_file = self._get_temp_path(output_ext)
 
         audio_duration = None
@@ -3022,47 +3539,61 @@ class MediaProcessor:
             audio_duration = duration
 
         cmd = [
-            'ffmpeg', '-hide_banner',
-            *(['-stream_loop', '-1', '-r', '25'] if is_image or loop_media else []),
-            '-i', media_path.as_posix(),
-            '-i', audio_path.as_posix()
+            "ffmpeg",
+            "-hide_banner",
+            *(["-stream_loop", "-1", "-r", "25"] if is_image or loop_media else []),
+            "-i",
+            media_path.as_posix(),
+            "-i",
+            audio_path.as_posix(),
         ]
 
         audio_filter = []
         if loop_audio and not is_image:
-            audio_filter.append(
-                f'[1:a]aloop=loop=-1:size=2e+9,asetpts=N/SR/TB[looped]'
-            )
-            audio_input = '[looped]'
+            audio_filter.append(f"[1:a]aloop=loop=-1:size=2e+9,asetpts=N/SR/TB[looped]")
+            audio_input = "[looped]"
         else:
-            audio_input = '[1:a]'
+            audio_input = "[1:a]"
 
         has_audio = not is_image and not is_audio
         if has_audio:
-            audio_filter.extend([
-                f'[0:a]aformat=sample_fmts=fltp,volume={volume}[a0]',
-                f'{audio_input}aformat=sample_fmts=fltp,volume={volume}[a1]',
-                f'[a0][a1]amix=inputs=2:duration=longest[a]'
-            ])
+            audio_filter.extend(
+                [
+                    f"[0:a]aformat=sample_fmts=fltp,volume={volume}[a0]",
+                    f"{audio_input}aformat=sample_fmts=fltp,volume={volume}[a1]",
+                    f"[a0][a1]amix=inputs=2:duration=longest[a]",
+                ]
+            )
         else:
-            audio_filter.extend([
-                f'{audio_input}aformat=sample_fmts=fltp,volume={volume}[a]'
-            ])
+            audio_filter.extend(
+                [f"{audio_input}aformat=sample_fmts=fltp,volume={volume}[a]"]
+            )
 
-        filter_complex_str = ';'.join(audio_filter)
+        filter_complex_str = ";".join(audio_filter)
 
         should_apply_shortest = not loop_audio and preserve_length
 
-        cmd.extend([
-            '-filter_complex', filter_complex_str,
-            *(['-c:v', 'libx264', '-pix_fmt', 'yuv420p'] if is_image else
-            ['-c:v', 'copy'] if not is_audio else []),
-            '-map', '0:v:0' if not is_audio else None,
-            '-map', '[a]',
-            *(['-shortest'] if should_apply_shortest else []),
-            *(['-t', str(audio_duration)] if loop_media and audio_duration else []),
-            '-y', output_file.as_posix()
-        ])
+        cmd.extend(
+            [
+                "-filter_complex",
+                filter_complex_str,
+                *(
+                    ["-c:v", "libx264", "-pix_fmt", "yuv420p"]
+                    if is_image
+                    else ["-c:v", "copy"]
+                    if not is_audio
+                    else []
+                ),
+                "-map",
+                "0:v:0" if not is_audio else None,
+                "-map",
+                "[a]",
+                *(["-shortest"] if should_apply_shortest else []),
+                *(["-t", str(audio_duration)] if loop_media and audio_duration else []),
+                "-y",
+                output_file.as_posix(),
+            ]
+        )
 
         cmd = [x for x in cmd if x is not None]
 
@@ -3074,19 +3605,19 @@ class MediaProcessor:
 
     async def _tremolo(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
             return await self._tremolo_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("tremolo", e)
 
     async def _tremolo_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        frequency = kwargs['frequency']
-        depth = kwargs['depth']
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        frequency = kwargs["frequency"]
+        depth = kwargs["depth"]
+        output_key = kwargs["output_key"]
         if input_key not in self.media_cache:
             return "Error: Missing input media"
 
@@ -3094,10 +3625,14 @@ class MediaProcessor:
         output_file = self._get_temp_path(input_path.suffix[1:])
 
         cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', input_path.as_posix(),
-            '-af', f'tremolo={frequency}:{depth}',
-            '-y', output_file.as_posix()
+            "ffmpeg",
+            "-hide_banner",
+            "-i",
+            input_path.as_posix(),
+            "-af",
+            f"tremolo={frequency}:{depth}",
+            "-y",
+            output_file.as_posix(),
         ]
 
         success, error = await self._run_ffmpeg(cmd)
@@ -3108,19 +3643,19 @@ class MediaProcessor:
 
     async def _vibrato(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
             return await self._vibrato_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("vibrato", e)
 
     async def _vibrato_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        frequency = kwargs['frequency']
-        depth = kwargs['depth']
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        frequency = kwargs["frequency"]
+        depth = kwargs["depth"]
+        output_key = kwargs["output_key"]
         if input_key not in self.media_cache:
             return "Error: Missing input media"
 
@@ -3128,10 +3663,14 @@ class MediaProcessor:
         output_file = self._get_temp_path(input_path.suffix[1:])
 
         cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', input_path.as_posix(),
-            '-af', f'vibrato={frequency}:{depth}',
-            '-y', output_file.as_posix()
+            "ffmpeg",
+            "-hide_banner",
+            "-i",
+            input_path.as_posix(),
+            "-af",
+            f"vibrato={frequency}:{depth}",
+            "-y",
+            output_file.as_posix(),
         ]
 
         success, error = await self._run_ffmpeg(cmd)
@@ -3142,11 +3681,11 @@ class MediaProcessor:
 
     async def _create_image(self, **kwargs) -> str:
         try:
-            if 'media_key' not in kwargs:
+            if "media_key" not in kwargs:
                 raise ValueError("Missing 'media_key' parameter")
-            if 'width' not in kwargs:
+            if "width" not in kwargs:
                 raise ValueError("Missing 'width' parameter")
-            if 'height' not in kwargs:
+            if "height" not in kwargs:
                 raise ValueError("Missing 'height' parameter")
             return await self._create_image_impl(**kwargs)
         except Exception as e:
@@ -3154,68 +3693,72 @@ class MediaProcessor:
 
     async def _create_image_impl(self, **kwargs) -> str:
         try:
-            width = await self._resolve_dimension(kwargs['width'])
-            height = await self._resolve_dimension(kwargs['height'])
+            width = await self._resolve_dimension(kwargs["width"])
+            height = await self._resolve_dimension(kwargs["height"])
             size = (width, height)
 
-            color = await asyncio.to_thread(self._parse_color, kwargs['color'], size)
+            color = await asyncio.to_thread(self._parse_color, kwargs["color"], size)
             if isinstance(color, Image.Image):
                 img = color
             else:
-                img = await asyncio.to_thread(Image.new, 'RGBA', size, color)
+                img = await asyncio.to_thread(Image.new, "RGBA", size, color)
 
-            output_file = self._get_temp_path('png')
+            output_file = self._get_temp_path("png")
             await asyncio.to_thread(img.save, output_file)
-            self.media_cache[kwargs['media_key']] = str(output_file)
+            self.media_cache[kwargs["media_key"]] = str(output_file)
             return f"media://{output_file.as_posix()}"
         except Exception as e:
-           return f"Create error: {str(e)}"
+            return f"Create error: {str(e)}"
 
     async def _fadein_media(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
             return await self._fadein_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("fadein", e)
 
     async def _fadein_media_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        duration = float(kwargs['duration'])
-        color = kwargs.get('color', '#000000')
-        audio_fade = kwargs.get('audio', True)
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        duration = float(kwargs["duration"])
+        color = kwargs.get("color", "#000000")
+        audio_fade = kwargs.get("audio", True)
+        output_key = kwargs["output_key"]
 
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
         input_path = Path(self.media_cache[input_key])
-        output_file = self._get_temp_path(input_path.suffix[1:].lstrip('.'))
+        output_file = self._get_temp_path(input_path.suffix[1:].lstrip("."))
 
-
-        width, height, input_duration, has_audio = await self._probe_media_info(input_path)
+        width, height, input_duration, has_audio = await self._probe_media_info(
+            input_path
+        )
         try:
             input_duration = float(input_duration) if input_duration else 0.0
         except (ValueError, TypeError):
             input_duration = 0.0
         is_image = input_duration <= 0
 
-
-        if color.startswith(('linear-gradient', 'radial-gradient')):
+        if color.startswith(("linear-gradient", "radial-gradient")):
             bg_img = await asyncio.to_thread(self._parse_color, color, (width, height))
-            bg_file = self._get_temp_path('png')
+            bg_file = self._get_temp_path("png")
             await asyncio.to_thread(bg_img.save, bg_file)
-            bg_input = ['-stream_loop', '-1', '-i', bg_file.as_posix()]
+            bg_input = ["-stream_loop", "-1", "-i", bg_file.as_posix()]
         else:
-            bg_input = ['-f', 'lavfi', '-i', f'color=c={color}:s={width}x{height}:d=9999']
-
+            bg_input = [
+                "-f",
+                "lavfi",
+                "-i",
+                f"color=c={color}:s={width}x{height}:d=9999",
+            ]
 
         filter_parts = [
-                f"[0:v]format=yuva420p,fade=t=in:st=0:d={duration}:alpha=1[fg];",
-                f"[1:v][fg]overlay=format=auto,pad=width=ceil(iw/2)*2:height=ceil(ih/2)*2[v]"
-            ]
+            f"[0:v]format=yuva420p,fade=t=in:st=0:d={duration}:alpha=1[fg];",
+            f"[1:v][fg]overlay=format=auto,pad=width=ceil(iw/2)*2:height=ceil(ih/2)*2[v]",
+        ]
 
         if has_audio:
             if audio_fade:
@@ -3224,27 +3767,28 @@ class MediaProcessor:
                 filter_parts.append(";[0:a]acopy[a]")
 
         cmd = [
-            'ffmpeg', '-hide_banner',
-            *(['-stream_loop', '-1'] if is_image else []),
-            '-i', input_path.as_posix(),
+            "ffmpeg",
+            "-hide_banner",
+            *(["-stream_loop", "-1"] if is_image else []),
+            "-i",
+            input_path.as_posix(),
             *bg_input,
-            '-filter_complex', ''.join(filter_parts),
-            '-map', '[v]',
-            *(['-map', '[a]'] if has_audio else []),
+            "-filter_complex",
+            "".join(filter_parts),
+            "-map",
+            "[v]",
+            *(["-map", "[a]"] if has_audio else []),
         ]
 
-
         if is_image:
-            output_file = self._get_temp_path('mp4')
-            cmd.extend([
-                '-t', str(duration),
-                '-pix_fmt', 'yuv420p',
-                '-movflags', '+faststart'
-            ])
+            output_file = self._get_temp_path("mp4")
+            cmd.extend(
+                ["-t", str(duration), "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
+            )
         else:
-            cmd.extend(['-shortest'])
+            cmd.extend(["-shortest"])
 
-        cmd.extend(['-y', output_file.as_posix()])
+        cmd.extend(["-y", output_file.as_posix()])
 
         success, error = await self._run_ffmpeg(cmd)
         if success:
@@ -3255,78 +3799,93 @@ class MediaProcessor:
 
     async def _fadeout_media(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
             return await self._fadeout_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("fadeout", e)
 
     async def _fadeout_media_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        duration = float(kwargs['duration'])
-        start_time = float(kwargs['start_time'])
-        color = kwargs.get('color', '#000000')
-        audio_fade = kwargs.get('audio', True)
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        duration = float(kwargs["duration"])
+        start_time = float(kwargs["start_time"])
+        color = kwargs.get("color", "#000000")
+        audio_fade = kwargs.get("audio", True)
+        output_key = kwargs["output_key"]
 
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
         input_path = Path(self.media_cache[input_key])
-        output_file = self._get_temp_path(input_path.suffix[1:].lstrip('.'))
+        output_file = self._get_temp_path(input_path.suffix[1:].lstrip("."))
 
-        width, height, input_duration, has_audio = await self._probe_media_info(input_path)
+        width, height, input_duration, has_audio = await self._probe_media_info(
+            input_path
+        )
         try:
             input_duration = float(input_duration) if input_duration else 0.0
         except (ValueError, TypeError):
             input_duration = 0.0
         is_image = input_duration <= 0
 
-        if color.startswith(('linear-gradient', 'radial-gradient')):
+        if color.startswith(("linear-gradient", "radial-gradient")):
             bg_img = await asyncio.to_thread(self._parse_color, color, (width, height))
-            bg_file = self._get_temp_path('png')
+            bg_file = self._get_temp_path("png")
             await asyncio.to_thread(bg_img.save, bg_file)
-            bg_input = ['-stream_loop', '-1', '-i', bg_file.as_posix()]
+            bg_input = ["-stream_loop", "-1", "-i", bg_file.as_posix()]
         else:
-            bg_input = ['-f', 'lavfi', '-i', f'color=c={color}:s={width}x{height}:d=9999']
-
+            bg_input = [
+                "-f",
+                "lavfi",
+                "-i",
+                f"color=c={color}:s={width}x{height}:d=9999",
+            ]
 
         filter_complex_parts = [
             f"[0:v]format=yuva420p,fade=t=out:st={start_time}:d={duration}:alpha=1[fg];",
-            f"[1:v][fg]overlay=format=auto,pad=width=ceil(iw/2)*2:height=ceil(ih/2)*2[v]"
+            f"[1:v][fg]overlay=format=auto,pad=width=ceil(iw/2)*2:height=ceil(ih/2)*2[v]",
         ]
-
 
         if has_audio:
             if audio_fade:
-                filter_complex_parts.append(f";[0:a]afade=t=out:st={start_time}:d={duration}[a]")
+                filter_complex_parts.append(
+                    f";[0:a]afade=t=out:st={start_time}:d={duration}[a]"
+                )
             else:
                 filter_complex_parts.append(";[0:a]acopy[a]")
 
         cmd = [
-            'ffmpeg', '-hide_banner',
-            *(['-stream_loop', '-1'] if is_image else []),
-            '-i', input_path.as_posix(),
+            "ffmpeg",
+            "-hide_banner",
+            *(["-stream_loop", "-1"] if is_image else []),
+            "-i",
+            input_path.as_posix(),
             *bg_input,
-            '-filter_complex', ''.join(filter_complex_parts),
-            '-map', '[v]',
-            *(['-map', '[a]'] if has_audio else []),
+            "-filter_complex",
+            "".join(filter_complex_parts),
+            "-map",
+            "[v]",
+            *(["-map", "[a]"] if has_audio else []),
         ]
 
-
         if is_image:
-            output_file = self._get_temp_path('mp4')
-            cmd.extend([
-                '-t', str(start_time + duration),
-                '-pix_fmt', 'yuv420p',
-                '-movflags', '+faststart'
-            ])
+            output_file = self._get_temp_path("mp4")
+            cmd.extend(
+                [
+                    "-t",
+                    str(start_time + duration),
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-movflags",
+                    "+faststart",
+                ]
+            )
         else:
-            cmd.append('-shortest')
+            cmd.append("-shortest")
 
-        cmd += ['-y', output_file.as_posix()]
+        cmd += ["-y", output_file.as_posix()]
 
         success, error = await self._run_ffmpeg(cmd)
         if success:
@@ -3336,20 +3895,20 @@ class MediaProcessor:
 
     async def _colorkey(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
             return await self._colorkey_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("colorkey", e)
 
     async def _colorkey_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        color = kwargs['color']
-        similarity = kwargs['similarity']
-        blend = kwargs['blend']
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        color = kwargs["color"]
+        similarity = kwargs["similarity"]
+        blend = kwargs["blend"]
+        output_key = kwargs["output_key"]
 
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
@@ -3358,10 +3917,14 @@ class MediaProcessor:
         output_file = self._get_temp_path(input_path.suffix[1:])
 
         cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', input_path.as_posix(),
-            '-vf', f'colorkey={color}:{similarity}:{blend}',
-            '-y', output_file.as_posix()
+            "ffmpeg",
+            "-hide_banner",
+            "-i",
+            input_path.as_posix(),
+            "-vf",
+            f"colorkey={color}:{similarity}:{blend}",
+            "-y",
+            output_file.as_posix(),
         ]
 
         success, error = await self._run_ffmpeg(cmd)
@@ -3372,20 +3935,20 @@ class MediaProcessor:
 
     async def _chromakey(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
             return await self._chromakey_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("chromakey", e)
 
     async def _chromakey_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        color = kwargs['color']
-        similarity = kwargs['similarity']
-        blend = kwargs['blend']
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        color = kwargs["color"]
+        similarity = kwargs["similarity"]
+        blend = kwargs["blend"]
+        output_key = kwargs["output_key"]
 
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
@@ -3394,10 +3957,14 @@ class MediaProcessor:
         output_file = self._get_temp_path(input_path.suffix[1:])
 
         cmd = [
-            'ffmpeg', '-hide_banner',
-            '-i', input_path.as_posix(),
-            '-vf', f'chromakey={color}:{similarity}:{blend}',
-            '-y', output_file.as_posix()
+            "ffmpeg",
+            "-hide_banner",
+            "-i",
+            input_path.as_posix(),
+            "-vf",
+            f"chromakey={color}:{similarity}:{blend}",
+            "-y",
+            output_file.as_posix(),
         ]
 
         success, error = await self._run_ffmpeg(cmd)
@@ -3408,65 +3975,61 @@ class MediaProcessor:
 
     async def _dobetween_media(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
-            if 'start_time' not in kwargs:
+            if "start_time" not in kwargs:
                 raise ValueError("Missing 'start_time' parameter")
-            if 'end_time' not in kwargs:
+            if "end_time" not in kwargs:
                 raise ValueError("Missing 'end_time' parameter")
             return await self._dobetween_media_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("dobetween", e)
 
     async def _dobetween_media_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        start_time = kwargs['start_time']
-        end_time = kwargs['end_time']
-        output_key = kwargs['output_key']
-        segment_key = kwargs.get('segment_key', 'segment')
-        sub_script = kwargs.get('sub_script', '')
+        input_key = kwargs["input_key"]
+        start_time = kwargs["start_time"]
+        end_time = kwargs["end_time"]
+        output_key = kwargs["output_key"]
+        segment_key = kwargs.get("segment_key", "segment")
+        sub_script = kwargs.get("sub_script", "")
 
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
-
         resolved_start = await self._resolve_timestamp(input_key, start_time)
         resolved_end = await self._resolve_timestamp(input_key, end_time)
-
 
         before_key = f"{segment_key}_before"
         segment_key = f"{segment_key}_main"
         after_key = f"{segment_key}_after"
         edited_key = f"{segment_key}_edited"
 
-
         trim_tasks = [
             self._trim_media(
                 input_key=input_key,
-                start_time='0',
+                start_time="0",
                 end_time=resolved_start,
-                output_key=before_key
+                output_key=before_key,
             ),
             self._trim_media(
                 input_key=input_key,
                 start_time=resolved_start,
                 end_time=resolved_end,
-                output_key=segment_key
+                output_key=segment_key,
             ),
             self._trim_media(
                 input_key=input_key,
                 start_time=resolved_end,
-                end_time='9999999',
-                output_key=after_key
-            )
+                end_time="9999999",
+                output_key=after_key,
+            ),
         ]
 
         results = await asyncio.gather(*trim_tasks)
         if any(r.startswith("Error") for r in results):
             return f"Trim error(s): {results}"
-
 
         if sub_script:
             patched_lines = []
@@ -3477,15 +4040,13 @@ class MediaProcessor:
 
                 parts = shlex.split(line)
                 cmd = parts[0]
-                pos_args = [p for p in parts[1:] if '=' not in p]
-                kw_args = dict(p.split('=', 1) for p in parts[1:] if '=' in p)
+                pos_args = [p for p in parts[1:] if "=" not in p]
+                kw_args = dict(p.split("=", 1) for p in parts[1:] if "=" in p)
 
-
-                if 'input_key' not in kw_args:
-                    kw_args['input_key'] = segment_key
-                if 'output_key' not in kw_args:
-                    kw_args['output_key'] = edited_key
-
+                if "input_key" not in kw_args:
+                    kw_args["input_key"] = segment_key
+                if "output_key" not in kw_args:
+                    kw_args["output_key"] = edited_key
 
                 new_parts = [cmd] + pos_args + [f"{k}={v}" for k, v in kw_args.items()]
                 patched_lines.append(shlex.join(new_parts))
@@ -3500,29 +4061,28 @@ class MediaProcessor:
             segment_to_use = segment_key
 
         concat_result = await self._concat_media(
-            input_keys=[before_key, segment_to_use, after_key],
-            output_key=output_key
+            input_keys=[before_key, segment_to_use, after_key], output_key=output_key
         )
 
         return concat_result
 
     async def _setframecount(self, **kwargs) -> str:
         try:
-            if 'input_key' not in kwargs:
+            if "input_key" not in kwargs:
                 raise ValueError("Missing 'input_key' parameter")
-            if 'output_key' not in kwargs:
+            if "output_key" not in kwargs:
                 raise ValueError("Missing 'output_key' parameter")
-            if 'frame_count' not in kwargs:
+            if "frame_count" not in kwargs:
                 raise ValueError("Missing 'frame_count' parameter")
             return await self._setframecount_impl(**kwargs)
         except Exception as e:
             return await self._handle_error("setframecount", e)
 
     async def _setframecount_impl(self, **kwargs) -> str:
-        input_key = kwargs['input_key']
-        output_key = kwargs['output_key']
+        input_key = kwargs["input_key"]
+        output_key = kwargs["output_key"]
         try:
-            target_count = int(kwargs['frame_count'])
+            target_count = int(kwargs["frame_count"])
             if target_count <= 0:
                 return "Error: frame_count must be a positive integer"
         except (ValueError, TypeError):
@@ -3535,22 +4095,40 @@ class MediaProcessor:
         suffix = input_path.suffix.lower()
         output_file = self._get_temp_path(suffix[1:])
 
-        is_image = suffix in ('.png', '.jpg', '.jpeg', '.webp')
-        is_gif = suffix == '.gif'
-        is_audio = suffix in ('.mp3', '.wav', '.ogg', '.opus', '.flac', '.m4a', '.wma', '.mka')
-        is_video = suffix in ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.wmv')
+        is_image = suffix in (".png", ".jpg", ".jpeg", ".webp")
+        is_gif = suffix == ".gif"
+        is_audio = suffix in (
+            ".mp3",
+            ".wav",
+            ".ogg",
+            ".opus",
+            ".flac",
+            ".m4a",
+            ".wma",
+            ".mka",
+        )
+        is_video = suffix in (".mp4", ".mov", ".webm", ".mkv", ".avi", ".wmv")
 
         if is_image and target_count > 1:
             duration = target_count / 30.0
-            output_file = self._get_temp_path('mp4')
+            output_file = self._get_temp_path("mp4")
             cmd = [
-                'ffmpeg', '-hide_banner',
-                '-loop', '1', '-i', input_path.as_posix(),
-                '-t', str(duration),
-                '-vf', 'pad=width=ceil(iw/2)*2:height=ceil(ih/2)*2',
-                '-pix_fmt', 'yuv420p',
-                '-r', '30',
-                '-y', output_file.as_posix()
+                "ffmpeg",
+                "-hide_banner",
+                "-loop",
+                "1",
+                "-i",
+                input_path.as_posix(),
+                "-t",
+                str(duration),
+                "-vf",
+                "pad=width=ceil(iw/2)*2:height=ceil(ih/2)*2",
+                "-pix_fmt",
+                "yuv420p",
+                "-r",
+                "30",
+                "-y",
+                output_file.as_posix(),
             ]
             success, error = await self._run_ffmpeg(cmd)
             if success:
@@ -3561,10 +4139,14 @@ class MediaProcessor:
         if is_image and target_count == 1:
             output_file = self._get_temp_path(suffix[1:])
             cmd = [
-                'ffmpeg', '-hide_banner',
-                '-i', input_path.as_posix(),
-                '-frames:v', '1',
-                '-y', output_file.as_posix()
+                "ffmpeg",
+                "-hide_banner",
+                "-i",
+                input_path.as_posix(),
+                "-frames:v",
+                "1",
+                "-y",
+                output_file.as_posix(),
             ]
             success, error = await self._run_ffmpeg(cmd)
             if success:
@@ -3574,10 +4156,14 @@ class MediaProcessor:
 
         if is_gif:
             cmd = [
-                'ffmpeg', '-hide_banner',
-                '-i', input_path.as_posix(),
-                '-vf', f'select=lt(n\\,{target_count}),setpts=PTS-STARTPTS',
-                '-y', output_file.as_posix()
+                "ffmpeg",
+                "-hide_banner",
+                "-i",
+                input_path.as_posix(),
+                "-vf",
+                f"select=lt(n\\,{target_count}),setpts=PTS-STARTPTS",
+                "-y",
+                output_file.as_posix(),
             ]
             success, error = await self._run_ffmpeg(cmd)
             if success:
@@ -3588,10 +4174,14 @@ class MediaProcessor:
         if is_audio:
             target_duration = target_count / 30.0
             cmd = [
-                'ffmpeg', '-hide_banner',
-                '-i', input_path.as_posix(),
-                '-t', str(target_duration),
-                '-y', output_file.as_posix()
+                "ffmpeg",
+                "-hide_banner",
+                "-i",
+                input_path.as_posix(),
+                "-t",
+                str(target_duration),
+                "-y",
+                output_file.as_posix(),
             ]
             success, error = await self._run_ffmpeg(cmd)
             if success:
@@ -3602,11 +4192,16 @@ class MediaProcessor:
         if is_video:
             duration = target_count / 30.0
             cmd = [
-                'ffmpeg', '-hide_banner',
-                '-i', input_path.as_posix(),
-                '-t', str(duration),
-                '-pix_fmt', 'yuv420p',
-                '-y', output_file.as_posix()
+                "ffmpeg",
+                "-hide_banner",
+                "-i",
+                input_path.as_posix(),
+                "-t",
+                str(duration),
+                "-pix_fmt",
+                "yuv420p",
+                "-y",
+                output_file.as_posix(),
             ]
             success, error = await self._run_ffmpeg(cmd)
             if success:
@@ -3618,7 +4213,7 @@ class MediaProcessor:
 class TagFormatter:
     def __init__(self):
         self.functions: Dict[str, Callable] = {}
-        self._component_tags = {'embed', 'button', 'select'}
+        self._component_tags = {"embed", "button", "select"}
 
     def register(self, name: str):
         def decorator(func: Callable):
@@ -3626,16 +4221,24 @@ class TagFormatter:
                 self._component_tags.add(name)
             self.functions[name] = func
             return func
+
         return decorator
 
-    async def format(self, content: str, ctx: commands.Context, **kwargs) -> tuple[str, list[discord.Embed], discord.ui.View | discord.ui.LayoutView | None, list[discord.File]]:
+    async def format(
+        self, content: str, ctx: commands.Context, **kwargs
+    ) -> tuple[
+        str,
+        list[discord.Embed],
+        discord.ui.View | discord.ui.LayoutView | None,
+        list[discord.File],
+    ]:
         text_parts = []
         embeds = []
         view = None
         files = []
 
         for chunk in self._split_chunks(content):
-            if chunk.startswith('{') and chunk.endswith('}'):
+            if chunk.startswith("{") and chunk.endswith("}"):
                 result = await self._process_tag(chunk, ctx, **kwargs)
                 text, new_embeds, new_view, new_files = self._normalize_result(result)
 
@@ -3657,26 +4260,30 @@ class TagFormatter:
             else:
                 text_parts.append(chunk)
 
-        return ''.join(text_parts), embeds, view if view and view.children else None, files
+        return (
+            "".join(text_parts),
+            embeds,
+            view if view and view.children else None,
+            files,
+        )
 
     async def _process_tag(self, tag: str, ctx: commands.Context, **kwargs):
         inner = tag[1:-1].strip()
-        parts = inner.split(':', 1)
+        parts = inner.split(":", 1)
         name = parts[0].strip()
 
         if name not in self.functions:
             return tag
 
         try:
-            args = parts[1] if len(parts) > 1 else ''
+            args = parts[1] if len(parts) > 1 else ""
             func = self.functions[name]
 
-            if name in ('note', 'comment'):
+            if name in ("note", "comment"):
                 return await func(ctx, args, **kwargs)
 
-            if name == 'ignore':
+            if name == "ignore":
                 return await func(ctx, args, **kwargs)
-
 
             if name in self._component_tags:
                 result = func(ctx, args, **kwargs)
@@ -3688,8 +4295,16 @@ class TagFormatter:
 
         except Exception as e:
             return f"[Tag Error: {str(e)}]"
+
     @staticmethod
-    def _normalize_result(result) -> tuple[str, list[discord.Embed], discord.ui.View | discord.ui.LayoutView | None, list[discord.File]]:
+    def _normalize_result(
+        result,
+    ) -> tuple[
+        str,
+        list[discord.Embed],
+        discord.ui.View | discord.ui.LayoutView | None,
+        list[discord.File],
+    ]:
         if result is None or result is discord.utils.MISSING:
             return ("", [], None, [])
         if isinstance(result, discord.Embed):
@@ -3716,30 +4331,32 @@ class TagFormatter:
         start = 0
 
         for i, c in enumerate(content):
-            if c == '{':
+            if c == "{":
                 if depth == 0:
                     if pos < i:
                         chunks.append(content[pos:i])
                     start = i
                 depth += 1
-            elif c == '}' and depth > 0:
+            elif c == "}" and depth > 0:
                 depth -= 1
                 if depth == 0:
-                    chunks.append(content[start:i+1])
+                    chunks.append(content[start : i + 1])
                     pos = i + 1
 
         if pos < len(content):
             chunks.append(content[pos:])
         return chunks
 
-    async def resolve_user(self, ctx, input_str: str) -> Union[discord.User, discord.Member]:
+    async def resolve_user(
+        self, ctx, input_str: str
+    ) -> Union[discord.User, discord.Member]:
         input_str = input_str.strip()
 
         if not input_str:
             return ctx.author
 
         try:
-            user_id = int(input_str.strip('<@!>'))
+            user_id = int(input_str.strip("<@!>"))
             user = await ctx.bot.fetch_user(user_id)
             return user
         except (ValueError, discord.NotFound):
@@ -3747,13 +4364,17 @@ class TagFormatter:
 
         if ctx.guild:
             member = discord.utils.find(
-                lambda m: m.name.lower() == input_str.lower() or m.display_name.lower() == input_str.lower(),
-                ctx.guild.members
+                lambda m: (
+                    m.name.lower() == input_str.lower()
+                    or m.display_name.lower() == input_str.lower()
+                ),
+                ctx.guild.members,
             )
             if member:
                 return member
 
         return ctx.author
+
 
 class Tags(commands.Cog):
     def __init__(self, bot):
@@ -3772,7 +4393,6 @@ class Tags(commands.Cog):
         data = aiohttp.FormData()
         data.add_field("code", code)
 
-
         attachments = ctx.message.attachments
         if attachments:
             for attachment in attachments:
@@ -3782,7 +4402,8 @@ class Tags(commands.Cog):
                         "files",
                         BytesIO(file_bytes),
                         filename=attachment.filename,
-                        content_type=attachment.content_type or "application/octet-stream"
+                        content_type=attachment.content_type
+                        or "application/octet-stream",
                     )
                 except Exception as e:
                     return f"[{language} error: Failed to process attachment {attachment.filename}: {str(e)}]"
@@ -3793,21 +4414,25 @@ class Tags(commands.Cog):
                     return f"[{language} error: HTTP {response.status}]"
                 result = await response.json()
 
-
                 output = result.get("output", "").replace("\r\n", "\n").strip()
                 if result.get("error") or "error" in output.lower():
                     return f"[{language} error: {output or 'Code execution failed with no output'}]"
-
 
                 if result.get("files"):
                     file_objs = []
                     for filename in result["files"][:10]:
                         file_url = f"http://localhost:8000/files/{filename}"
                         try:
-                            async with self.processor.session.get(file_url) as file_resp:
+                            async with self.processor.session.get(
+                                file_url
+                            ) as file_resp:
                                 if file_resp.status == 200:
                                     file_data = await file_resp.read()
-                                    file_objs.append(discord.File(BytesIO(file_data), filename=filename))
+                                    file_objs.append(
+                                        discord.File(
+                                            BytesIO(file_data), filename=filename
+                                        )
+                                    )
                         except Exception as e:
                             return f"[{language} error: Failed to fetch file {filename}: {str(e)}]"
 
@@ -3818,12 +4443,9 @@ class Tags(commands.Cog):
         except Exception as e:
             return f"[{language} exception: {str(e)}]"
 
-
-
-
     def setup_media_formatters(self):
-        @self.formatter.register('gmanscript')
-        @self.formatter.register('gscript')
+        @self.formatter.register("gmanscript")
+        @self.formatter.register("gscript")
         async def _gscript(ctx, script, **kwargs):
             """
             ### {gmanscript:...}
@@ -3874,18 +4496,25 @@ class Tags(commands.Cog):
                 results = await self.processor.execute_media_script(script)
 
                 if isinstance(results, list):
-                    ffmpeg_errors = [r for r in results if isinstance(r, str) and r.startswith(("FFmpeg error", "Media Error"))]
+                    ffmpeg_errors = [
+                        r
+                        for r in results
+                        if isinstance(r, str)
+                        and r.startswith(("FFmpeg error", "Media Error"))
+                    ]
                     if ffmpeg_errors:
                         error_msg = "\n".join(ffmpeg_errors[:5])
                         if len(ffmpeg_errors) > 5:
-                            error_msg += f"\n...and {len(ffmpeg_errors)-5} more errors."
+                            error_msg += (
+                                f"\n...and {len(ffmpeg_errors) - 5} more errors."
+                            )
                         return (error_msg, [], None, [])
 
                     files = []
                     for path in results:
                         if isinstance(path, str) and os.path.isfile(path):
                             try:
-                                with open(path, 'rb') as f:
+                                with open(path, "rb") as f:
                                     data = BytesIO(f.read())
                                 filename = os.path.basename(path)
                                 files.append(discord.File(data, filename=filename))
@@ -3896,16 +4525,30 @@ class Tags(commands.Cog):
                     if files:
                         return ("", [], None, files[:10])
 
-                    other_results = [r for r in results if isinstance(r, str) and not r.startswith("media://")]
+                    other_results = [
+                        r
+                        for r in results
+                        if isinstance(r, str) and not r.startswith("media://")
+                    ]
                     if other_results:
                         return ("\n".join(other_results[:5]), [], None, [])
 
-                    return ("GScript executed but produced no output or files.", [], None, [])
+                    return (
+                        "GScript executed but produced no output or files.",
+                        [],
+                        None,
+                        [],
+                    )
 
                 elif isinstance(results, str):
                     return (results, [], None, [])
                 else:
-                    return ("GScript executed but returned an unexpected result type.", [], None, [])
+                    return (
+                        "GScript executed but returned an unexpected result type.",
+                        [],
+                        None,
+                        [],
+                    )
 
             except Exception as e:
                 await self.processor.cleanup()
@@ -3913,28 +4556,27 @@ class Tags(commands.Cog):
             finally:
                 await self.processor.cleanup()
 
-
     def setup_formatters(self):
-        @self.formatter.register('eval')
+        @self.formatter.register("eval")
         async def _eval(ctx, val, **kwargs):
             """
             ### {eval:content}
                 * Processes nested tag functions in the content.
                 * Example: `{eval:Hello {user}!}`
             """
-            return await self.process_tags(ctx, val, kwargs.get('args', ''))
+            return await self.process_tags(ctx, val, kwargs.get("args", ""))
 
-        @self.formatter.register('ignore')
+        @self.formatter.register("ignore")
         async def _ignore(ctx, text, **kwargs):
             """
             ### {ignore:text}
                 * Returns the text exactly as provided, without evaluating any nested tags.
                 * Example: `{ignore:{user}}` -> "{user}"
             """
-            return text.replace('{', '\\{').replace('}', '\\}')
+            return text.replace("{", "\\{").replace("}", "\\}")
 
-        @self.formatter.register('note')
-        @self.formatter.register('comment')
+        @self.formatter.register("note")
+        @self.formatter.register("comment")
         async def _note(ctx, text, **kwargs):
             """
             ### {note:text}
@@ -3943,7 +4585,7 @@ class Tags(commands.Cog):
             """
             return ""
 
-        @self.formatter.register('text')
+        @self.formatter.register("text")
         async def _fetch_text(ctx, url, **kwargs):
             """
             ### {text:url}
@@ -3960,7 +4602,7 @@ class Tags(commands.Cog):
             except Exception as e:
                 return f"[text error: {str(e)}]"
 
-        @self.formatter.register('attachtext')
+        @self.formatter.register("attachtext")
         async def _attach_text(ctx, text, **kwargs):
             """
             ### {attachtext:text}
@@ -3968,7 +4610,7 @@ class Tags(commands.Cog):
                 * Example: `{attachtext:MiniatureEge2006}`
             """
             try:
-                buffer = BytesIO(text.encode('utf-8'))
+                buffer = BytesIO(text.encode("utf-8"))
 
                 file = discord.File(buffer, filename="attachment.txt")
 
@@ -3977,7 +4619,7 @@ class Tags(commands.Cog):
             except Exception as e:
                 return f"[attachtext error: {str(e)}", [], None, []
 
-        @self.formatter.register('ai')
+        @self.formatter.register("ai")
         async def _ai(ctx, prompt, **kwargs):
             """
             ### {ai:prompt}
@@ -3986,22 +4628,31 @@ class Tags(commands.Cog):
             """
             try:
                 MAX_CONVERSATION_HISTORY_LENGTH = 5
-                ai = ctx.bot.get_cog('AI')
+                ai = ctx.bot.get_cog("AI")
                 if not ai:
                     return "[AI error: AI cog not loaded]"
-                
-                think_mode = re.search(r'(^|\s)--think($|\s)', prompt) is not None
+
+                think_mode = re.search(r"(^|\s)--think($|\s)", prompt) is not None
                 if think_mode:
-                    prompt = re.sub(r'(^|\s)--think($|\s)', ' ', prompt).strip()
-                show_thinking = re.search(r'(^|\s)--show-thinking($|\s)', prompt) is not None
+                    prompt = re.sub(r"(^|\s)--think($|\s)", " ", prompt).strip()
+                show_thinking = (
+                    re.search(r"(^|\s)--show-thinking($|\s)", prompt) is not None
+                )
                 if show_thinking:
-                    prompt = re.sub(r'(^|\s)--show-thinking($|\s)', ' ', prompt).strip()
-                web_mode = re.search(r'(^|\s)--web($|\s)', prompt) is not None
+                    prompt = re.sub(r"(^|\s)--show-thinking($|\s)", " ", prompt).strip()
+                web_mode = re.search(r"(^|\s)--web($|\s)", prompt) is not None
                 if web_mode:
-                    prompt = re.sub(r'(^|\s)--web($|\s)', ' ', prompt).strip()
+                    prompt = re.sub(r"(^|\s)--web($|\s)", " ", prompt).strip()
 
                 class AIContext:
-                    __slots__ = ('bot', 'author', 'guild', 'channel', 'message', '_state')
+                    __slots__ = (
+                        "bot",
+                        "author",
+                        "guild",
+                        "channel",
+                        "message",
+                        "_state",
+                    )
 
                     def __init__(self, original_ctx):
                         self.bot = original_ctx.bot
@@ -4022,13 +4673,18 @@ class Tags(commands.Cog):
 
                 fake_ctx = AIContext(ctx)
 
-                messages = [{
-                    "role": "system",
-                    "content": await ai.create_system_prompt(fake_ctx, prompt)
-                }]
+                messages = [
+                    {
+                        "role": "system",
+                        "content": await ai.create_system_prompt(fake_ctx, prompt),
+                    }
+                ]
 
-
-                conv_key = (fake_ctx.guild.id, fake_ctx.channel.id, fake_ctx.author.id) if fake_ctx.guild else (fake_ctx.author.id, fake_ctx.channel.id)
+                conv_key = (
+                    (fake_ctx.guild.id, fake_ctx.channel.id, fake_ctx.author.id)
+                    if fake_ctx.guild
+                    else (fake_ctx.author.id, fake_ctx.channel.id)
+                )
                 history = await ai.get_conversation_history(conv_key)
 
                 if history:
@@ -4037,33 +4693,51 @@ class Tags(commands.Cog):
                 messages.append({"role": "user", "content": prompt})
                 while True:
                     ollama_client = ollama.AsyncClient(
-                        host="https://ollama.com" if web_mode else None,
-                        headers={'Authorization': 'Bearer ' + bot_info.data['ollama_api_key'] if web_mode else None}
+                        headers={
+                            "Authorization": "Bearer " + bot_info.data["ollama_api_key"]
+                            if web_mode
+                            else None
+                        }
                     )
-                    available_tools = {'web_search': ollama_client.web_search, 'web_fetch': ollama_client.web_fetch}
+                    available_tools = {
+                        "web_search": ollama_client.web_search,
+                        "web_fetch": ollama_client.web_fetch,
+                    }
                     response = await ollama_client.chat(
-                        model=bot_info.data['ollama_model'],
+                        model=bot_info.data["ollama_model"],
                         messages=messages,
                         think=think_mode,
-                        tools=[ollama_client.web_search, ollama_client.web_fetch] if web_mode else None
+                        tools=[ollama_client.web_search, ollama_client.web_fetch]
+                        if web_mode
+                        else None,
                     )
                     msg = response.message
                     if web_mode and getattr(msg, "tool_calls", None):
                         for tool_call in msg.tool_calls:
-                            function_to_call = available_tools.get(tool_call.function.name)
+                            function_to_call = available_tools.get(
+                                tool_call.function.name
+                            )
                             if function_to_call:
                                 args = tool_call.function.arguments
                                 result = await function_to_call(**args)
-                                messages.append({
-                                    "role": "tool",
-                                    "tool_name": tool_call.function.name,
-                                    "content": str(result)[:2000]
-                                })
+                                messages.append(
+                                    {
+                                        "role": "tool",
+                                        "tool_name": tool_call.function.name,
+                                        "content": str(result)[:2000],
+                                    }
+                                )
                             else:
-                                messages.append({"role":" tool", "content": f"Tool {tool_call.function.name} not found", "tool_name": tool_call.function.name})
-                        
+                                messages.append(
+                                    {
+                                        "role": " tool",
+                                        "content": f"Tool {tool_call.function.name} not found",
+                                        "tool_name": tool_call.function.name,
+                                    }
+                                )
+
                         continue
-                    
+
                     final_content = msg.content
                     display_content = final_content
                     if show_thinking and getattr(msg, "thinking", None):
@@ -4074,9 +4748,13 @@ class Tags(commands.Cog):
                             f"{final_content}"
                         )
 
-                    new_history = (history[-MAX_CONVERSATION_HISTORY_LENGTH * 2:] if history else []) + [
+                    new_history = (
+                        history[-MAX_CONVERSATION_HISTORY_LENGTH * 2 :]
+                        if history
+                        else []
+                    ) + [
                         {"role": "user", "content": prompt},
-                        {"role": "assistant", "content": final_content}
+                        {"role": "assistant", "content": final_content},
                     ]
                     await ai.save_conversation_history(conv_key, new_history)
 
@@ -4085,56 +4763,55 @@ class Tags(commands.Cog):
             except Exception as e:
                 return f"[AI error: {str(e)}]"
 
-        @self.formatter.register('translate')
+        @self.formatter.register("translate")
         async def _translate(ctx, val, **kwargs):
             """
             ### {translate:text|from_lang|to_lang}
                 * Translates text to another language via LibreTranslate.
                 * Example: `{translate:hello world|auto|tr}`
             """
-            parts = val.split('|', 2)
+            parts = val.split("|", 2)
 
             text = parts[0].strip()
             from_lang = parts[1].strip() or "auto"
             to_lang = parts[2].strip() if len(parts) > 2 else "en"
 
             url = "http://localhost:5000/translate"
-            payload = {
-                "q": text,
-                "source": from_lang,
-                "target": to_lang
-            }
+            payload = {"q": text, "source": from_lang, "target": to_lang}
             headers = {"Content-Type": "application/json"}
 
             try:
                 async with aiohttp.ClientSession() as session:
-                    async with session.post(url, json=payload, headers=headers) as response:
+                    async with session.post(
+                        url, json=payload, headers=headers
+                    ) as response:
                         if response.status != 200:
-                            return f"[translate error: HTTP Exception: {response.status}]"
+                            return (
+                                f"[translate error: HTTP Exception: {response.status}]"
+                            )
                         data = await response.json()
                         translated_text = data.get("translatedText", "").strip()
                         return translated_text
             except Exception as e:
                 return f"[translate error: {str(e)}]"
 
-
-        @self.formatter.register('args')
+        @self.formatter.register("args")
         def args(ctx, _, **kwargs):
             """
             ### {args}
                 * Returns all arguments passed to the tag.
                 * Example: `{args}`
             """
-            return kwargs.get('args', '')
+            return kwargs.get("args", "")
 
-        @self.formatter.register('arg')
+        @self.formatter.register("arg")
         async def arg(ctx, i, **kwargs):
             """
             ### {arg:index}
                 * Returns the argument at the specified index. (0-based)
                 * Example: `{arg:1}` returns the second argument.
             """
-            args_string = kwargs.get('args', '')
+            args_string = kwargs.get("args", "")
             args_list = args_string.split()
 
             try:
@@ -4144,19 +4821,19 @@ class Tags(commands.Cog):
 
             if 0 <= index < len(args_list):
                 return args_list[index]
-            return ''
+            return ""
 
-        @self.formatter.register('rest')
+        @self.formatter.register("rest")
         def rest(ctx, i, **kwargs):
             """
             ### {rest:index}
                 * Returns all arguments from the specified index onward.
                 * Example: `{rest:2}` returns arguments starting from the 3rd one.
             """
-            split_args = kwargs.get('args', '').split()
-            return ' '.join(split_args[int(i):]) if i.isdigit() else ''
+            split_args = kwargs.get("args", "").split()
+            return " ".join(split_args[int(i) :]) if i.isdigit() else ""
 
-        @self.formatter.register('default')
+        @self.formatter.register("default")
         def default(ctx, val, fb, **kwargs):
             """
             ### {default:value|fallback}
@@ -4167,7 +4844,7 @@ class Tags(commands.Cog):
             fb_str = str(fb) if fb is not None else ""
             return val_str if val_str else fb_str
 
-        @self.formatter.register('newline')
+        @self.formatter.register("newline")
         def _newline(ctx, _, **kwargs):
             """
             ### {newline}
@@ -4175,9 +4852,9 @@ class Tags(commands.Cog):
                 * Example: `Line1{newline}Line2`
                 * Can be useful inside slash commands.
             """
-            return '\n'
+            return "\n"
 
-        @self.formatter.register('jsonify')
+        @self.formatter.register("jsonify")
         def _jsonify(ctx, text, **kwargs):
             """
             ### {jsonify:text}
@@ -4191,7 +4868,7 @@ class Tags(commands.Cog):
             except Exception as e:
                 return f"[JSON Error: {str(e)}]"
 
-        @self.formatter.register('traversejson')
+        @self.formatter.register("traversejson")
         def _traversejson(ctx, val, **kwargs):
             """
             ### {traversejson:path|json}
@@ -4199,32 +4876,34 @@ class Tags(commands.Cog):
                 * Example: `{traversejson:user.name|{"user":{"name":"Alice"}}}`
             """
             try:
-                parts = str(val).strip().split('|', 1)
+                parts = str(val).strip().split("|", 1)
                 if len(parts) != 2:
-                    return '[JSON traverse error: invalid syntax]'
+                    return "[JSON traverse error: invalid syntax]"
 
                 path_expr, json_str = parts[0].strip(), parts[1].strip()
 
                 try:
                     data = json.loads(json_str)
                 except json.JSONDecodeError:
-                    return '[JSON traverse error: invalid JSON]'
+                    return "[JSON traverse error: invalid JSON]"
 
                 path_expr = path_expr.strip()
-                if path_expr.startswith('$'):
-                    path_expr = path_expr[1:].lstrip('. ')
+                if path_expr.startswith("$"):
+                    path_expr = path_expr[1:].lstrip(". ")
                 if not path_expr:
                     return json.dumps(data)
 
                 tokens = []
-                for part in re.findall(r'\.{1,2}|(?:\[[^\]]+\])+|[^\.\[\]]+', path_expr):
+                for part in re.findall(
+                    r"\.{1,2}|(?:\[[^\]]+\])+|[^\.\[\]]+", path_expr
+                ):
                     part = part.strip()
-                    if part.startswith('[') and part.endswith(']'):
-                        tokens.append(('index', part))
-                    elif part == '.':
+                    if part.startswith("[") and part.endswith("]"):
+                        tokens.append(("index", part))
+                    elif part == ".":
                         continue
                     else:
-                        tokens.append(('key', part))
+                        tokens.append(("key", part))
 
                 result = [data]
                 i = 0
@@ -4233,7 +4912,7 @@ class Tags(commands.Cog):
                     next_results = []
 
                     for item in result:
-                        if token_type == 'key' and token == '..':
+                        if token_type == "key" and token == "..":
                             stack = [item]
                             found = []
                             while stack:
@@ -4250,15 +4929,15 @@ class Tags(commands.Cog):
                             break
 
                         elif isinstance(item, dict):
-                            if token_type == 'key':
-                                if token == '*':
+                            if token_type == "key":
+                                if token == "*":
                                     next_results.extend(item.values())
                                 elif token in item:
                                     next_results.append(item[token])
-                            elif token_type == 'index':
-                                indices = re.findall(r'\[(\*|\d+)\]', token)
+                            elif token_type == "index":
+                                indices = re.findall(r"\[(\*|\d+)\]", token)
                                 for idx in indices:
-                                    if idx == '*':
+                                    if idx == "*":
                                         next_results.extend(item.values())
                                     else:
                                         n = int(idx)
@@ -4267,17 +4946,17 @@ class Tags(commands.Cog):
                                             next_results.append(vals[n])
 
                         elif isinstance(item, list):
-                            if token_type == 'key':
-                                if token.isdigit() or token == '*':
+                            if token_type == "key":
+                                if token.isdigit() or token == "*":
                                     continue
                                 else:
                                     for elem in item:
                                         if isinstance(elem, dict) and token in elem:
                                             next_results.append(elem[token])
-                            elif token_type == 'index':
-                                indices = re.findall(r'\[(\*|\d+)\]', token)
+                            elif token_type == "index":
+                                indices = re.findall(r"\[(\*|\d+)\]", token)
                                 for idx in indices:
-                                    if idx == '*':
+                                    if idx == "*":
                                         next_results.extend(item)
                                     else:
                                         n = int(idx)
@@ -4290,9 +4969,9 @@ class Tags(commands.Cog):
                 return json.dumps(result[0]) if len(result) == 1 else json.dumps(result)
 
             except Exception as e:
-                return f'[JSON traverse error: {str(e)}]'
+                return f"[JSON traverse error: {str(e)}]"
 
-        @self.formatter.register('repeat')
+        @self.formatter.register("repeat")
         def _repeat(ctx, val, **kwargs):
             """
             ### {repeat:count|text}
@@ -4302,7 +4981,7 @@ class Tags(commands.Cog):
                 * If count is not a valid number, returns the text once
             """
             try:
-                parts = str(val).split('|', 1)
+                parts = str(val).split("|", 1)
                 if len(parts) < 2:
                     return str(val)
 
@@ -4316,7 +4995,7 @@ class Tags(commands.Cog):
             except ValueError:
                 return text
 
-        @self.formatter.register('join')
+        @self.formatter.register("join")
         async def _join(ctx, val, **kwargs):
             """
             ### {join:delimiter|json_array}
@@ -4324,12 +5003,12 @@ class Tags(commands.Cog):
                 * Example: `{join:, |["a","b","c"]}` -> "a, b, c"
             """
             try:
-                delim, arr = val.split('|', 1)
+                delim, arr = val.split("|", 1)
                 return delim.join(json.loads(arr))
             except Exception as e:
                 return f"[join error: {str(e)}]"
 
-        @self.formatter.register('split')
+        @self.formatter.register("split")
         async def _split(ctx, val, **kwargs):
             """
             ### {split:delimiter|text}
@@ -4343,21 +5022,18 @@ class Tags(commands.Cog):
                 if not val:
                     return json.dumps([])
 
-
-                parts = val.split('|', 1)
+                parts = val.split("|", 1)
                 if len(parts) < 2:
                     return "[split error: missing text to split]"
 
                 delim_spec, text = parts
 
-
                 if delim_spec.lower() == "space":
                     delim = " "
                 elif delim_spec.lower() == "whitespace":
-                    return json.dumps(re.split(r'\s+', text.strip()))
+                    return json.dumps(re.split(r"\s+", text.strip()))
                 else:
                     delim = delim_spec.replace("\\n", "\n").replace("\\t", "\t")
-
 
                 if delim == "" and " " in val:
                     delim = " "
@@ -4367,8 +5043,8 @@ class Tags(commands.Cog):
             except Exception as e:
                 return f"[split error: {str(e)}]"
 
-        @self.formatter.register('trim')
-        @self.formatter.register('strip')
+        @self.formatter.register("trim")
+        @self.formatter.register("strip")
         async def _trim(ctx, val, **kwargs):
             """
             ### {trim:text}
@@ -4377,7 +5053,7 @@ class Tags(commands.Cog):
             """
             return val.strip()
 
-        @self.formatter.register('substring')
+        @self.formatter.register("substring")
         async def _substring(ctx, args_str, **kwargs):
             """
             ### {substring:text|start|end|step}
@@ -4387,10 +5063,12 @@ class Tags(commands.Cog):
             try:
                 processed_input = str(args_str)
 
-                if '|' in processed_input:
-                    parts = [p.strip() for p in processed_input.split('|') if p.strip()]
+                if "|" in processed_input:
+                    parts = [p.strip() for p in processed_input.split("|") if p.strip()]
                 else:
-                    parts = [p.strip() for p in processed_input.split(':', 2) if p.strip()]
+                    parts = [
+                        p.strip() for p in processed_input.split(":", 2) if p.strip()
+                    ]
 
                 if len(parts) < 2:
                     return "[error: substring requires atleast text and start position]"
@@ -4433,7 +5111,7 @@ class Tags(commands.Cog):
             except Exception as e:
                 return f"[substring error: {str(e)}]"
 
-        @self.formatter.register('replace')
+        @self.formatter.register("replace")
         async def _replace(ctx, args_str, **kwargs):
             """
             ### {replace:text|find|replace|flags}
@@ -4447,10 +5125,10 @@ class Tags(commands.Cog):
             try:
                 processed_input = str(args_str)
 
-                if '|' in processed_input:
-                    parts = [p.strip() for p in processed_input.split('|')]
+                if "|" in processed_input:
+                    parts = [p.strip() for p in processed_input.split("|")]
                 else:
-                    parts = [p.strip() for p in processed_input.split(':')]
+                    parts = [p.strip() for p in processed_input.split(":")]
 
                 if len(parts) < 3:
                     return processed_input
@@ -4458,24 +5136,24 @@ class Tags(commands.Cog):
                 text = parts[0]
                 find = parts[1]
                 replace = parts[2]
-                flags = parts[3].lower() if len(parts) > 3 else ''
+                flags = parts[3].lower() if len(parts) > 3 else ""
 
                 if not find:
                     return text
 
-                if 'c' in flags:
-                    if 'r' in flags:
-                        re_flags = re.IGNORECASE if 'i' in flags else 0
-                        if 'w' in flags:
-                            find = r'\b' + find + r'\b'
+                if "c" in flags:
+                    if "r" in flags:
+                        re_flags = re.IGNORECASE if "i" in flags else 0
+                        if "w" in flags:
+                            find = r"\b" + find + r"\b"
                         try:
                             return str(len(re.findall(find, text, flags=re_flags)))
                         except re.error:
                             return text
                     else:
-                        search_text = text.lower() if 'i' in flags else text
-                        find_str = find.lower() if 'i' in flags else find
-                        if 'w' in flags:
+                        search_text = text.lower() if "i" in flags else text
+                        find_str = find.lower() if "i" in flags else find
+                        if "w" in flags:
                             words = search_text.split()
                             count = 0
                             for word in words:
@@ -4485,7 +5163,7 @@ class Tags(commands.Cog):
                         count = 0
                         start = 0
                         while True:
-                            if 'i' in flags:
+                            if "i" in flags:
                                 idx = search_text.find(find_str, start)
                             else:
                                 idx = text.find(find, start)
@@ -4495,40 +5173,40 @@ class Tags(commands.Cog):
                             start = idx + len(find)
                         return str(count)
 
-                if 'r' in flags:
-                    re_flags = re.IGNORECASE if 'i' in flags else 0
-                    if 'w' in flags:
-                        find = r'\b' + find + r'\b'
+                if "r" in flags:
+                    re_flags = re.IGNORECASE if "i" in flags else 0
+                    if "w" in flags:
+                        find = r"\b" + find + r"\b"
                     try:
                         pattern = re.compile(find, flags=re_flags)
-                        count = 0 if 'g' in flags else 1
+                        count = 0 if "g" in flags else 1
                         return pattern.sub(replace, text, count=count)
                     except re.error:
                         return text
 
-                if 'w' in flags:
+                if "w" in flags:
                     words = text.split()
                     replaced = []
-                    find_lower = find.lower() if 'i' in flags else find
+                    find_lower = find.lower() if "i" in flags else find
                     for word in words:
-                        word_comp = word.lower() if 'i' in flags else word
+                        word_comp = word.lower() if "i" in flags else word
                         if word_comp == find_lower:
                             replaced.append(replace)
-                            if 'g' not in flags:
+                            if "g" not in flags:
                                 idx = len(replaced)
-                                return ' '.join(replaced + words[idx:])
+                                return " ".join(replaced + words[idx:])
                         else:
                             replaced.append(word)
-                    return ' '.join(replaced)
+                    return " ".join(replaced)
 
-                if 'i' in flags:
+                if "i" in flags:
                     find_lower = find.lower()
                     text_lower = text.lower()
                     idx = text_lower.find(find_lower)
                     if idx == -1:
                         return text
-                    if 'g' in flags:
-                        result = ''
+                    if "g" in flags:
+                        result = ""
                         last = 0
                         while idx != -1:
                             result += text[last:idx] + replace
@@ -4537,9 +5215,9 @@ class Tags(commands.Cog):
                         result += text[last:]
                         return result
                     else:
-                        return text[:idx] + replace + text[idx + len(find):]
+                        return text[:idx] + replace + text[idx + len(find) :]
 
-                if 'g' in flags:
+                if "g" in flags:
                     return text.replace(find, replace)
                 else:
                     return text.replace(find, replace, 1)
@@ -4547,8 +5225,7 @@ class Tags(commands.Cog):
             except Exception:
                 return args_str
 
-
-        @self.formatter.register('timestamp')
+        @self.formatter.register("timestamp")
         async def _timestamp(ctx, val, **kwargs):
             """
             ### {timestamp:format|timezone|offset}
@@ -4562,11 +5239,10 @@ class Tags(commands.Cog):
                 * Example: `{timestamp:F|Europe/Paris|+1}`
             """
             try:
-                parts = val.split('|', 2) if val else []
+                parts = val.split("|", 2) if val else []
                 format_code = parts[0].strip() if parts else "f"
                 tz = parts[1].strip() if len(parts) > 1 else "UTC"
                 offset = float(parts[2]) if len(parts) > 2 else 0
-
 
                 try:
                     tz_info = ZoneInfo(tz)
@@ -4575,7 +5251,6 @@ class Tags(commands.Cog):
 
                 now = datetime.now(tz_info) + timedelta(hours=offset)
 
-
                 discord_formats = {
                     "t": "t",
                     "T": "T",
@@ -4583,7 +5258,7 @@ class Tags(commands.Cog):
                     "D": "D",
                     "f": "f",
                     "F": "F",
-                    "R": "R"
+                    "R": "R",
                 }
 
                 if format_code == "R":
@@ -4601,7 +5276,7 @@ class Tags(commands.Cog):
             except Exception as e:
                 return f"[timestamp error: {str(e)}]"
 
-        @self.formatter.register('duration')
+        @self.formatter.register("duration")
         async def _duration(ctx, val, **kwargs):
             """
             ### {duration:start|end|format|precision}
@@ -4623,7 +5298,7 @@ class Tags(commands.Cog):
                     - {duration:now-30m|now+1h|colon} -> "01:30:00"
             """
             try:
-                parts = str(val).split('|', 3)
+                parts = str(val).split("|", 3)
                 start_str = parts[0].strip()
                 end_str = parts[1].strip()
                 fmt = parts[2].lower() if len(parts) > 2 else "human"
@@ -4631,52 +5306,55 @@ class Tags(commands.Cog):
 
                 def parse_relative(time_str):
                     now = datetime.now(ZoneInfo("UTC"))
-                    match = re.match(r'now([+-])(\d+)([hmsd])', time_str.lower())
+                    match = re.match(r"now([+-])(\d+)([hmsd])", time_str.lower())
                     if not match:
                         return None
 
                     sign, num, unit = match.groups()
-                    delta = timedelta(**{
-                        'h': {'hours': int(num)},
-                        'm': {'minutes': int(num)},
-                        's': {'seconds': int(num)},
-                        'd': {'days': int(num)}
-                    }[unit])
-                    return now + delta if sign == '+' else now - delta
+                    delta = timedelta(
+                        **{
+                            "h": {"hours": int(num)},
+                            "m": {"minutes": int(num)},
+                            "s": {"seconds": int(num)},
+                            "d": {"days": int(num)},
+                        }[unit]
+                    )
+                    return now + delta if sign == "+" else now - delta
 
                 def parse_time(time_str):
-                    if time_str.lower().startswith('now'):
+                    if time_str.lower().startswith("now"):
                         relative = parse_relative(time_str)
                         if relative:
                             return relative
 
-
                     if time_str.lower() == "now":
                         return datetime.now(ZoneInfo("UTC"))
                     try:
-                        return datetime.fromisoformat(time_str).astimezone(ZoneInfo("UTC"))
+                        return datetime.fromisoformat(time_str).astimezone(
+                            ZoneInfo("UTC")
+                        )
                     except ValueError:
                         try:
-                            return datetime.fromtimestamp(int(time_str), ZoneInfo("UTC"))
+                            return datetime.fromtimestamp(
+                                int(time_str), ZoneInfo("UTC")
+                            )
                         except ValueError:
                             raise ValueError(f"Invalid time format: {time_str}")
-
 
                 start = parse_time(start_str)
                 end = parse_time(end_str)
                 delta = end - start if end > start else start - end
                 total_seconds = delta.total_seconds()
 
-
                 def format_human(seconds, max_units):
                     intervals = [
-                        ('year', 31536000),
-                        ('month', 2592000),
-                        ('week', 604800),
-                        ('day', 86400),
-                        ('hour', 3600),
-                        ('minute', 60),
-                        ('second', 1)
+                        ("year", 31536000),
+                        ("month", 2592000),
+                        ("week", 604800),
+                        ("day", 86400),
+                        ("hour", 3600),
+                        ("minute", 60),
+                        ("second", 1),
                     ]
                     parts = []
                     for name, count in intervals:
@@ -4690,10 +5368,10 @@ class Tags(commands.Cog):
 
                 def format_precise(seconds):
                     units = [
-                        ('day', delta.days),
-                        ('hour', delta.seconds // 3600),
-                        ('minute', (delta.seconds // 60) % 60),
-                        ('second', delta.seconds % 60)
+                        ("day", delta.days),
+                        ("hour", delta.seconds // 3600),
+                        ("minute", (delta.seconds // 60) % 60),
+                        ("second", delta.seconds % 60),
                     ]
                     parts = []
                     for unit, value in units:
@@ -4703,7 +5381,6 @@ class Tags(commands.Cog):
 
                 def format_iso():
                     return end.isoformat()
-
 
                 if fmt == "human":
                     return format_human(total_seconds, precision)
@@ -4727,7 +5404,7 @@ class Tags(commands.Cog):
             except Exception as e:
                 return f"[duration error: {str(e)}]"
 
-        @self.formatter.register('businessdays')
+        @self.formatter.register("businessdays")
         async def _businessdays(ctx, val, **kwargs):
             """
             ### {businessdays:start|end|[holidays]}
@@ -4736,12 +5413,14 @@ class Tags(commands.Cog):
                 * Example: `{businessdays:2023-12-01|2023-12-31|["2023-12-25"]}`
             """
             try:
-                parts = val.split('|', 2)
+                parts = val.split("|", 2)
                 if len(parts) < 2:
                     return "[businessdays error: need start and end dates]"
 
                 start_str, end_str = parts[0].strip(), parts[1].strip()
-                holidays = json.loads(parts[2].replace('""', '"')) if len(parts) > 2 else []
+                holidays = (
+                    json.loads(parts[2].replace('""', '"')) if len(parts) > 2 else []
+                )
 
                 def parse_date(d):
                     if d.lower() == "now":
@@ -4762,7 +5441,10 @@ class Tags(commands.Cog):
 
                 delta = end_date - start_date
                 business_days = 0
-                holidays = [datetime.fromisoformat(h).date() if isinstance(h, str) else h for h in holidays]
+                holidays = [
+                    datetime.fromisoformat(h).date() if isinstance(h, str) else h
+                    for h in holidays
+                ]
 
                 for i in range(delta.days + 1):
                     current = start_date + timedelta(days=i)
@@ -4776,7 +5458,7 @@ class Tags(commands.Cog):
             except Exception as e:
                 return f"[businessdays error: {str(e)}]"
 
-        @self.formatter.register('parsetime')
+        @self.formatter.register("parsetime")
         async def _parsetime(ctx, val, **kwargs):
             """
             ### {parsetime:time string|timezone|format}
@@ -4784,37 +5466,29 @@ class Tags(commands.Cog):
                 * Example: `{parsetime:in 2 hours|UTC|ISO}`
             """
             try:
-                parts = val.split('|', 2)
-                time_str = parts[0].strip(' "\'')
+                parts = val.split("|", 2)
+                time_str = parts[0].strip(" \"'")
                 tz = parts[1].strip() if len(parts) > 1 else "UTC"
                 fmt = parts[2].strip().lower() if len(parts) > 2 else "iso"
 
-
                 now = datetime.now(ZoneInfo(tz))
 
-
                 settings = {
-                    'TIMEZONE': tz,
-                    'RETURN_AS_TIMEZONE_AWARE': True,
-                    'PREFER_DATES_FROM': 'future',
-                    'RELATIVE_BASE': now,
-                    'DATE_ORDER': 'MDY',
+                    "TIMEZONE": tz,
+                    "RETURN_AS_TIMEZONE_AWARE": True,
+                    "PREFER_DATES_FROM": "future",
+                    "RELATIVE_BASE": now,
+                    "DATE_ORDER": "MDY",
                 }
 
-
-                dt = dateparser.parse(
-                    time_str,
-                    settings=settings
-                )
+                dt = dateparser.parse(time_str, settings=settings)
 
                 if not dt:
                     return f"[parsetime error: could not understand '{time_str}']"
 
-
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=ZoneInfo(tz))
                 dt = dt.astimezone(ZoneInfo(tz))
-
 
                 if fmt == "unix":
                     return str(int(dt.timestamp()))
@@ -4825,16 +5499,15 @@ class Tags(commands.Cog):
             except Exception as e:
                 return f"[parsetime error: {str(e)}]"
 
-
-        @self.formatter.register('jsonpretty')
+        @self.formatter.register("jsonpretty")
         async def _jsonpretty(ctx, val, **kwargs):
             """
-                ### {jsonpretty:json}
-                    * Formats JSON with indentation.
-                    * Example: `{jsonpretty:{"a":1}}` ->
-                {
-                    "a": 1
-                }
+            ### {jsonpretty:json}
+                * Formats JSON with indentation.
+                * Example: `{jsonpretty:{"a":1}}` ->
+            {
+                "a": 1
+            }
             """
             try:
                 data = json.loads(val)
@@ -4842,7 +5515,7 @@ class Tags(commands.Cog):
             except Exception as e:
                 return f"[jsonpretty error: {str(e)}]"
 
-        @self.formatter.register('jsonschema')
+        @self.formatter.register("jsonschema")
         async def _jsonschema(ctx, val, **kwargs):
             """
             ### {jsonschema:json|schema}
@@ -4866,7 +5539,7 @@ class Tags(commands.Cog):
             except Exception as e:
                 return f"[jsonschema error: {str(e)}]"
 
-        @self.formatter.register('type')
+        @self.formatter.register("type")
         async def _type(ctx, val, **kwargs):
             """
             ### {type:value}
@@ -4880,7 +5553,7 @@ class Tags(commands.Cog):
                 evaluated_val = val
             return type(evaluated_val).__name__
 
-        @self.formatter.register('hash')
+        @self.formatter.register("hash")
         async def _hash(ctx, val, **kwargs):
             """
             ### {hash:algorithm|text}
@@ -4889,12 +5562,12 @@ class Tags(commands.Cog):
                 * Example: `{hash:sha256|hello}` -> "2cf24d...b2b4"
             """
             try:
-                algo, text = val.split('|', 1)
+                algo, text = val.split("|", 1)
                 return hashlib.new(algo.strip(), text.encode()).hexdigest()
             except Exception as e:
                 return f"[Hash error: {str(e)}]"
 
-        @self.formatter.register('urlencode')
+        @self.formatter.register("urlencode")
         async def _urlencode(ctx, text, **kwargs):
             """
             ### {urlencode:text}
@@ -4907,7 +5580,7 @@ class Tags(commands.Cog):
             except Exception:
                 return text
 
-        @self.formatter.register('urldecode')
+        @self.formatter.register("urldecode")
         async def _urldecode(ctx, text, **kwargs):
             """
             ### {urldecode:text}
@@ -4920,7 +5593,7 @@ class Tags(commands.Cog):
             except Exception:
                 return text
 
-        @self.formatter.register('base64encode')
+        @self.formatter.register("base64encode")
         async def _base64encode(ctx, text, **kwargs):
             """
             ### {base64encode:text}
@@ -4933,7 +5606,7 @@ class Tags(commands.Cog):
             except Exception:
                 return "[base64 error]"
 
-        @self.formatter.register('base64decode')
+        @self.formatter.register("base64decode")
         async def _base64decode(ctx, text, **kwargs):
             """
             ### {base64decode:text}
@@ -4946,7 +5619,7 @@ class Tags(commands.Cog):
             except Exception:
                 return "[base64 error]"
 
-        @self.formatter.register('hex')
+        @self.formatter.register("hex")
         async def _hex(ctx, args_str, **kwargs):
             """
             ### {hex:encode|text} or {hex:decode|text}
@@ -4968,7 +5641,7 @@ class Tags(commands.Cog):
             except Exception:
                 return "[hex error]"
 
-        @self.formatter.register('countdown')
+        @self.formatter.register("countdown")
         async def _countdown(ctx, val, **kwargs):
             """
             ### {countdown:target_time|format|timezone|past_message}
@@ -4988,12 +5661,15 @@ class Tags(commands.Cog):
                     - `{countdown:tomorrow at 3pm|discord|Europe/London}`
             """
             try:
-                parts = str(val).split('|', 3)
+                parts = str(val).split("|", 3)
                 time_str = parts[0].strip('"')
                 fmt = parts[1].lower() if len(parts) > 1 else "human"
                 tz = parts[2] if len(parts) > 2 else "UTC"
-                past_msg = parts[3] if len(parts) > 3 else "The target time has already passed."
-
+                past_msg = (
+                    parts[3]
+                    if len(parts) > 3
+                    else "The target time has already passed."
+                )
 
                 try:
                     if time_str.lower() == "now":
@@ -5003,7 +5679,7 @@ class Tags(commands.Cog):
                     else:
                         target = dateparser.parse(
                             time_str,
-                            settings={'TIMEZONE': tz, 'RETURN_AS_TIMEZONE_AWARE': True}
+                            settings={"TIMEZONE": tz, "RETURN_AS_TIMEZONE_AWARE": True},
                         )
 
                     if not target:
@@ -5011,26 +5687,24 @@ class Tags(commands.Cog):
                 except Exception as e:
                     return f"[countdown error: invalid time - {str(e)}]"
 
-
                 now = datetime.now(ZoneInfo(tz))
                 delta = target - now if target > now else now - target
                 is_past = target < now
 
-
                 if fmt == "discord":
-                    return f"<t:{int(target.timestamp())}:R>" if not is_past else past_msg
-
+                    return (
+                        f"<t:{int(target.timestamp())}:R>" if not is_past else past_msg
+                    )
 
                 if is_past:
                     return past_msg
 
-
                 def format_duration(seconds, precision=3):
                     intervals = [
-                        ('day', 86400),
-                        ('hour', 3600),
-                        ('minute', 60),
-                        ('second', 1)
+                        ("day", 86400),
+                        ("hour", 3600),
+                        ("minute", 60),
+                        ("second", 1),
                     ]
 
                     parts = []
@@ -5038,7 +5712,9 @@ class Tags(commands.Cog):
                         value = int(seconds // count)
                         if value:
                             seconds -= value * count
-                            parts.append(f"{value} {name if value == 1 else name + 's'}")
+                            parts.append(
+                                f"{value} {name if value == 1 else name + 's'}"
+                            )
                         if len(parts) >= precision:
                             break
                     return ", ".join(parts) if parts else "0 seconds"
@@ -5061,7 +5737,7 @@ class Tags(commands.Cog):
             except Exception as e:
                 return f"[countdown error: {str(e)}]"
 
-        @self.formatter.register('reverse')
+        @self.formatter.register("reverse")
         async def _reverse(ctx, text, **kwargs):
             """
             ### {reverse:text}
@@ -5074,7 +5750,7 @@ class Tags(commands.Cog):
             except Exception:
                 return text
 
-        @self.formatter.register('if')
+        @self.formatter.register("if")
         async def _if(ctx, args_str, **kwargs):
             """
             ### {if:left|operator|right|then:value[|elif:left|operator|right|then:value|...]|else:value}
@@ -5086,15 +5762,15 @@ class Tags(commands.Cog):
                 * Example: `{if:some|==|thing|then:yes|else:no}`
             """
             resolved_str, _, _, _ = await self.formatter.format(args_str, ctx, **kwargs)
-            processed_str = re.sub(r'\s+then:', 'then:', resolved_str)
-            processed_str = re.sub(r'\s+elif:', 'elif:', processed_str)
-            processed_str = re.sub(r'\s+else:', 'else:', processed_str)
+            processed_str = re.sub(r"\s+then:", "then:", resolved_str)
+            processed_str = re.sub(r"\s+elif:", "elif:", processed_str)
+            processed_str = re.sub(r"\s+else:", "else:", processed_str)
             tokens = []
-            for part in processed_str.split('|'):
-                if ':' in part:
-                    key = part.split(':')[0].lower()
-                    if key in ('then', 'else', 'elif'):
-                        key_val = part.split(':', 1)
+            for part in processed_str.split("|"):
+                if ":" in part:
+                    key = part.split(":")[0].lower()
+                    if key in ("then", "else", "elif"):
+                        key_val = part.split(":", 1)
                         tokens.append(key_val[0].strip())
                         tokens.append(key_val[1].strip())
                     else:
@@ -5109,13 +5785,12 @@ class Tags(commands.Cog):
             conditions = []
             else_value = None
 
-
             left = tokens[i]
             op = tokens[i + 1]
             right = tokens[i + 2]
             i += 3
 
-            if i >= len(tokens) or tokens[i].lower() != 'then':
+            if i >= len(tokens) or tokens[i].lower() != "then":
                 return f"[error: missing 'then' after condition at position {i}]"
             i += 1
             if i >= len(tokens):
@@ -5124,17 +5799,16 @@ class Tags(commands.Cog):
             i += 1
             conditions.append((left, op, right, then_val))
 
-
             while i < len(tokens):
-                if tokens[i].lower() == 'elif':
+                if tokens[i].lower() == "elif":
                     i += 1
                     if i + 3 >= len(tokens):
                         return "[error: incomplete elif block]"
                     elif_left = tokens[i]
-                    elif_op = tokens[i+1]
-                    elif_right = tokens[i+2]
+                    elif_op = tokens[i + 1]
+                    elif_right = tokens[i + 2]
                     i += 3
-                    if i >= len(tokens) or tokens[i].lower() != 'then':
+                    if i >= len(tokens) or tokens[i].lower() != "then":
                         return "[error: missing 'then' after elif]"
                     i += 1
                     if i >= len(tokens):
@@ -5142,33 +5816,31 @@ class Tags(commands.Cog):
                     elif_then = tokens[i]
                     i += 1
                     conditions.append((elif_left, elif_op, elif_right, elif_then))
-                elif tokens[i].lower() == 'else':
+                elif tokens[i].lower() == "else":
                     i += 1
-                    else_value = '|'.join(tokens[i:])
+                    else_value = "|".join(tokens[i:])
                     break
                 else:
                     break
 
-
             ops = {
-                '==': lambda a, b: str(a) == str(b),
-                '!=': lambda a, b: str(a) != str(b),
-                '>': lambda a, b: float(a) > float(b),
-                '<': lambda a, b: float(a) < float(b),
-                '>=': lambda a, b: float(a) >= float(b),
-                '<=': lambda a, b: float(a) <= float(b),
-                '*=': lambda a, b: str(b) in str(a),
-                '^=': lambda a, b: str(a).startswith(str(b)),
-                '$=': lambda a, b: str(a).endswith(str(b)),
-                '~=': lambda a, b: re.search(str(b), str(a)) is not None,
+                "==": lambda a, b: str(a) == str(b),
+                "!=": lambda a, b: str(a) != str(b),
+                ">": lambda a, b: float(a) > float(b),
+                "<": lambda a, b: float(a) < float(b),
+                ">=": lambda a, b: float(a) >= float(b),
+                "<=": lambda a, b: float(a) <= float(b),
+                "*=": lambda a, b: str(b) in str(a),
+                "^=": lambda a, b: str(a).startswith(str(b)),
+                "$=": lambda a, b: str(a).endswith(str(b)),
+                "~=": lambda a, b: re.search(str(b), str(a)) is not None,
             }
-
 
             for cond in conditions:
                 l, o, r, t = cond
                 negate = False
 
-                if o.startswith('!') and o[1:] in ops:
+                if o.startswith("!") and o[1:] in ops:
                     negate = True
                     o = o[1:]
 
@@ -5188,14 +5860,13 @@ class Tags(commands.Cog):
                     text, _, _, _ = await self.formatter.format(t, ctx, **kwargs)
                     return text.strip()
 
-
             if else_value is not None:
                 text, _, _, _ = await self.formatter.format(else_value, ctx, **kwargs)
                 return text.strip()
 
             return None
 
-        @self.formatter.register('and')
+        @self.formatter.register("and")
         async def _and(ctx, args_str, **kwargs):
             """
             ### {and:value1|value2|...}
@@ -5214,7 +5885,7 @@ class Tags(commands.Cog):
                 last_valid = arg
             return last_valid
 
-        @self.formatter.register('or')
+        @self.formatter.register("or")
         async def _or(ctx, args_str, **kwargs):
             """
             ### {or:value1|value2|...}
@@ -5226,7 +5897,7 @@ class Tags(commands.Cog):
                     return arg
             return None
 
-        @self.formatter.register('equals')
+        @self.formatter.register("equals")
         async def _equals(ctx, args_str, **kwargs):
             """
             ### {equals:val1|val2|...}
@@ -5243,8 +5914,8 @@ class Tags(commands.Cog):
                     return False
             return True
 
-        @self.formatter.register('notequals')
-        @self.formatter.register('unequals')
+        @self.formatter.register("notequals")
+        @self.formatter.register("unequals")
         async def _notequals(ctx, args_str, **kwargs):
             """
             ### {notequals:val1|val2|...}
@@ -5261,7 +5932,7 @@ class Tags(commands.Cog):
                     return True
             return False
 
-        @self.formatter.register('range')
+        @self.formatter.register("range")
         async def _range(ctx, args_str, **kwargs):
             """
             ### {range:min|max}
@@ -5270,10 +5941,10 @@ class Tags(commands.Cog):
             """
             try:
                 processed = str(args_str)
-                if '|' in processed:
-                    min_val, max_val = processed.split('|', 1)
+                if "|" in processed:
+                    min_val, max_val = processed.split("|", 1)
                 else:
-                    min_val, max_val = '1', processed
+                    min_val, max_val = "1", processed
 
                 min_val = int(min_val.strip())
                 max_val = int(max_val.strip())
@@ -5285,7 +5956,7 @@ class Tags(commands.Cog):
             except Exception:
                 return "[range error: invalid input]"
 
-        @self.formatter.register('dice')
+        @self.formatter.register("dice")
         async def _dice(ctx, notation, **kwargs):
             """
             ### {dice:notation}
@@ -5294,8 +5965,8 @@ class Tags(commands.Cog):
             """
             try:
                 processed = str(notation)
-                parts = re.split(r'[d+-]', processed)
-                modifiers = re.findall(r'[+-]', processed)
+                parts = re.split(r"[d+-]", processed)
+                modifiers = re.findall(r"[+-]", processed)
 
                 count = int(parts[0]) if parts[0] else 1
                 sides = int(parts[1])
@@ -5322,7 +5993,7 @@ class Tags(commands.Cog):
             except Exception:
                 return "[dice error: invalid notation]"
 
-        @self.formatter.register('choose')
+        @self.formatter.register("choose")
         async def _choose(ctx, options_str, **kwargs):
             """
             ### {choose:option1|option2|option3|...}
@@ -5352,42 +6023,48 @@ class Tags(commands.Cog):
             try:
                 processed = str(options_str)
                 settings = {}
-                if 'sep=' in processed.lower():
-                    parts = processed.rsplit('sep=', 1)
+                if "sep=" in processed.lower():
+                    parts = processed.rsplit("sep=", 1)
                     processed = parts[0]
                     settings["sep"] = parts[1].strip().split()[0].strip("'\"")
 
-                if 'group=' in processed.lower():
-                    parts = processed.rsplit('group=', 1)
+                if "group=" in processed.lower():
+                    parts = processed.rsplit("group=", 1)
                     processed = parts[0]
-                    settings["group"] = parts[1].strip().split()[0].strip().lower() in ('true', 'yes', '1')
+                    settings["group"] = parts[1].strip().split()[0].strip().lower() in (
+                        "true",
+                        "yes",
+                        "1",
+                    )
 
                 sep = settings.get("sep", "|")
                 group_mode = settings.get("group", False)
 
                 def process_group(match):
-                    options = [opt.strip() for opt in match.group(1).split('|') if opt.strip()]
-                    return random.choice(options) if options else ''
+                    options = [
+                        opt.strip() for opt in match.group(1).split("|") if opt.strip()
+                    ]
+                    return random.choice(options) if options else ""
 
                 if group_mode:
-                    processed = re.sub(r'\{([^{}]+)\}', process_group, processed)
+                    processed = re.sub(r"\{([^{}]+)\}", process_group, processed)
 
-                raw_parts = re.split(rf'(?<!\\)\{sep}', processed)
+                raw_parts = re.split(rf"(?<!\\)\{sep}", processed)
                 options = []
                 weights = []
                 total_percent = 0
                 percent_entries = []
 
                 for part in raw_parts:
-                    part = part.replace(f'\\{sep}', sep).strip()
+                    part = part.replace(f"\\{sep}", sep).strip()
                     if not part:
                         continue
 
                     weight = 1
                     percent = None
 
-                    if '%' in part:
-                        opt_part, percent_part = part.rsplit('%', 1)
+                    if "%" in part:
+                        opt_part, percent_part = part.rsplit("%", 1)
                         opt_part = opt_part.strip()
                         try:
                             percent = float(percent_part.strip())
@@ -5397,14 +6074,13 @@ class Tags(commands.Cog):
                         except ValueError:
                             pass
 
-                    if '%' not in part and '@' in part:
-                        opt_part, weight_part = part.rsplit('@', 1)
+                    if "%" not in part and "@" in part:
+                        opt_part, weight_part = part.rsplit("@", 1)
                         part = opt_part.strip()
                         try:
                             weight = max(1, int(weight_part.strip()))
                         except ValueError:
                             pass
-
 
                     options.append(part)
                     weights.append(weight)
@@ -5425,7 +6101,7 @@ class Tags(commands.Cog):
             except Exception as e:
                 return f"[choose error: {str(e)}]"
 
-        @self.formatter.register('len')
+        @self.formatter.register("len")
         def _len(ctx, val, **kwargs):
             """
             ### {len:text}
@@ -5434,7 +6110,7 @@ class Tags(commands.Cog):
             """
             return str(len(str(val)))
 
-        @self.formatter.register('upper')
+        @self.formatter.register("upper")
         def _upper(ctx, val, **kwargs):
             """
             ### {upper:text}
@@ -5443,7 +6119,7 @@ class Tags(commands.Cog):
             """
             return str(val).upper()
 
-        @self.formatter.register('lower')
+        @self.formatter.register("lower")
         def _lower(ctx, val, **kwargs):
             """
             ### {lower:text}
@@ -5452,7 +6128,7 @@ class Tags(commands.Cog):
             """
             return str(val).lower()
 
-        @self.formatter.register('capitalize')
+        @self.formatter.register("capitalize")
         def _capitalize(ctx, val, **kwargs):
             """
             ### {capitalize:text}
@@ -5461,23 +6137,22 @@ class Tags(commands.Cog):
             """
             return str(val).capitalize()
 
-        @self.formatter.register('set')
+        @self.formatter.register("set")
         async def _set(ctx, val, **kwargs):
             """
             ### {set:name|value}
                 * Sets a variable for the tag.
                 * Example: `{set:name|John}`
             """
-            parts = val.split('|', 1)
+            parts = val.split("|", 1)
             if len(parts) < 2:
                 return "[error: format should be {set:name|value}]"
             name, value = parts[0].strip(), parts[1].strip()
 
-
             self._variables.setdefault(ctx.message.id, {})[name] = value
             return ""
 
-        @self.formatter.register('get')
+        @self.formatter.register("get")
         async def _get(ctx, name, **kwargs):
             """
             ### {get:name}
@@ -5487,7 +6162,7 @@ class Tags(commands.Cog):
             variables = self._variables.get(ctx.message.id, {})
             return str(variables.get(name.strip(), ""))
 
-        @self.formatter.register('math')
+        @self.formatter.register("math")
         def _math(ctx, expr, **kwargs):
             """
             ### {math:expression}
@@ -5497,157 +6172,157 @@ class Tags(commands.Cog):
             try:
                 expr = str(expr)
                 if not expr:
-                    return '0'
+                    return "0"
                 return str(eval(expr, {"__builtins__": None}, {}))
             except Exception as e:
-                return f'[math error: {e}]'
+                return f"[math error: {e}]"
 
-        @self.formatter.register('python')
-        @self.formatter.register('py')
+        @self.formatter.register("python")
+        @self.formatter.register("py")
         async def _python(ctx, code, **kwargs):
             """
             ### {python:code}
                 * Execute Python code.
                 * Example: `{py:print("hi")}` -> "hi"
             """
-            return await self.execute_language(ctx, 'python', code, **kwargs)
+            return await self.execute_language(ctx, "python", code, **kwargs)
 
-        @self.formatter.register('bash')
-        @self.formatter.register('sh')
+        @self.formatter.register("bash")
+        @self.formatter.register("sh")
         async def _bash(ctx, code, **kwargs):
             """
             ### {bash:code}
                 * Execute Bash code.
                 * Example: `{sh:echo hi}` -> "hi"
             """
-            return await self.execute_language(ctx, 'bash', code, **kwargs)
+            return await self.execute_language(ctx, "bash", code, **kwargs)
 
-        @self.formatter.register('javascript')
-        @self.formatter.register('js')
-        @self.formatter.register('node')
+        @self.formatter.register("javascript")
+        @self.formatter.register("js")
+        @self.formatter.register("node")
         async def _javascript(ctx, code, **kwargs):
             """
             ### {javascript:code}
                 * Execute JavaScript code.
                 * Example: `{js:console.log('hi');}` -> "hi"
             """
-            return await self.execute_language(ctx, 'javascript', code, **kwargs)
+            return await self.execute_language(ctx, "javascript", code, **kwargs)
 
-        @self.formatter.register('typescript')
-        @self.formatter.register('ts')
+        @self.formatter.register("typescript")
+        @self.formatter.register("ts")
         async def _typescript(ctx, code, **kwargs):
             """
             ### {typescript:code}
                 * Execute TypeScript code.
                 * Example: `{ts:console.log('hi');}` -> "hi"
             """
-            return await self.execute_language(ctx, 'typescript', code, **kwargs)
+            return await self.execute_language(ctx, "typescript", code, **kwargs)
 
-        @self.formatter.register('php')
+        @self.formatter.register("php")
         async def _php(ctx, code, **kwargs):
             """
             ### {php:code}
                 * Execute PHP code.
             """
-            return await self.execute_language(ctx, 'php', code, **kwargs)
+            return await self.execute_language(ctx, "php", code, **kwargs)
 
-        @self.formatter.register('ruby')
-        @self.formatter.register('rb')
+        @self.formatter.register("ruby")
+        @self.formatter.register("rb")
         async def _ruby(ctx, code, **kwargs):
             """
             ### {ruby:code}
                 * Execute Ruby code.
                 * Example: `{rb:puts "hi"}` -> "hi"
             """
-            return await self.execute_language(ctx, 'ruby', code, **kwargs)
+            return await self.execute_language(ctx, "ruby", code, **kwargs)
 
-        @self.formatter.register('lua')
+        @self.formatter.register("lua")
         async def _lua(ctx, code, **kwargs):
             """
             ### {lua:code}
                 * Execute Lua code.
                 * Example: `{lua:print("hi")}` -> "hi"
             """
-            return await self.execute_language(ctx, 'lua', code, **kwargs)
+            return await self.execute_language(ctx, "lua", code, **kwargs)
 
-        @self.formatter.register('go')
+        @self.formatter.register("go")
         async def _go(ctx, code, **kwargs):
             """
             ### {go:code}
                 * Execute Go code.
             """
-            return await self.execute_language(ctx, 'go', code, **kwargs)
+            return await self.execute_language(ctx, "go", code, **kwargs)
 
-        @self.formatter.register('rust')
-        @self.formatter.register('rs')
+        @self.formatter.register("rust")
+        @self.formatter.register("rs")
         async def _rust(ctx, code, **kwargs):
             """
             ### {rust:code}
                 * Execute Rust code.
             """
-            return await self.execute_language(ctx, 'rust', code, **kwargs)
+            return await self.execute_language(ctx, "rust", code, **kwargs)
 
-        @self.formatter.register('c')
+        @self.formatter.register("c")
         async def _c(ctx, code, **kwargs):
             """
             ### {c:code}
                 * Execute C code.
             """
-            return await self.execute_language(ctx, 'c', code, **kwargs)
+            return await self.execute_language(ctx, "c", code, **kwargs)
 
-        @self.formatter.register('cpp')
-        @self.formatter.register('c++')
+        @self.formatter.register("cpp")
+        @self.formatter.register("c++")
         async def _cpp(ctx, code, **kwargs):
             """
             ### {cpp:code}
                 * Execute C++ code.
             """
-            return await self.execute_language(ctx, 'cpp', code, **kwargs)
+            return await self.execute_language(ctx, "cpp", code, **kwargs)
 
-        @self.formatter.register('csharp')
-        @self.formatter.register('cs')
-        @self.formatter.register('c#')
+        @self.formatter.register("csharp")
+        @self.formatter.register("cs")
+        @self.formatter.register("c#")
         async def _csharp(ctx, code, **kwargs):
             """
             ### {csharp:code}
                 * Execute C# code.
             """
-            return await self.execute_language(ctx, 'csharp', code, **kwargs)
+            return await self.execute_language(ctx, "csharp", code, **kwargs)
 
-        @self.formatter.register('zig')
+        @self.formatter.register("zig")
         async def _zig(ctx, code, **kwargs):
             """
             ### {zig:code}
                 * Execute Zig code.
             """
-            return await self.execute_language(ctx, 'zig', code, **kwargs)
+            return await self.execute_language(ctx, "zig", code, **kwargs)
 
-        @self.formatter.register('java')
+        @self.formatter.register("java")
         async def _java(ctx, code, **kwargs):
             """
             ### {java:code}
                 * Execute Java code.
             """
-            return await self.execute_language(ctx, 'java', code, **kwargs)
+            return await self.execute_language(ctx, "java", code, **kwargs)
 
-        @self.formatter.register('kotlin')
-        @self.formatter.register('kt')
+        @self.formatter.register("kotlin")
+        @self.formatter.register("kt")
         async def _kotlin(ctx, code, **kwargs):
             """
             ### {kotlin:code}
                 * Execute Kotlin code.
             """
-            return await self.execute_language(ctx, 'kotlin', code, **kwargs)
+            return await self.execute_language(ctx, "kotlin", code, **kwargs)
 
-        @self.formatter.register('nim')
+        @self.formatter.register("nim")
         async def _nim(ctx, code, **kwargs):
             """
             ### {nim:code}
                 * Execute Nim code.
             """
-            return await self.execute_language(ctx, 'nim', code, **kwargs)
+            return await self.execute_language(ctx, "nim", code, **kwargs)
 
-        @self.formatter.register('user')
+        @self.formatter.register("user")
         async def _user(ctx, i, **kwargs):
             """
             ### {user:user}
@@ -5659,7 +6334,7 @@ class Tags(commands.Cog):
                 return user.name
             return user.name
 
-        @self.formatter.register('userid')
+        @self.formatter.register("userid")
         async def _userid(ctx, i, **kwargs):
             """
             ### {userid:user}
@@ -5669,7 +6344,7 @@ class Tags(commands.Cog):
             user = await self.formatter.resolve_user(ctx, i)
             return user.id
 
-        @self.formatter.register('nick')
+        @self.formatter.register("nick")
         async def _nick(ctx, i, **kwargs):
             """
             ### {nick:user}
@@ -5681,7 +6356,7 @@ class Tags(commands.Cog):
                 return user.nick
             return user.display_name
 
-        @self.formatter.register('userdisplay')
+        @self.formatter.register("userdisplay")
         async def _userdisplay(ctx, i, **kwargs):
             """
             ### {userdisplay:user}
@@ -5691,7 +6366,7 @@ class Tags(commands.Cog):
             user = await self.formatter.resolve_user(ctx, i)
             return user.global_name
 
-        @self.formatter.register('mention')
+        @self.formatter.register("mention")
         async def _mention(ctx, i, **kwargs):
             """
             ### {mention:user}
@@ -5701,7 +6376,7 @@ class Tags(commands.Cog):
             user = await self.formatter.resolve_user(ctx, i)
             return user.mention
 
-        @self.formatter.register('avatar')
+        @self.formatter.register("avatar")
         async def _avatar(ctx, i, **kwargs):
             """
             ### {avatar:user}
@@ -5711,7 +6386,7 @@ class Tags(commands.Cog):
             user = await self.formatter.resolve_user(ctx, i)
             return str(user.display_avatar.url)
 
-        @self.formatter.register('avatarkey')
+        @self.formatter.register("avatarkey")
         async def _avatarkey(ctx, i, **kwargs):
             """
             ### {avatarkey:user}
@@ -5721,7 +6396,7 @@ class Tags(commands.Cog):
             user = await self.formatter.resolve_user(ctx, i)
             return str(user.display_avatar.key)
 
-        @self.formatter.register('useravatar')
+        @self.formatter.register("useravatar")
         async def _useravatar(ctx, i, **kwargs):
             """
             ### {useravatar:user}
@@ -5731,7 +6406,7 @@ class Tags(commands.Cog):
             user = await self.formatter.resolve_user(ctx, i)
             return str(user.avatar.url) if user.avatar else None
 
-        @self.formatter.register('useravatarkey')
+        @self.formatter.register("useravatarkey")
         async def _useravatarkey(ctx, i, **kwargs):
             """
             ### {useravatarkey:user}
@@ -5741,7 +6416,7 @@ class Tags(commands.Cog):
             user = await self.formatter.resolve_user(ctx, i)
             return str(user.avatar.key) if user.avatar else None
 
-        @self.formatter.register('banner')
+        @self.formatter.register("banner")
         async def _banner(ctx, i, **kwargs):
             """
             ### {banner:user}
@@ -5750,9 +6425,13 @@ class Tags(commands.Cog):
             """
             user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
-                return str(user.guild_banner.url) if user.guild_banner else await _userbanner(ctx, i)
+                return (
+                    str(user.guild_banner.url)
+                    if user.guild_banner
+                    else await _userbanner(ctx, i)
+                )
 
-        @self.formatter.register('bannerkey')
+        @self.formatter.register("bannerkey")
         async def _bannerkey(ctx, i, **kwargs):
             """
             ### {bannerkey:user}
@@ -5761,9 +6440,13 @@ class Tags(commands.Cog):
             """
             user = await self.formatter.resolve_user(ctx, i)
             if isinstance(user, discord.Member):
-                return str(user.guild_banner.key) if user.guild_banner else await _userbannerkey(ctx, i)
+                return (
+                    str(user.guild_banner.key)
+                    if user.guild_banner
+                    else await _userbannerkey(ctx, i)
+                )
 
-        @self.formatter.register('userbanner')
+        @self.formatter.register("userbanner")
         async def _userbanner(ctx, i, **kwargs):
             """
             ### {userbanner:user}
@@ -5777,7 +6460,7 @@ class Tags(commands.Cog):
                 return None
             return str(user.banner.url)
 
-        @self.formatter.register('userbannerkey')
+        @self.formatter.register("userbannerkey")
         async def _userbannerkey(ctx, i, **kwargs):
             """
             ### {userbannerkey:user}
@@ -5791,7 +6474,7 @@ class Tags(commands.Cog):
                 return None
             return str(user.banner.key)
 
-        @self.formatter.register('usercreatedate')
+        @self.formatter.register("usercreatedate")
         async def _usercreatedate(ctx, i, **kwargs):
             """
             ### {usercreatedate:user}
@@ -5800,7 +6483,7 @@ class Tags(commands.Cog):
             user = await self.formatter.resolve_user(ctx, i)
             return user.created_at.isoformat()
 
-        @self.formatter.register('userjoindate')
+        @self.formatter.register("userjoindate")
         async def _userjoindate(ctx, i, **kwargs):
             """
             ### {userjoindate:user}
@@ -5816,7 +6499,7 @@ class Tags(commands.Cog):
 
             return date_to_use.isoformat()
 
-        @self.formatter.register('userstatus')
+        @self.formatter.register("userstatus")
         async def _userstatus(ctx, i, **kwargs):
             """
             ### {userstatus:user}
@@ -5828,7 +6511,7 @@ class Tags(commands.Cog):
                 return str(user.status.value).capitalize()
             return None
 
-        @self.formatter.register('usercustomstatus')
+        @self.formatter.register("usercustomstatus")
         async def _usercustomstatus(ctx, i, **kwargs):
             """
             ### {usercustomstatus:user}
@@ -5856,14 +6539,20 @@ class Tags(commands.Cog):
                     artists = ", ".join(activity.artists)
                     activities.append(f"Listening to {artists} - {activity.title}")
                 elif isinstance(activity, discord.Streaming):
-                    activities.append(f"Streaming {activity.game} on {activity.platform}")
-                elif activity.type == discord.ActivityType.listening and not isinstance(activity, discord.Spotify):
+                    activities.append(
+                        f"Streaming {activity.game} on {activity.platform}"
+                    )
+                elif activity.type == discord.ActivityType.listening and not isinstance(
+                    activity, discord.Spotify
+                ):
                     activities.append(f"Listening to {activity.name}")
                 elif activity.type == discord.ActivityType.watching:
                     activities.append(f"Watching {activity.name}")
                 elif activity.type == discord.ActivityType.competing:
                     activities.append(f"Competing in {activity.name}")
-                elif activity.type == discord.ActivityType.playing and not isinstance(activity, discord.Game):
+                elif activity.type == discord.ActivityType.playing and not isinstance(
+                    activity, discord.Game
+                ):
                     activities.append(f"Playing {activity.name}")
 
             if not activities:
@@ -5871,7 +6560,7 @@ class Tags(commands.Cog):
 
             return " | ".join(activities)
 
-        @self.formatter.register('userbadges')
+        @self.formatter.register("userbadges")
         async def _userbadges(ctx, i, **kwargs):
             """
             ### {userbadges:user}
@@ -5921,7 +6610,7 @@ class Tags(commands.Cog):
             else:
                 return None
 
-        @self.formatter.register('randuser')
+        @self.formatter.register("randuser")
         async def _randuser(ctx, user, **kwargs):
             """
             ### {randuser}
@@ -5933,7 +6622,7 @@ class Tags(commands.Cog):
                 return random_user.name
             return None
 
-        @self.formatter.register('randonline')
+        @self.formatter.register("randonline")
         async def _randonline(ctx, user, **kwargs):
             """
             ### {randonline}
@@ -5941,12 +6630,16 @@ class Tags(commands.Cog):
                 * Example: `{randonline}`
             """
             if ctx.guild:
-                online_users = [user for user in ctx.guild.members if user.status != discord.Status.offline]
+                online_users = [
+                    user
+                    for user in ctx.guild.members
+                    if user.status != discord.Status.offline
+                ]
                 random_online_user = random.choice(online_users)
                 return random_online_user.name
             return None
 
-        @self.formatter.register('randonlineid')
+        @self.formatter.register("randonlineid")
         async def _randonlineid(ctx, user, **kwargs):
             """
             ### {randonlineid}
@@ -5954,12 +6647,16 @@ class Tags(commands.Cog):
                 * Example: `{randonlineid}`
             """
             if ctx.guild:
-                online_users = [user for user in ctx.guild.members if user.status != discord.Status.offline]
+                online_users = [
+                    user
+                    for user in ctx.guild.members
+                    if user.status != discord.Status.offline
+                ]
                 random_online_user = random.choice(online_users)
                 return random_online_user.id
             return None
 
-        @self.formatter.register('randuserid')
+        @self.formatter.register("randuserid")
         async def _randuserid(ctx, user, **kwargs):
             """
             ### {randuserid}
@@ -5971,7 +6668,7 @@ class Tags(commands.Cog):
                 return random_user.id
             return None
 
-        @self.formatter.register('channel')
+        @self.formatter.register("channel")
         async def _channel(ctx, channel, **kwargs):
             """
             ### {channel:channel}
@@ -5986,7 +6683,7 @@ class Tags(commands.Cog):
             except Exception:
                 return ctx.channel.name
 
-        @self.formatter.register('channelmention')
+        @self.formatter.register("channelmention")
         async def _channelmention(ctx, channel, **kwargs):
             """
             ### {channelmention:channel}
@@ -6001,7 +6698,7 @@ class Tags(commands.Cog):
             except Exception:
                 return ctx.channel.mention
 
-        @self.formatter.register('channelid')
+        @self.formatter.register("channelid")
         async def _channelid(ctx, channel, **kwargs):
             """
             ### {channelid:channel}
@@ -6016,7 +6713,7 @@ class Tags(commands.Cog):
             except Exception:
                 return ctx.channel.id
 
-        @self.formatter.register('randchannel')
+        @self.formatter.register("randchannel")
         async def _randchannel(ctx, channel, **kwargs):
             """
             ### {randchannel}
@@ -6028,7 +6725,7 @@ class Tags(commands.Cog):
                 return random_channel.name
             return None
 
-        @self.formatter.register('randchannelmention')
+        @self.formatter.register("randchannelmention")
         async def _randchannelmention(ctx, channel, **kwargs):
             """
             ### {randchannelmention}
@@ -6040,7 +6737,7 @@ class Tags(commands.Cog):
                 return random_channel.mention
             return None
 
-        @self.formatter.register('randchannelid')
+        @self.formatter.register("randchannelid")
         async def _randchannelid(ctx, channel, **kwargs):
             """
             ### {randchannelid}
@@ -6052,8 +6749,8 @@ class Tags(commands.Cog):
                 return random_channel.id
             return None
 
-        @self.formatter.register('guild')
-        @self.formatter.register('server')
+        @self.formatter.register("guild")
+        @self.formatter.register("server")
         async def _guild(ctx, i, **kwargs):
             """
             ### {guild}
@@ -6067,8 +6764,8 @@ class Tags(commands.Cog):
             else:
                 return "Private Channel"
 
-        @self.formatter.register('guildid')
-        @self.formatter.register('serverid')
+        @self.formatter.register("guildid")
+        @self.formatter.register("serverid")
         async def _guildid(ctx, i, **kwargs):
             """
             ### {guildid}
@@ -6082,8 +6779,8 @@ class Tags(commands.Cog):
             else:
                 return None
 
-        @self.formatter.register('guildicon')
-        @self.formatter.register('servericon')
+        @self.formatter.register("guildicon")
+        @self.formatter.register("servericon")
         async def _guildicon(ctx, i, **kwargs):
             """
             ### {guildicon}
@@ -6094,8 +6791,8 @@ class Tags(commands.Cog):
                 return ctx.guild.icon.url
             return None
 
-        @self.formatter.register('guildbanner')
-        @self.formatter.register('serverbanner')
+        @self.formatter.register("guildbanner")
+        @self.formatter.register("serverbanner")
         async def _guildbanner(ctx, i, **kwargs):
             """
             ### {guildbanner}
@@ -6106,10 +6803,10 @@ class Tags(commands.Cog):
                 return ctx.guild.banner.url
             return None
 
-        @self.formatter.register('component')
-        @self.formatter.register('componentjson')
-        @self.formatter.register('json.component')
-        @self.formatter.register('cv2')
+        @self.formatter.register("component")
+        @self.formatter.register("componentjson")
+        @self.formatter.register("json.component")
+        @self.formatter.register("cv2")
         async def _component(ctx, args_str, **kwargs):
             """
             ### {component:JSON}
@@ -6123,10 +6820,14 @@ class Tags(commands.Cog):
                     - Merges multiple {component} tags.
                 * Component Types (Numerical):
                     1: Action Row, 2: Button, 3: Select Menu, 9: Section, 10: Text Display, 11: Thumbnail, 12: Media Gallery, 13: File, 14: Separator, 17: Container.
-                """
+            """
             try:
                 processed_args = await self.formatter.format(args_str, ctx, **kwargs)
-                processed_args = processed_args[0] if isinstance(processed_args, tuple) else processed_args
+                processed_args = (
+                    processed_args[0]
+                    if isinstance(processed_args, tuple)
+                    else processed_args
+                )
 
                 try:
                     data = json.loads(processed_args)
@@ -6137,205 +6838,230 @@ class Tags(commands.Cog):
 
                 async def process_component(component_data):
                     if isinstance(component_data, str):
-                        processed = await self.formatter.format(component_data, ctx, **kwargs)
-                        return processed[0] if isinstance(processed, tuple) else processed
+                        processed = await self.formatter.format(
+                            component_data, ctx, **kwargs
+                        )
+                        return (
+                            processed[0] if isinstance(processed, tuple) else processed
+                        )
 
                     if isinstance(component_data, dict):
                         component_data = component_data.copy()
-                        component_type = component_data.get('type')
+                        component_type = component_data.get("type")
 
                         for key, value in component_data.items():
                             if isinstance(value, str):
-                                if key not in {'tag', 'command'}:
-                                    processed = await self.formatter.format(value, ctx, **kwargs)
-                                    component_data[key] = processed[0] if isinstance(processed, tuple) else processed
+                                if key not in {"tag", "command"}:
+                                    processed = await self.formatter.format(
+                                        value, ctx, **kwargs
+                                    )
+                                    component_data[key] = (
+                                        processed[0]
+                                        if isinstance(processed, tuple)
+                                        else processed
+                                    )
                                 else:
                                     component_data[key] = value
 
                         if component_type == 1:
-                            row = discord.ui.ActionRow(
-                                id=component_data.get('id')
-                            )
-                            for item_data in component_data.get('components', []):
+                            row = discord.ui.ActionRow(id=component_data.get("id"))
+                            for item_data in component_data.get("components", []):
                                 item = await process_component(item_data)
                                 if item:
                                     row.add_item(item)
                             return row
 
                         elif component_type == 2:
-                            if 'command' in component_data:
-                                cmd = component_data.pop('command').strip()
-                                component_data['custom_id'] = f"cmd:{cmd}"
-                            elif 'tag' in component_data:
-                                tag = component_data.pop('tag').strip()
-                                component_data['custom_id'] = f"tag:{tag}"
-                            elif 'custom_id' not in component_data and 'url' not in component_data:
-                                component_data['custom_id'] = f"btn_{uuid.uuid4().hex[:8]}"
+                            if "command" in component_data:
+                                cmd = component_data.pop("command").strip()
+                                component_data["custom_id"] = f"cmd:{cmd}"
+                            elif "tag" in component_data:
+                                tag = component_data.pop("tag").strip()
+                                component_data["custom_id"] = f"tag:{tag}"
+                            elif (
+                                "custom_id" not in component_data
+                                and "url" not in component_data
+                            ):
+                                component_data["custom_id"] = (
+                                    f"btn_{uuid.uuid4().hex[:8]}"
+                                )
                             style_map = {
-                                'primary': discord.ButtonStyle.primary,
-                                'secondary': discord.ButtonStyle.secondary,
-                                'success': discord.ButtonStyle.success,
-                                'danger': discord.ButtonStyle.danger,
-                                'link': discord.ButtonStyle.link
+                                "primary": discord.ButtonStyle.primary,
+                                "secondary": discord.ButtonStyle.secondary,
+                                "success": discord.ButtonStyle.success,
+                                "danger": discord.ButtonStyle.danger,
+                                "link": discord.ButtonStyle.link,
                             }
-                            style = component_data.get('style', 'primary')
+                            style = component_data.get("style", "primary")
                             if isinstance(style, str):
-                                style = style_map.get(style.lower(), discord.ButtonStyle.primary)
+                                style = style_map.get(
+                                    style.lower(), discord.ButtonStyle.primary
+                                )
 
                             return discord.ui.Button(
                                 style=style,
-                                label=component_data.get('label'),
-                                disabled=component_data.get('disabled'),
-                                url=component_data.get('url'),
-                                emoji=component_data.get('emoji'),
-                                custom_id=component_data.get('custom_id'),
-                                row=component_data.get('row'),
-                                id=component_data.get('id')
+                                label=component_data.get("label"),
+                                disabled=component_data.get("disabled"),
+                                url=component_data.get("url"),
+                                emoji=component_data.get("emoji"),
+                                custom_id=component_data.get("custom_id"),
+                                row=component_data.get("row"),
+                                id=component_data.get("id"),
                             )
 
                         elif component_type == 3:
                             options = []
-                            for opt in component_data.get('options', []):
+                            for opt in component_data.get("options", []):
                                 opt = opt.copy()
-                                if 'command' in opt:
-                                    cmd = opt.pop('command').strip()
-                                    opt['value'] = f"cmd:{cmd}"
-                                elif 'tag' in opt:
-                                    tag = opt.pop('tag').strip()
-                                    opt['value'] = f"tag:{tag}"
-                                elif 'value' not in opt:
-                                    opt['value'] = opt.get('label', '')
-                                options.append(discord.SelectOption(
-                                    label=opt.get('label'),
-                                    value=opt.get('value'),
-                                    description=opt.get('description'),
-                                    emoji=opt.get('emoji'),
-                                    default=opt.get('default')
-                                ))
+                                if "command" in opt:
+                                    cmd = opt.pop("command").strip()
+                                    opt["value"] = f"cmd:{cmd}"
+                                elif "tag" in opt:
+                                    tag = opt.pop("tag").strip()
+                                    opt["value"] = f"tag:{tag}"
+                                elif "value" not in opt:
+                                    opt["value"] = opt.get("label", "")
+                                options.append(
+                                    discord.SelectOption(
+                                        label=opt.get("label"),
+                                        value=opt.get("value"),
+                                        description=opt.get("description"),
+                                        emoji=opt.get("emoji"),
+                                        default=opt.get("default"),
+                                    )
+                                )
 
                             return discord.ui.Select(
-                                placeholder=component_data.get('placeholder'),
-                                min_values=component_data.get('min_values'),
-                                max_values=component_data.get('max_values'),
+                                placeholder=component_data.get("placeholder"),
+                                min_values=component_data.get("min_values"),
+                                max_values=component_data.get("max_values"),
                                 options=options,
-                                disabled=component_data.get('disabled'),
-                                custom_id=component_data.get('custom_id', f"sel_{uuid.uuid4().hex[:8]}"),
-                                row=component_data.get('row'),
-                                id=component_data.get('id')
+                                disabled=component_data.get("disabled"),
+                                custom_id=component_data.get(
+                                    "custom_id", f"sel_{uuid.uuid4().hex[:8]}"
+                                ),
+                                row=component_data.get("row"),
+                                id=component_data.get("id"),
                             )
 
                         elif component_type == 9:
-                            accessory_data = component_data.get('accessory')
+                            accessory_data = component_data.get("accessory")
                             accessory = None
                             if accessory_data and isinstance(accessory_data, dict):
                                 accessory = await process_component(accessory_data)
                             section = discord.ui.Section(
-                                accessory=accessory,
-                                id=component_data.get('id')
+                                accessory=accessory, id=component_data.get("id")
                             )
-                            for section_data in component_data.get('components', []):
-                                content = section_data.get('content')
-                                processed_content = await self.formatter.format(content, ctx, **kwargs)
+                            for section_data in component_data.get("components", []):
+                                content = section_data.get("content")
+                                processed_content = await self.formatter.format(
+                                    content, ctx, **kwargs
+                                )
                                 if isinstance(processed_content, tuple):
                                     processed_content = processed_content[0]
                                 section_item = discord.ui.TextDisplay(
-                                    content=processed_content,
-                                    id=section_data.get('id')
+                                    content=processed_content, id=section_data.get("id")
                                 )
                                 section.add_item(section_item)
                             return section
 
                         elif component_type == 10:
                             text_display = discord.ui.TextDisplay(
-                                content=component_data.get('content'),
-                                id=component_data.get('id')
+                                content=component_data.get("content"),
+                                id=component_data.get("id"),
                             )
                             return text_display
 
                         elif component_type == 11:
-                            media_data = component_data['media']
-                            url = media_data['url']
-                            processed_url = await self.formatter.format(url, ctx, **kwargs)
+                            media_data = component_data["media"]
+                            url = media_data["url"]
+                            processed_url = await self.formatter.format(
+                                url, ctx, **kwargs
+                            )
                             if isinstance(processed_url, tuple):
                                 processed_url = processed_url[0]
                             thumbnail = discord.ui.Thumbnail(
                                 media=processed_url,
-                                description=component_data.get('description'),
-                                spoiler=component_data.get('spoiler'),
-                                id=component_data.get('id')
+                                description=component_data.get("description"),
+                                spoiler=component_data.get("spoiler"),
+                                id=component_data.get("id"),
                             )
                             return thumbnail
 
                         elif component_type == 12:
                             gallery = discord.ui.MediaGallery(
-                                id=component_data.get('id')
+                                id=component_data.get("id")
                             )
-                            items = component_data.get('items', [])
+                            items = component_data.get("items", [])
                             for item_data in items:
-                                media_data = item_data.get('media', {})
+                                media_data = item_data.get("media", {})
                                 if isinstance(media_data, str):
-                                    media_data = {'url': media_data}
+                                    media_data = {"url": media_data}
 
-                                url = media_data.get('url')
+                                url = media_data.get("url")
                                 if url:
-                                    processed_url = await self.formatter.format(url, ctx, **kwargs)
+                                    processed_url = await self.formatter.format(
+                                        url, ctx, **kwargs
+                                    )
                                     if isinstance(processed_url, tuple):
                                         processed_url = processed_url[0]
-                                    media_data['url'] = processed_url
+                                    media_data["url"] = processed_url
 
                                 media_item = discord.UnfurledMediaItem(
-                                    url=media_data.get('url')
+                                    url=media_data.get("url")
                                 )
                                 gallery.add_item(
                                     media=media_item,
-                                    description=item_data.get('description'),
-                                    spoiler=item_data.get('spoiler')
+                                    description=item_data.get("description"),
+                                    spoiler=item_data.get("spoiler"),
                                 )
                             return gallery
 
                         elif component_type == 13:
-                            file_data = component_data['file']
-                            url = file_data['url']
-                            processed_url = await self.formatter.format(url, ctx, **kwargs)
+                            file_data = component_data["file"]
+                            url = file_data["url"]
+                            processed_url = await self.formatter.format(
+                                url, ctx, **kwargs
+                            )
                             if isinstance(processed_url, tuple):
                                 processed_url = processed_url[0]
                             file = discord.ui.File(
                                 media=processed_url,
-                                spoiler=component_data.get('spoiler'),
-                                id=component_data.get('id')
+                                spoiler=component_data.get("spoiler"),
+                                id=component_data.get("id"),
                             )
                             return file
 
                         elif component_type == 14:
-                            spacing = component_data.get('spacing')
+                            spacing = component_data.get("spacing")
                             if isinstance(spacing, str):
                                 spacing = spacing.lower()
-                                if spacing == 'small':
+                                if spacing == "small":
                                     spacing = discord.SeparatorSpacing.small
-                                elif spacing == 'large':
+                                elif spacing == "large":
                                     spacing = discord.SeparatorSpacing.large
                                 else:
                                     spacing = None
                             separator = discord.ui.Separator(
-                                visible=component_data.get('visible'),
+                                visible=component_data.get("visible"),
                                 spacing=spacing,
-                                id=component_data.get('id')
+                                id=component_data.get("id"),
                             )
                             return separator
 
                         elif component_type == 17:
-                            color = component_data.get('accent_color')
+                            color = component_data.get("accent_color")
                             if isinstance(color, str):
                                 try:
-                                    color = int(color.strip('#'), 16)
+                                    color = int(color.strip("#"), 16)
                                 except ValueError:
                                     color = None
                             container = discord.ui.Container(
                                 accent_color=color,
-                                spoiler=component_data.get('spoiler'),
-                                id=component_data.get('id')
+                                spoiler=component_data.get("spoiler"),
+                                id=component_data.get("id"),
                             )
-                            for item_data in component_data.get('components', []):
+                            for item_data in component_data.get("components", []):
                                 item = await process_component(item_data)
                                 if item:
                                     container.add_item(item)
@@ -6358,9 +7084,9 @@ class Tags(commands.Cog):
             except Exception as e:
                 return f"[ComponentV2 error: {str(e)}]"
 
-        @self.formatter.register('embed')
-        @self.formatter.register('embedjson')
-        @self.formatter.register('json.embed')
+        @self.formatter.register("embed")
+        @self.formatter.register("embedjson")
+        @self.formatter.register("json.embed")
         async def _embed(ctx, args_str, **kwargs):
             """
             ### {embed:JSON}
@@ -6368,7 +7094,9 @@ class Tags(commands.Cog):
                 * Example: `{embed:{"title":"Hello"}}`
             """
             try:
-                processed_content, _, _, _ = await self.formatter.format(args_str, ctx, **kwargs)
+                processed_content, _, _, _ = await self.formatter.format(
+                    args_str, ctx, **kwargs
+                )
                 embed_data = json.loads(processed_content)
                 resolved_data = await resolve_json_tags(ctx, embed_data)
                 embed = DiscordGenerator._build_embed(**resolved_data)
@@ -6403,9 +7131,9 @@ class Tags(commands.Cog):
                 return processed
             return data
 
-        @self.formatter.register('button')
-        @self.formatter.register('buttonjson')
-        @self.formatter.register('json.button')
+        @self.formatter.register("button")
+        @self.formatter.register("buttonjson")
+        @self.formatter.register("json.button")
         async def _button(ctx, args_str, **kwargs):
             """
             ### {button:JSON}
@@ -6417,19 +7145,17 @@ class Tags(commands.Cog):
             try:
                 params = await parse_component_input(ctx, args_str)
 
+                if "command" in params:
+                    cmd = params.pop("command").strip()
+                    params["custom_id"] = f"cmd:{cmd}"
+                elif "tag" in params:
+                    tag = params.pop("tag").strip()
+                    params["custom_id"] = f"tag:{tag}"
+                elif "custom_id" not in params and "url" not in params:
+                    params["custom_id"] = f"btn_{uuid.uuid4().hex[:8]}"
 
-                if 'command' in params:
-                    cmd = params.pop('command').strip()
-                    params['custom_id'] = f"cmd:{cmd}"
-                elif 'tag' in params:
-                    tag = params.pop('tag').strip()
-                    params['custom_id'] = f"tag:{tag}"
-                elif 'custom_id' not in params and 'url' not in params:
-                    params['custom_id'] = f"btn_{uuid.uuid4().hex[:8]}"
-
-
-                if 'style' not in params and 'url' not in params:
-                    params['style'] = 'secondary'
+                if "style" not in params and "url" not in params:
+                    params["style"] = "secondary"
 
                 button = DiscordGenerator.create_button(params)
                 return ("", [], discord.ui.View().add_item(button), [])
@@ -6437,9 +7163,9 @@ class Tags(commands.Cog):
             except Exception as e:
                 return (f"[button error: {str(e)}]", [], None, [])
 
-        @self.formatter.register('select')
-        @self.formatter.register('selectjson')
-        @self.formatter.register('json.select')
+        @self.formatter.register("select")
+        @self.formatter.register("selectjson")
+        @self.formatter.register("json.select")
         async def _select(ctx, args_str, **kwargs):
             """
             ### {select:JSON}
@@ -6449,16 +7175,16 @@ class Tags(commands.Cog):
             try:
                 data = await parse_component_input(ctx, args_str)
 
-                if 'options' in data:
-                    for opt in data['options']:
-                        if 'command' in opt:
-                            cmd = opt.pop('command').strip()
-                            opt['value'] = f"cmd:{cmd}"
-                        elif 'tag' in opt:
-                            tag = opt.pop('tag').strip()
-                            opt['value'] = f"tag:{tag}"
-                        elif 'value' not in opt:
-                            opt['value'] = opt['label']
+                if "options" in data:
+                    for opt in data["options"]:
+                        if "command" in opt:
+                            cmd = opt.pop("command").strip()
+                            opt["value"] = f"cmd:{cmd}"
+                        elif "tag" in opt:
+                            tag = opt.pop("tag").strip()
+                            opt["value"] = f"tag:{tag}"
+                        elif "value" not in opt:
+                            opt["value"] = opt["label"]
 
                 select = DiscordGenerator.create_select(data)
                 view = discord.ui.View().add_item(select)
@@ -6466,12 +7192,12 @@ class Tags(commands.Cog):
             except Exception as e:
                 return (f"[select error: {str(e)}]", [], None, [])
 
-        @self.formatter.register('paginator')
-        @self.formatter.register('page')
-        @self.formatter.register('paginatorjson')
-        @self.formatter.register('pagejson')
-        @self.formatter.register('json.paginator')
-        @self.formatter.register('json.page')
+        @self.formatter.register("paginator")
+        @self.formatter.register("page")
+        @self.formatter.register("paginatorjson")
+        @self.formatter.register("pagejson")
+        @self.formatter.register("json.paginator")
+        @self.formatter.register("json.page")
         async def _paginator(ctx, content, **kwargs):
             """
             ### {paginator:json_content}
@@ -6500,7 +7226,9 @@ class Tags(commands.Cog):
                     ]}
             """
             try:
-                text, _, _, nested_files = await self.formatter.format(content, ctx, **kwargs)
+                text, _, _, nested_files = await self.formatter.format(
+                    content, ctx, **kwargs
+                )
                 all_files = {}
                 for attachment in ctx.message.attachments:
                     if attachment.filename not in all_files:
@@ -6519,7 +7247,9 @@ class Tags(commands.Cog):
                     page_content = page_data.get("content", "")
                     embeds_data = page_data.get("embeds", [])
                     file_refs = page_data.get("files", [])
-                    formatted_content, _, _, _ = await self.formatter.format(str(page_content), ctx, **kwargs)
+                    formatted_content, _, _, _ = await self.formatter.format(
+                        str(page_content), ctx, **kwargs
+                    )
                     formatted_embeds = []
                     for embed_data in embeds_data:
                         resolved_embed_data = await resolve_json_tags(ctx, embed_data)
@@ -6541,10 +7271,9 @@ class Tags(commands.Cog):
                                     break
 
                         if filename:
-                            file_metadata.append({
-                                "filename": filename,
-                                "data": all_files[filename]
-                            })
+                            file_metadata.append(
+                                {"filename": filename, "data": all_files[filename]}
+                            )
 
                     pages.append((formatted_content, formatted_embeds, file_metadata))
 
@@ -6565,9 +7294,9 @@ class Tags(commands.Cog):
             except Exception as e:
                 return f"[paginator error: {str(e)}]", [], None, []
 
-        @self.formatter.register('json.user')
-        @self.formatter.register('userjson')
-        async def _json_user(ctx, user_ref='', **kwargs):
+        @self.formatter.register("json.user")
+        @self.formatter.register("userjson")
+        async def _json_user(ctx, user_ref="", **kwargs):
             """
             ### {json.user:user}
                 * Returns an user's JSON object. Defaults to self.
@@ -6585,20 +7314,32 @@ class Tags(commands.Cog):
                     "discriminator": user.discriminator,
                     "bot": user.bot,
                     "created_at": user.created_at.isoformat(),
-                    "avatar": str(user.avatar.key) if user.avatar else str(user.display_avatar.key),
-                    "avatar_url": str(user.avatar.url) if user.avatar else str(user.display_avatar.url),
-                    "banner": (str((await ctx.bot.fetch_user(user.id)).banner.key) if (await ctx.bot.fetch_user(user.id)).banner else None),
-                    "banner_url": (str((await ctx.bot.fetch_user(user.id)).banner.url) if (await ctx.bot.fetch_user(user.id)).banner else None),
-                    "mention": user.mention
+                    "avatar": str(user.avatar.key)
+                    if user.avatar
+                    else str(user.display_avatar.key),
+                    "avatar_url": str(user.avatar.url)
+                    if user.avatar
+                    else str(user.display_avatar.url),
+                    "banner": (
+                        str((await ctx.bot.fetch_user(user.id)).banner.key)
+                        if (await ctx.bot.fetch_user(user.id)).banner
+                        else None
+                    ),
+                    "banner_url": (
+                        str((await ctx.bot.fetch_user(user.id)).banner.url)
+                        if (await ctx.bot.fetch_user(user.id)).banner
+                        else None
+                    ),
+                    "mention": user.mention,
                 }
 
                 return json.dumps(user_data)
             except Exception as e:
                 return f"[JSON User Error: {str(e)}]"
 
-        @self.formatter.register('json.member')
-        @self.formatter.register('memberjson')
-        async def _json_member(ctx, user_ref='', **kwargs):
+        @self.formatter.register("json.member")
+        @self.formatter.register("memberjson")
+        async def _json_member(ctx, user_ref="", **kwargs):
             """
             ### {json.member:user}
                 * Returns a member's JSON object. Defaults to self.
@@ -6620,24 +7361,39 @@ class Tags(commands.Cog):
                     "name": member.name,
                     "display_name": getattr(member, "display_name", member.name),
                     "nick": member.nick,
-                    "joined_at": member.joined_at.isoformat() if member.joined_at else None,
-                    "avatar": str(member.guild_avatar.key) if member.guild_avatar else None,
-                    "avatar_url": str(member.guild_avatar.url) if member.guild_avatar else None,
-                    "banner": str(member.guild_banner.key) if member.guild_banner else None,
-                    "banner_url": str(member.guild_banner.url) if member.guild_banner else None,
+                    "joined_at": member.joined_at.isoformat()
+                    if member.joined_at
+                    else None,
+                    "avatar": str(member.guild_avatar.key)
+                    if member.guild_avatar
+                    else None,
+                    "avatar_url": str(member.guild_avatar.url)
+                    if member.guild_avatar
+                    else None,
+                    "banner": str(member.guild_banner.key)
+                    if member.guild_banner
+                    else None,
+                    "banner_url": str(member.guild_banner.url)
+                    if member.guild_banner
+                    else None,
                     "roles": [{"id": str(r.id), "name": r.name} for r in member.roles],
-                    "top_role": {"id": str(member.top_role.id), "name": member.top_role.name},
+                    "top_role": {
+                        "id": str(member.top_role.id),
+                        "name": member.top_role.name,
+                    },
                     "guild_permissions": list(member.guild_permissions),
-                    "timed_out_until": member.timed_out_until.isoformat() if member.timed_out_until else None
+                    "timed_out_until": member.timed_out_until.isoformat()
+                    if member.timed_out_until
+                    else None,
                 }
 
                 return json.dumps(member_data)
             except Exception as e:
                 return f"[JSON Member Error: {str(e)}]"
 
-        @self.formatter.register('json.memberoruser')
-        @self.formatter.register('memberoruserjson')
-        async def _json_memberoruser(ctx, user_ref='', **kwargs):
+        @self.formatter.register("json.memberoruser")
+        @self.formatter.register("memberoruserjson")
+        async def _json_memberoruser(ctx, user_ref="", **kwargs):
             """
             ### {json.memberoruser:user}
                 * Returns an user or a member's JSON object. Defaults to self.
@@ -6657,28 +7413,51 @@ class Tags(commands.Cog):
                     "created_at": user.created_at.isoformat(),
                     "avatar": str(user.display_avatar.key),
                     "avatar_url": str(user.display_avatar.url),
-                    "banner": str(user.guild_banner.key) if getattr(user, "guild_banner", None) else (str((await ctx.bot.fetch_user(user.id)).banner.key) if (await ctx.bot.fetch_user(user.id)).banner else None),
-                    "banner_url": str(user.guild_banner.url) if getattr(user, "guild_banner", None) else (str((await ctx.bot.fetch_user(user.id)).banner.url) if (await ctx.bot.fetch_user(user.id)).banner else None),
-                    "mention": user.mention
+                    "banner": str(user.guild_banner.key)
+                    if getattr(user, "guild_banner", None)
+                    else (
+                        str((await ctx.bot.fetch_user(user.id)).banner.key)
+                        if (await ctx.bot.fetch_user(user.id)).banner
+                        else None
+                    ),
+                    "banner_url": str(user.guild_banner.url)
+                    if getattr(user, "guild_banner", None)
+                    else (
+                        str((await ctx.bot.fetch_user(user.id)).banner.url)
+                        if (await ctx.bot.fetch_user(user.id)).banner
+                        else None
+                    ),
+                    "mention": user.mention,
                 }
 
                 if isinstance(user, discord.Member):
-                    user_data.update({
-                        "nick": user.nick,
-                        "joined_at": user.joined_at.isoformat() if user.joined_at else None,
-                        "roles": [{"id": str(r.id), "name": r.name} for r in user.roles],
-                        "top_role": {"id": str(user.top_role.id), "name": user.top_role.name},
-                        "guild_permissions": list(user.guild_permissions),
-                        "timed_out_until": user.timed_out_until.isoformat() if user.timed_out_until else None
-                    })
+                    user_data.update(
+                        {
+                            "nick": user.nick,
+                            "joined_at": user.joined_at.isoformat()
+                            if user.joined_at
+                            else None,
+                            "roles": [
+                                {"id": str(r.id), "name": r.name} for r in user.roles
+                            ],
+                            "top_role": {
+                                "id": str(user.top_role.id),
+                                "name": user.top_role.name,
+                            },
+                            "guild_permissions": list(user.guild_permissions),
+                            "timed_out_until": user.timed_out_until.isoformat()
+                            if user.timed_out_until
+                            else None,
+                        }
+                    )
 
                 return json.dumps(user_data)
             except Exception as e:
                 return f"[JSON MemberOrUser Error: {str(e)}]"
 
-        @self.formatter.register('json.message')
-        @self.formatter.register('messagejson')
-        async def _json_message(ctx, message_ref='', **kwargs):
+        @self.formatter.register("json.message")
+        @self.formatter.register("messagejson")
+        async def _json_message(ctx, message_ref="", **kwargs):
             """
             ### {json.message:message}
                 * Returns a message's JSON object. Defaults to current message.
@@ -6686,7 +7465,9 @@ class Tags(commands.Cog):
             try:
                 if not message_ref.strip():
                     if ctx.message.reference:
-                        message = await ctx.channel.fetch_message(ctx.message.reference.message_id)
+                        message = await ctx.channel.fetch_message(
+                            ctx.message.reference.message_id
+                        )
                     else:
                         message = ctx.message
                 else:
@@ -6698,59 +7479,74 @@ class Tags(commands.Cog):
                     "content": message.content,
                     "clean_content": message.clean_content,
                     "created_at": message.created_at.isoformat(),
-                    "edited_at": message.edited_at.isoformat() if message.edited_at else None,
+                    "edited_at": message.edited_at.isoformat()
+                    if message.edited_at
+                    else None,
                     "author": json.loads(await _json_user(ctx, str(message.author.id))),
                     "channel": {
                         "id": str(message.channel.id),
                         "name": getattr(message.channel, "name", "DM"),
-                        "mention": message.channel.mention
+                        "mention": message.channel.mention,
                     },
-                    "attachments": [{
-                        "id": str(a.id),
-                        "filename": a.filename,
-                        "width": getattr(a, 'width', None),
-                        "height": getattr(a, 'height', None),
-                        "url": a.url,
-                        "proxy_url": a.proxy_url,
-                        "size": a.size,
-                        "content_type": a.content_type
-                    } for a in message.attachments],
-                    "embeds": [e.to_dict() for e in message.embeds],
-                    "components": [c.to_dict() for c in message.components],
-                    "mention_everyone": message.mention_everyone,
-                    "mentions": [json.loads(await _json_user(ctx, str(u.id))) for u in message.mentions],
-                    "message_snapshots": [{
-                        "content": m.content,
-                        "attachments": [{
+                    "attachments": [
+                        {
                             "id": str(a.id),
                             "filename": a.filename,
-                            "width": getattr(a, 'width', None),
-                            "height": getattr(a, 'height', None),
+                            "width": getattr(a, "width", None),
+                            "height": getattr(a, "height", None),
                             "url": a.url,
                             "proxy_url": a.proxy_url,
                             "size": a.size,
-                            "content_type": a.content_type
-                        } for a in m.attachments],
-                        "embeds": [e.to_dict() for e in m.embeds],
-                        "components": [c.to_dict() for c in m.components]
-                    } for m in message.message_snapshots],
+                            "content_type": a.content_type,
+                        }
+                        for a in message.attachments
+                    ],
+                    "embeds": [e.to_dict() for e in message.embeds],
+                    "components": [c.to_dict() for c in message.components],
+                    "mention_everyone": message.mention_everyone,
+                    "mentions": [
+                        json.loads(await _json_user(ctx, str(u.id)))
+                        for u in message.mentions
+                    ],
+                    "message_snapshots": [
+                        {
+                            "content": m.content,
+                            "attachments": [
+                                {
+                                    "id": str(a.id),
+                                    "filename": a.filename,
+                                    "width": getattr(a, "width", None),
+                                    "height": getattr(a, "height", None),
+                                    "url": a.url,
+                                    "proxy_url": a.proxy_url,
+                                    "size": a.size,
+                                    "content_type": a.content_type,
+                                }
+                                for a in m.attachments
+                            ],
+                            "embeds": [e.to_dict() for e in m.embeds],
+                            "components": [c.to_dict() for c in m.components],
+                        }
+                        for m in message.message_snapshots
+                    ],
                     "reference": {
                         "message_id": str(message.reference.message_id),
                         "channel_id": str(message.reference.channel_id),
-                        "guild_id": str(message.reference.guild_id)
-                    } if message.reference else None,
+                        "guild_id": str(message.reference.guild_id),
+                    }
+                    if message.reference
+                    else None,
                     "pinned": message.pinned,
-                    "type": str(message.type.name)
+                    "type": str(message.type.name),
                 }
-
 
                 return json.dumps(message_data)
             except Exception as e:
                 return f"[JSON Message Error: {str(e)}]"
 
-        @self.formatter.register('json.guild')
-        @self.formatter.register('guildjson')
-        async def _json_guild(ctx, guild_ref='', **kwargs):
+        @self.formatter.register("json.guild")
+        @self.formatter.register("guildjson")
+        async def _json_guild(ctx, guild_ref="", **kwargs):
             """
             ### {json.guild}
                 * Returns the current server's JSON object.
@@ -6764,7 +7560,9 @@ class Tags(commands.Cog):
                     "name": ctx.guild.name,
                     "description": ctx.guild.description,
                     "icon_url": str(ctx.guild.icon.url) if ctx.guild.icon else None,
-                    "banner_url": str(ctx.guild.banner.url) if ctx.guild.banner else None,
+                    "banner_url": str(ctx.guild.banner.url)
+                    if ctx.guild.banner
+                    else None,
                     "owner_id": str(ctx.guild.owner_id),
                     "created_at": ctx.guild.created_at.isoformat(),
                     "member_count": ctx.guild.member_count,
@@ -6777,73 +7575,108 @@ class Tags(commands.Cog):
                     "mfa_level": str(ctx.guild.mfa_level),
                     "system_channel": {
                         "id": str(ctx.guild.system_channel.id),
-                        "name": ctx.guild.system_channel.name
-                    } if ctx.guild.system_channel else None,
+                        "name": ctx.guild.system_channel.name,
+                    }
+                    if ctx.guild.system_channel
+                    else None,
                     "rules_channel": {
                         "id": str(ctx.guild.rules_channel.id),
-                        "name": ctx.guild.rules_channel.name
-                    } if ctx.guild.rules_channel else None,
+                        "name": ctx.guild.rules_channel.name,
+                    }
+                    if ctx.guild.rules_channel
+                    else None,
                     "afk_channel": {
                         "id": str(ctx.guild.afk_channel.id),
-                        "name": ctx.guild.afk_channel.name
-                    } if ctx.guild.afk_channel else None,
+                        "name": ctx.guild.afk_channel.name,
+                    }
+                    if ctx.guild.afk_channel
+                    else None,
                     "afk_timeout": ctx.guild.afk_timeout,
-                    "emojis": [{
-                        "id": str(e.id),
-                        "name": e.name,
-                        "animated": e.animated,
-                        "url": str(e.url)
-                    } for e in ctx.guild.emojis],
-                    "roles": [{
-                        "id": str(r.id),
-                        "name": r.name,
-                        "color": r.color.value,
-                        "position": r.position,
-                        "permissions": r.permissions.value,
-                        "mentionable": r.mentionable
-                    } for r in ctx.guild.roles],
-                    "channels": [{
-                        "id": str(c.id),
-                        "name": c.name,
-                        "type": str(c.type),
-                        "created_at": c.created_at.isoformat(),
-                        "position": c.position,
-                        "topic": getattr(c, 'topic', None),
-                        "nsfw": c.nsfw,
-                        "bitrate": getattr(c, 'bitrate', None),
-                        "user_limit": getattr(c, 'user_limit', None),
-                        "slowmode_delay": getattr(c, 'slowmode_delay', None),
-                        "category": {
-                            "id": str(c.category.id),
-                            "name": c.category.name
-                        } if getattr(c, 'category', None) else None,
-                        "mention": c.mention
-                    } for c in ctx.guild.channels],
-                    "members": [{
-                        "id": str(m.id),
-                        "name": m.name,
-                        "display_name": m.display_name,
-                        "nick": m.nick,
-                        "mention": m.mention,
-                        "joined_at": m.joined_at.isoformat(),
-                        "avatar": str(m.display_avatar.key) if m.display_avatar else None,
-                        "avatar_url": str(m.display_avatar.url) if m.display_avatar else None,
-                        "banner": str(m.guild_banner.key) if m.guild_banner else None,
-                        "banner_url": str(m.guild_banner.url) if m.guild_banner else None,
-                        "roles": [{"id": str(r.id), "name": r.name} for r in m.roles],
-                        "top_role": {"id": str(m.top_role.id), "name": m.top_role.name},
-                        "guild_permissions": list(m.guild_permissions),
-                        "timed_out_until": m.timed_out_until.isoformat() if m.timed_out_until else None
-                    } for m in ctx.guild.members]
+                    "emojis": [
+                        {
+                            "id": str(e.id),
+                            "name": e.name,
+                            "animated": e.animated,
+                            "url": str(e.url),
+                        }
+                        for e in ctx.guild.emojis
+                    ],
+                    "roles": [
+                        {
+                            "id": str(r.id),
+                            "name": r.name,
+                            "color": r.color.value,
+                            "position": r.position,
+                            "permissions": r.permissions.value,
+                            "mentionable": r.mentionable,
+                        }
+                        for r in ctx.guild.roles
+                    ],
+                    "channels": [
+                        {
+                            "id": str(c.id),
+                            "name": c.name,
+                            "type": str(c.type),
+                            "created_at": c.created_at.isoformat(),
+                            "position": c.position,
+                            "topic": getattr(c, "topic", None),
+                            "nsfw": c.nsfw,
+                            "bitrate": getattr(c, "bitrate", None),
+                            "user_limit": getattr(c, "user_limit", None),
+                            "slowmode_delay": getattr(c, "slowmode_delay", None),
+                            "category": {
+                                "id": str(c.category.id),
+                                "name": c.category.name,
+                            }
+                            if getattr(c, "category", None)
+                            else None,
+                            "mention": c.mention,
+                        }
+                        for c in ctx.guild.channels
+                    ],
+                    "members": [
+                        {
+                            "id": str(m.id),
+                            "name": m.name,
+                            "display_name": m.display_name,
+                            "nick": m.nick,
+                            "mention": m.mention,
+                            "joined_at": m.joined_at.isoformat(),
+                            "avatar": str(m.display_avatar.key)
+                            if m.display_avatar
+                            else None,
+                            "avatar_url": str(m.display_avatar.url)
+                            if m.display_avatar
+                            else None,
+                            "banner": str(m.guild_banner.key)
+                            if m.guild_banner
+                            else None,
+                            "banner_url": str(m.guild_banner.url)
+                            if m.guild_banner
+                            else None,
+                            "roles": [
+                                {"id": str(r.id), "name": r.name} for r in m.roles
+                            ],
+                            "top_role": {
+                                "id": str(m.top_role.id),
+                                "name": m.top_role.name,
+                            },
+                            "guild_permissions": list(m.guild_permissions),
+                            "timed_out_until": m.timed_out_until.isoformat()
+                            if m.timed_out_until
+                            else None,
+                        }
+                        for m in ctx.guild.members
+                    ],
                 }
 
                 return json.dumps(guild_data)
             except Exception as e:
                 return f"[JSON Guild Error: {str(e)}]"
 
-        @self.formatter.register('json.channel')
-        @self.formatter.register('channeljson')
-        async def _json_channel(ctx, channel_ref='', **kwargs):
+        @self.formatter.register("json.channel")
+        @self.formatter.register("channeljson")
+        async def _json_channel(ctx, channel_ref="", **kwargs):
             """
             ### {json.channel:channel}
                 * Returns a server channel's JSON object. Defaults to current channel.
@@ -6851,44 +7684,46 @@ class Tags(commands.Cog):
             try:
                 channel = None
 
-
                 if not channel_ref.strip():
                     channel = ctx.channel
-                elif hasattr(channel_ref, 'id') and hasattr(channel_ref, 'type'):
+                elif hasattr(channel_ref, "id") and hasattr(channel_ref, "type"):
                     channel = channel_ref
                 elif isinstance(channel_ref, str):
-                    channel_id = channel_ref.strip('<>#')
+                    channel_id = channel_ref.strip("<>#")
                     if channel_id.isdigit():
                         channel = ctx.guild.get_channel(int(channel_id))
                     else:
                         channel = discord.utils.get(ctx.guild.channels, name=channel_id)
 
-
                 channel_data = {
                     "id": str(channel.id),
-                    "name": getattr(channel, 'name', 'DM'),
+                    "name": getattr(channel, "name", "DM"),
                     "type": str(channel.type),
-                    "created_at": channel.created_at.isoformat() if hasattr(channel, 'created_at') else None,
-                    "position": getattr(channel, 'position', None),
-                    "topic": getattr(channel, 'topic', None),
-                    "nsfw": getattr(channel, 'nsfw', None),
-                    "bitrate": getattr(channel, 'bitrate', None),
-                    "user_limit": getattr(channel, 'user_limit', None),
-                    "slowmode_delay": getattr(channel, 'slowmode_delay', None),
+                    "created_at": channel.created_at.isoformat()
+                    if hasattr(channel, "created_at")
+                    else None,
+                    "position": getattr(channel, "position", None),
+                    "topic": getattr(channel, "topic", None),
+                    "nsfw": getattr(channel, "nsfw", None),
+                    "bitrate": getattr(channel, "bitrate", None),
+                    "user_limit": getattr(channel, "user_limit", None),
+                    "slowmode_delay": getattr(channel, "slowmode_delay", None),
                     "category": {
                         "id": str(channel.category.id),
-                        "name": channel.category.name
-                    } if getattr(channel, 'category', None) else None,
-                    "mention": channel.mention
+                        "name": channel.category.name,
+                    }
+                    if getattr(channel, "category", None)
+                    else None,
+                    "mention": channel.mention,
                 }
 
                 return json.dumps(channel_data)
             except Exception as e:
                 return f"[JSON Channel Error: {str(e)}]"
 
-        @self.formatter.register('json.role')
-        @self.formatter.register('rolejson')
-        async def _json_role(ctx, role_ref='', **kwargs):
+        @self.formatter.register("json.role")
+        @self.formatter.register("rolejson")
+        async def _json_role(ctx, role_ref="", **kwargs):
             """
             ### {json.role:role}
                 * Returns a server role's JSON object. Defaults to all roles.
@@ -6910,13 +7745,13 @@ class Tags(commands.Cog):
                             "managed": role.managed,
                             "hoist": role.hoist,
                             "created_at": role.created_at.isoformat(),
-                            "mention": role.mention
+                            "mention": role.mention,
                         }
                         roles_data.append(role_data)
                     return json.dumps(roles_data)
 
                 try:
-                    role_id = int(role_ref.strip('<@&>'))
+                    role_id = int(role_ref.strip("<@&>"))
                     role = ctx.guild.get_role(role_id)
                     if role:
                         role_data = {
@@ -6929,12 +7764,11 @@ class Tags(commands.Cog):
                             "managed": role.managed,
                             "hoist": role.hoist,
                             "created_at": role.created_at.isoformat(),
-                            "mention": role.mention
+                            "mention": role.mention,
                         }
                         return json.dumps(role_data)
                 except ValueError:
                     pass
-
 
                 role = discord.utils.get(ctx.guild.roles, name=role_ref)
                 if role:
@@ -6948,7 +7782,7 @@ class Tags(commands.Cog):
                         "managed": role.managed,
                         "hoist": role.hoist,
                         "created_at": role.created_at.isoformat(),
-                        "mention": role.mention
+                        "mention": role.mention,
                     }
                     return json.dumps(role_data)
 
@@ -6956,8 +7790,8 @@ class Tags(commands.Cog):
             except Exception as e:
                 return f"[JSON Role Error: {str(e)}]"
 
-        @self.formatter.register('json.emoji')
-        @self.formatter.register('emojijson')
+        @self.formatter.register("json.emoji")
+        @self.formatter.register("emojijson")
         async def _json_emoji(ctx, emoji_ref, **kwargs):
             """
             ### {json.emoji:emoji}
@@ -6970,16 +7804,18 @@ class Tags(commands.Cog):
                 emoji_ref = emoji_ref.strip()
 
                 if not emoji_ref:
-                    emojis_data = [{
-                        "id": str(e.id),
-                        "name": e.name,
-                        "animated": e.animated,
-                        "url": str(e.url),
-                        "created_at": e.created_at.isoformat(),
-                        "mention": str(e)
-                    } for e in ctx.guild.emojis]
+                    emojis_data = [
+                        {
+                            "id": str(e.id),
+                            "name": e.name,
+                            "animated": e.animated,
+                            "url": str(e.url),
+                            "created_at": e.created_at.isoformat(),
+                            "mention": str(e),
+                        }
+                        for e in ctx.guild.emojis
+                    ]
                     return json.dumps(emojis_data)
-
 
                 try:
                     emoji_id = int(emoji_ref)
@@ -6991,12 +7827,11 @@ class Tags(commands.Cog):
                             "animated": emoji.animated,
                             "url": str(emoji.url),
                             "created_at": emoji.created_at.isoformat(),
-                            "mention": str(emoji)
+                            "mention": str(emoji),
                         }
                         return json.dumps(emoji_data)
                 except ValueError:
                     pass
-
 
                 emoji = discord.utils.get(ctx.guild.emojis, name=emoji_ref)
                 if emoji:
@@ -7006,7 +7841,7 @@ class Tags(commands.Cog):
                         "animated": emoji.animated,
                         "url": str(emoji.url),
                         "created_at": emoji.created_at.isoformat(),
-                        "mention": str(emoji)
+                        "mention": str(emoji),
                     }
                     return json.dumps(emoji_data)
 
@@ -7014,8 +7849,8 @@ class Tags(commands.Cog):
             except Exception as e:
                 return f"[JSON Emoji Error: {str(e)}]"
 
-        @self.formatter.register('json.attachment')
-        @self.formatter.register('attachmentjson')
+        @self.formatter.register("json.attachment")
+        @self.formatter.register("attachmentjson")
         async def _json_attachment(ctx, attachment_ref, **kwargs):
             """
             ### {json.attachment:index}
@@ -7029,18 +7864,20 @@ class Tags(commands.Cog):
                 attachment_ref = attachment_ref.strip().lower()
 
                 if not attachment_ref.strip():
-                    attachments_data = [{
-                        "id": str(a.id),
-                        "filename": a.filename,
-                        "url": a.url,
-                        "proxy_url": a.proxy_url,
-                        "size": a.size,
-                        "content_type": a.content_type,
-                        "height": getattr(a, 'height', None),
-                        "width": getattr(a, 'width', None)
-                    } for a in attachments]
+                    attachments_data = [
+                        {
+                            "id": str(a.id),
+                            "filename": a.filename,
+                            "url": a.url,
+                            "proxy_url": a.proxy_url,
+                            "size": a.size,
+                            "content_type": a.content_type,
+                            "height": getattr(a, "height", None),
+                            "width": getattr(a, "width", None),
+                        }
+                        for a in attachments
+                    ]
                     return json.dumps(attachments_data)
-
 
                 try:
                     index = int(attachment_ref)
@@ -7053,14 +7890,13 @@ class Tags(commands.Cog):
                             "proxy_url": a.proxy_url,
                             "size": a.size,
                             "content_type": a.content_type,
-                            "height": getattr(a, 'height', None),
-                            "width": getattr(a, 'width', None)
+                            "height": getattr(a, "height", None),
+                            "width": getattr(a, "width", None),
                         }
                         return json.dumps(attachment_data)
                     return "[JSON Attachment Error: Invalid index]"
                 except ValueError:
                     pass
-
 
                 for a in attachments:
                     if attachment_ref in (a.url, a.filename):
@@ -7071,8 +7907,8 @@ class Tags(commands.Cog):
                             "proxy_url": a.proxy_url,
                             "size": a.size,
                             "content_type": a.content_type,
-                            "height": getattr(a, 'height', None),
-                            "width": getattr(a, 'width', None)
+                            "height": getattr(a, "height", None),
+                            "width": getattr(a, "width", None),
                         }
                         return json.dumps(attachment_data)
 
@@ -7080,7 +7916,7 @@ class Tags(commands.Cog):
             except Exception as e:
                 return f"[JSON Attachment Error: {str(e)}]"
 
-        @self.formatter.register('attach')
+        @self.formatter.register("attach")
         async def _attach(ctx, args_str, **kwargs):
             """
             ### {attach:optional_url}
@@ -7095,30 +7931,35 @@ class Tags(commands.Cog):
                 attachments = ctx.message.attachments
                 files = []
 
-
                 if not url and attachments:
                     for attachment in attachments[:10]:
                         file = discord.File(
                             BytesIO(await attachment.read()),
-                            filename=attachment.filename
+                            filename=attachment.filename,
                         )
                         files.append(file)
                     return ("", [], None, files)
-
 
                 if url:
                     async with aiohttp.ClientSession() as session:
                         async with session.get(url) as resp:
                             if resp.status != 200:
-                                return (f"[attach error: HTTP {resp.status}]", [], None, [])
+                                return (
+                                    f"[attach error: HTTP {resp.status}]",
+                                    [],
+                                    None,
+                                    [],
+                                )
 
-                            content_type = resp.headers.get('Content-Type', '')
+                            content_type = resp.headers.get("Content-Type", "")
                             filename = os.path.basename(urlparse(url).path)
 
-
                             ext = self._get_extension(content_type, filename)
-                            filename = f"{filename.split('.')[0]}.{ext}" if '.' not in filename else filename
-
+                            filename = (
+                                f"{filename.split('.')[0]}.{ext}"
+                                if "." not in filename
+                                else filename
+                            )
 
                             file_data = BytesIO(await resp.read())
                             file = discord.File(file_data, filename=filename)
@@ -7129,7 +7970,6 @@ class Tags(commands.Cog):
             except Exception as e:
                 return (f"[attach error: {str(e)}]", [], None, [])
 
-
         async def _get_media_url(ctx, url_arg: str, media_types: tuple):
             if url_arg:
                 async with aiohttp.ClientSession() as session:
@@ -7137,10 +7977,9 @@ class Tags(commands.Cog):
                         if resp.status != 200:
                             return None
 
-                        content_type = resp.headers.get('Content-Type', '')
+                        content_type = resp.headers.get("Content-Type", "")
                         if content_type in media_types:
                             return url_arg
-
 
             if ctx.message.attachments:
                 for attachment in ctx.message.attachments:
@@ -7149,7 +7988,7 @@ class Tags(commands.Cog):
 
             return None
 
-        @self.formatter.register('image')
+        @self.formatter.register("image")
         async def _image(ctx, url: str = None, **kwargs):
             """
             ### {image:url}
@@ -7163,7 +8002,7 @@ class Tags(commands.Cog):
             """
             return await _get_media_url(ctx, url, media_types=IMAGE_TYPES)
 
-        @self.formatter.register('video')
+        @self.formatter.register("video")
         async def _video(ctx, url: str = None, **kwargs):
             """
             ### {video:url}
@@ -7176,7 +8015,7 @@ class Tags(commands.Cog):
             """
             return await _get_media_url(ctx, url, media_types=VIDEO_TYPES)
 
-        @self.formatter.register('iv')
+        @self.formatter.register("iv")
         async def _iv(ctx, url: str = None, **kwargs):
             """
             ### {iv:url}
@@ -7186,9 +8025,9 @@ class Tags(commands.Cog):
                     - `{iv:https://example.com/media.gif}` -> URL
                     - `{iv}` (with image/video attachment) -> attachment URL
             """
-            return await _get_media_url(ctx, url, media_types=IMAGE_TYPES+VIDEO_TYPES)
+            return await _get_media_url(ctx, url, media_types=IMAGE_TYPES + VIDEO_TYPES)
 
-        @self.formatter.register('audio')
+        @self.formatter.register("audio")
         async def _audio(ctx, url: str = None, **kwargs):
             """
             ### {audio:url}
@@ -7201,7 +8040,7 @@ class Tags(commands.Cog):
             """
             return await _get_media_url(ctx, url, media_types=AUDIO_TYPES)
 
-        @self.formatter.register('av')
+        @self.formatter.register("av")
         async def _av(ctx, url: str = None, **kwargs):
             """
             ### {av:url}
@@ -7211,9 +8050,9 @@ class Tags(commands.Cog):
                     - `{av:https://example.com/media.mp4}` -> URL
                     - `{av}` (with audio/video attachment) -> attachment URL
             """
-            return await _get_media_url(ctx, url, media_types=AUDIO_TYPES+VIDEO_TYPES)
+            return await _get_media_url(ctx, url, media_types=AUDIO_TYPES + VIDEO_TYPES)
 
-        @self.formatter.register('media')
+        @self.formatter.register("media")
         async def _media(ctx, url: str = None, **kwargs):
             """
             ### {media:url}
@@ -7223,42 +8062,41 @@ class Tags(commands.Cog):
                     - `{media:https://example.com/video.mp4}` -> URL
                     - `{media}` (with any attachment) -> attachment URL
             """
-            return await _get_media_url(ctx, url, media_types=AUDIO_TYPES+VIDEO_TYPES+IMAGE_TYPES)
+            return await _get_media_url(
+                ctx, url, media_types=AUDIO_TYPES + VIDEO_TYPES + IMAGE_TYPES
+            )
 
     def _get_extension(self, content_type: str, filename: str = None) -> str:
         if content_type:
             type_to_ext = {
-                'image/png': 'png',
-                'image/jpeg': 'jpg',
-                'image/jpg': 'jpg',
-                'image/webp': 'webp',
-                'image/gif': 'gif',
-                'video/mp4': 'mp4',
-                'video/webm': 'webm',
-                'video/quicktime': 'mov',
-                'video/x-matroska': 'mkv',
-                'video/x-msvideo': 'avi',
-                'video/x-ms-wmv': 'wmv',
-                'audio/mpeg': 'mp3',
-                'audio/mp4': 'm4a',
-                'audio/wav': 'wav',
-                'audio/ogg': 'ogg',
-                'audio/opus': 'opus',
-                'audio/flac': 'flac',
-                'audio/x-matroska': 'mka',
-                'audio/x-ms-wma': 'wma'
+                "image/png": "png",
+                "image/jpeg": "jpg",
+                "image/jpg": "jpg",
+                "image/webp": "webp",
+                "image/gif": "gif",
+                "video/mp4": "mp4",
+                "video/webm": "webm",
+                "video/quicktime": "mov",
+                "video/x-matroska": "mkv",
+                "video/x-msvideo": "avi",
+                "video/x-ms-wmv": "wmv",
+                "audio/mpeg": "mp3",
+                "audio/mp4": "m4a",
+                "audio/wav": "wav",
+                "audio/ogg": "ogg",
+                "audio/opus": "opus",
+                "audio/flac": "flac",
+                "audio/x-matroska": "mka",
+                "audio/x-ms-wma": "wma",
             }
             for mime, ext in type_to_ext.items():
                 if mime in content_type.lower():
                     return ext
 
+            if "." in filename:
+                return filename.split(".")[-1].lower()
 
-            if '.' in filename:
-                return filename.split('.')[-1].lower()
-
-
-            return '.tmp'
-
+            return ".tmp"
 
     def parse_args(self, raw: str) -> list[str]:
         if not raw:
@@ -7272,20 +8110,22 @@ class Tags(commands.Cog):
             if escape:
                 current.append(char)
                 escape = False
-            elif char == '\\':
+            elif char == "\\":
                 escape = True
             elif char == '"':
                 in_quotes = not in_quotes
-            elif char == '|' and not in_quotes:
-                parts.append(''.join(current).strip())
+            elif char == "|" and not in_quotes:
+                parts.append("".join(current).strip())
                 current = []
             else:
                 current.append(char)
         if current:
-            parts.append(''.join(current).strip())
+            parts.append("".join(current).strip())
         return parts
 
-    async def process_tags(self, ctx: commands.Context, content: str, args: str = "") -> tuple[str, list, discord.ui.View]:
+    async def process_tags(
+        self, ctx: commands.Context, content: str, args: str = ""
+    ) -> tuple[str, list, discord.ui.View]:
         return await self.formatter.format(content, ctx, args=args)
 
     @commands.Cog.listener()
@@ -7302,7 +8142,6 @@ class Tags(commands.Cog):
             return
 
         try:
-
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
 
@@ -7315,18 +8154,24 @@ class Tags(commands.Cog):
             elif component_type == 3:
                 values = interaction.data.get("values", [])
                 if not values:
-                    return await interaction.followup.send("No selection made.", ephemeral=True)
+                    return await interaction.followup.send(
+                        "No selection made.", ephemeral=True
+                    )
                 await self.handle_select(interaction, values[0])
 
             else:
-                await interaction.followup.send("Unknown component type.", ephemeral=True)
+                await interaction.followup.send(
+                    "Unknown component type.", ephemeral=True
+                )
 
         except discord.HTTPException:
             pass
 
         except Exception as e:
             try:
-                await interaction.followup.send(f"Interaction failed: {str(e)}", ephemeral=True)
+                await interaction.followup.send(
+                    f"Interaction failed: {str(e)}", ephemeral=True
+                )
             except:
                 await interaction.channel.send(f"Interaction failed: {str(e)}")
 
@@ -7373,8 +8218,9 @@ class Tags(commands.Cog):
         formatted_str = formatted_str.strip()
 
         if not formatted_str:
-            return await interaction.followup.send("Empty command after processing.", ephemeral=True)
-
+            return await interaction.followup.send(
+                "Empty command after processing.", ephemeral=True
+            )
 
         parts = formatted_str.split()
         command_name = parts[0]
@@ -7382,7 +8228,9 @@ class Tags(commands.Cog):
 
         command = self.bot.get_command(command_name)
         if not command:
-            return await interaction.followup.send(f"Command not found: `{command_name}`", ephemeral=True)
+            return await interaction.followup.send(
+                f"Command not found: `{command_name}`", ephemeral=True
+            )
 
         fake_message = interaction.message
         fake_message.author = interaction.user
@@ -7397,7 +8245,6 @@ class Tags(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"Command failed: {str(e)}", ephemeral=True)
 
-
     async def execute_tag(self, interaction: discord.Interaction, tag_str: str):
         tag_name = tag_str.split(maxsplit=1)[0]
 
@@ -7407,33 +8254,31 @@ class Tags(commands.Cog):
                 WHERE name = $1 AND (guild_id = $2 OR user_id = $3)""",
                 tag_name,
                 interaction.guild.id if interaction.guild else None,
-                interaction.user.id
+                interaction.user.id,
             )
 
         if not tag:
             return await interaction.followup.send(
-                f"Tag not found: {tag_name}",
-                ephemeral=True
+                f"Tag not found: {tag_name}", ephemeral=True
             )
 
-        args = tag_str[len(tag_name):].strip()
-
-
+        args = tag_str[len(tag_name) :].strip()
 
         ctx = await self.bot.get_context(interaction.message)
         ctx.author = interaction.user
         ctx.guild = interaction.guild
         ctx.channel = interaction.channel
 
-
-        text, embeds, view, files = await self.formatter.format(tag['content'], ctx, args=args)
+        text, embeds, view, files = await self.formatter.format(
+            tag["content"], ctx, args=args
+        )
 
         try:
             send_kwargs = {
                 "content": text[:2000] if text else None,
                 "embeds": embeds[:10],
                 "files": files[:10],
-                "ephemeral": True
+                "ephemeral": True,
             }
 
             if view and getattr(view, "children", []):
@@ -7443,8 +8288,7 @@ class Tags(commands.Cog):
 
         except Exception as e:
             await interaction.followup.send(
-                f"Failed to send tag result: {str(e)}",
-                ephemeral=True
+                f"Failed to send tag result: {str(e)}", ephemeral=True
             )
 
     def parse_personal_flag(self, content: str) -> tuple[str, bool]:
@@ -7456,9 +8300,7 @@ class Tags(commands.Cog):
 
     @app_commands.autocomplete()
     async def tag_name_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str
+        self, interaction: discord.Interaction, current: str
     ) -> List[app_commands.Choice[str]]:
         cog = interaction.client.get_cog("Tags")
         if not cog:
@@ -7502,8 +8344,13 @@ class Tags(commands.Cog):
 
         return choices[:25]
 
-
-    @commands.hybrid_group(name="tag", description="Tag management commands.", invoke_without_command=True, with_app_command=True, aliases=["t"])
+    @commands.hybrid_group(
+        name="tag",
+        description="Tag management commands.",
+        invoke_without_command=True,
+        with_app_command=True,
+        aliases=["t"],
+    )
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def tag(self, ctx: commands.Context, name: str, *, args: str = ""):
@@ -7516,64 +8363,87 @@ class Tags(commands.Cog):
                 tag = await conn.fetchrow(
                     """SELECT content, uses FROM tags
                     WHERE name = $1 AND user_id = $2""",
-                    name, ctx.author.id
+                    name,
+                    ctx.author.id,
                 )
-
 
                 if not tag and ctx.guild:
                     tag = await conn.fetchrow(
                         """SELECT content, uses FROM tags
                         WHERE name = $1 AND guild_id = $2""",
-                        name, ctx.guild.id
+                        name,
+                        ctx.guild.id,
                     )
             else:
                 tag = await conn.fetchrow(
                     """SELECT content, uses FROM tags
                     WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4))""",
-                    name, forced_personal, ctx.author.id, ctx.guild.id if ctx.guild else None
+                    name,
+                    forced_personal,
+                    ctx.author.id,
+                    ctx.guild.id if ctx.guild else None,
                 )
-
 
             if not tag:
                 alias = await conn.fetchrow(
                     """SELECT tag_name FROM tag_aliases
                     WHERE alias = $1 AND (user_id = $2 OR guild_id = $3)""",
-                    name, ctx.author.id, ctx.guild.id if ctx.guild else None
+                    name,
+                    ctx.author.id,
+                    ctx.guild.id if ctx.guild else None,
                 )
                 if alias:
                     tag = await conn.fetchrow(
                         """SELECT content, uses FROM tags
                         WHERE name = $1 AND (user_id = $2 OR guild_id = $3)""",
-                        alias['tag_name'], ctx.author.id, ctx.guild.id if ctx.guild else None
+                        alias["tag_name"],
+                        ctx.author.id,
+                        ctx.guild.id if ctx.guild else None,
                     )
                     if tag:
-                        name = alias['tag_name']
+                        name = alias["tag_name"]
 
             if not tag:
                 return await ctx.send(f"Tag or alias `{name}` not found.")
 
-
             await conn.execute(
                 """UPDATE tags SET uses = uses + 1
                 WHERE name = $1 AND (user_id = $2 OR guild_id = $3)""",
-                name, ctx.author.id, ctx.guild.id if ctx.guild else None
+                name,
+                ctx.author.id,
+                ctx.guild.id if ctx.guild else None,
             )
 
-            text, embeds, view, files = await self.formatter.format(tag['content'], ctx, args=args)
+            text, embeds, view, files = await self.formatter.format(
+                tag["content"], ctx, args=args
+            )
             if text.strip() or embeds or (view and view.children) or files:
                 try:
                     await ctx.send(
                         content=text[:2000] if text else None,
                         embeds=embeds[:10],
                         view=view if view and view.children else None,
-                        files=files[:10]
+                        files=files[:10],
                     )
                 except discord.HTTPException as e:
                     await ctx.send(f"Failed to send tag: {e}")
 
-    @tag.command(name="show", description="Show a tag.", with_app_command=True, aliases=["fetch"])
-    @app_commands.describe(name="The tag name.", args="The tag arguments, if any.", personal="Whether to show a personal tag.")
-    async def show(self, ctx: commands.Context, name: str, *, args: str = "", personal: bool = False):
+    @tag.command(
+        name="show", description="Show a tag.", with_app_command=True, aliases=["fetch"]
+    )
+    @app_commands.describe(
+        name="The tag name.",
+        args="The tag arguments, if any.",
+        personal="Whether to show a personal tag.",
+    )
+    async def show(
+        self,
+        ctx: commands.Context,
+        name: str,
+        *,
+        args: str = "",
+        personal: bool = False,
+    ):
         await ctx.typing()
         name, content_personal = self.parse_personal_flag(name)
         personal = personal or content_personal
@@ -7584,36 +8454,42 @@ class Tags(commands.Cog):
                 tag = await conn.fetchrow(
                     """SELECT content, uses FROM tags
                     WHERE name = $1 AND user_id = $2""",
-                    name, ctx.author.id
+                    name,
+                    ctx.author.id,
                 )
                 if not tag and ctx.guild:
                     tag = await conn.fetchrow(
                         """SELECT content, uses FROM tags
                         WHERE name = $1 AND guild_id = $2""",
-                        name, ctx.guild.id
+                        name,
+                        ctx.guild.id,
                     )
             else:
                 tag = await conn.fetchrow(
                     """SELECT content, uses FROM tags
                     WHERE name = $1 AND user_id = $2""",
-                    name, ctx.author.id
+                    name,
+                    ctx.author.id,
                 )
-
 
             if not tag and not personal:
                 alias = await conn.fetchrow(
                     """SELECT tag_name FROM tag_aliases
                     WHERE alias = $1 AND (guild_id = $2 OR user_id = $3)""",
-                    name, ctx.guild.id if ctx.guild else None, ctx.author.id
+                    name,
+                    ctx.guild.id if ctx.guild else None,
+                    ctx.author.id,
                 )
                 if alias:
                     tag = await conn.fetchrow(
                         """SELECT content, uses FROM tags
                         WHERE name = $1 AND (guild_id = $2 OR user_id = $3)""",
-                        alias['tag_name'], ctx.guild.id if ctx.guild else None, ctx.author.id
+                        alias["tag_name"],
+                        ctx.guild.id if ctx.guild else None,
+                        ctx.author.id,
                     )
                     if tag:
-                        name = alias['tag_name']
+                        name = alias["tag_name"]
 
             if not tag:
                 return await ctx.send(f"Tag or alias `{name}` not found.")
@@ -7621,37 +8497,46 @@ class Tags(commands.Cog):
             await conn.execute(
                 """UPDATE tags SET uses = uses + 1
                 WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4))""",
-                name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None
+                name,
+                personal,
+                ctx.author.id,
+                ctx.guild.id if ctx.guild else None,
             )
 
-
-            text, embeds, view, files = await self.formatter.format(tag['content'], ctx, args=args)
+            text, embeds, view, files = await self.formatter.format(
+                tag["content"], ctx, args=args
+            )
             if text.strip() or embeds or (view and view.children) or files:
                 try:
                     await ctx.send(
                         content=text[:2000] if text else None,
                         embeds=embeds[:10],
                         view=view if view and view.children else None,
-                        files=files[:10]
+                        files=files[:10],
                     )
                 except discord.HTTPException as e:
                     await ctx.send(f"Failed to send tag: {e}")
 
     @show.autocomplete("name")
     async def autocomplete_tag_show_name(
-        self,
-        interaction: discord.Interaction,
-        current: str
+        self, interaction: discord.Interaction, current: str
     ):
         return await self.tag_name_autocomplete(interaction, current)
 
-    @tag.command(name="create", description="Create a tag.", with_app_command=True, aliases=["add"])
+    @tag.command(
+        name="create",
+        description="Create a tag.",
+        with_app_command=True,
+        aliases=["add"],
+    )
     @app_commands.describe(
         name="The tag name.",
         content="The tag content.",
-        personal="Make this a personal tag."
+        personal="Make this a personal tag.",
     )
-    async def create(self, ctx: commands.Context, name: str, *, content: str, personal: bool = False):
+    async def create(
+        self, ctx: commands.Context, name: str, *, content: str, personal: bool = False
+    ):
         await ctx.typing()
         if content is None:
             return await ctx.send("Please provide both a name and content for the tag.")
@@ -7671,31 +8556,50 @@ class Tags(commands.Cog):
                     await conn.execute(
                         """INSERT INTO tags (user_id, name, content, author_id)
                         VALUES ($1, $2, $3, $4)""",
-                        ctx.author.id, name, content, ctx.author.id
+                        ctx.author.id,
+                        name,
+                        content,
+                        ctx.author.id,
                     )
                     await ctx.send(f"Created personal tag `{name}`")
                 else:
                     if not ctx.guild:
-                        return await ctx.send("Server tags can only be created in servers.")
+                        return await ctx.send(
+                            "Server tags can only be created in servers."
+                        )
                     await conn.execute(
                         """INSERT INTO tags (guild_id, name, content, author_id)
                         VALUES ($1, $2, $3, $4)""",
-                        ctx.guild.id, name, content, ctx.author.id
+                        ctx.guild.id,
+                        name,
+                        content,
+                        ctx.author.id,
                     )
                     await ctx.send(f"Created server tag `{name}`")
         except asyncpg.UniqueViolationError:
             await ctx.send(f"A tag named `{name}` already exists in this context.")
 
-    @tag.command(name="edit", description="Edit an existing tag.", with_app_command=True, aliases=["update"])
+    @tag.command(
+        name="edit",
+        description="Edit an existing tag.",
+        with_app_command=True,
+        aliases=["update"],
+    )
     @app_commands.describe(
         name="The tag name.",
         new_content="The new content for the tag.",
-        personal="Whether this is a personal tag."
+        personal="Whether this is a personal tag.",
     )
-    async def edit(self, ctx: commands.Context, name: str, *, new_content: str = None, personal: bool = False):
+    async def edit(
+        self,
+        ctx: commands.Context,
+        name: str,
+        *,
+        new_content: str = None,
+        personal: bool = False,
+    ):
         await ctx.typing()
         name = name.lower()
-
 
         if new_content is not None:
             new_content, content_personal = self.parse_personal_flag(new_content)
@@ -7709,7 +8613,9 @@ class Tags(commands.Cog):
                 updated = await conn.execute(
                     """UPDATE tags SET content = $1
                     WHERE name = $2 AND user_id = $3""",
-                    new_content, name, ctx.author.id
+                    new_content,
+                    name,
+                    ctx.author.id,
                 )
                 if updated != "UPDATE 0":
                     return await ctx.send(f"Edited personal tag `{name}`")
@@ -7717,21 +8623,24 @@ class Tags(commands.Cog):
                 if not ctx.guild:
                     return await ctx.send("Server tags can only be edited in servers.")
 
-
                 updated = await conn.execute(
                     """UPDATE tags SET content = $1
                     WHERE name = $2 AND guild_id = $3 AND author_id = $4""",
-                    new_content, name, ctx.guild.id, ctx.author.id
+                    new_content,
+                    name,
+                    ctx.guild.id,
+                    ctx.author.id,
                 )
                 if updated != "UPDATE 0":
                     return await ctx.send(f"Edited server tag `{name}`")
-
 
                 if ctx.author.guild_permissions.manage_messages:
                     updated = await conn.execute(
                         """UPDATE tags SET content = $1
                         WHERE name = $2 AND guild_id = $3""",
-                        new_content, name, ctx.guild.id
+                        new_content,
+                        name,
+                        ctx.guild.id,
                     )
                     if updated != "UPDATE 0":
                         return await ctx.send(f"Forcefully edited server tag `{name}`")
@@ -7740,9 +8649,7 @@ class Tags(commands.Cog):
 
     @edit.autocomplete("name")
     async def autocomplete_tag_edit_name(
-        self,
-        interaction: discord.Interaction,
-        current: str
+        self, interaction: discord.Interaction, current: str
     ):
         return await self.tag_name_autocomplete(interaction, current)
 
@@ -7750,9 +8657,15 @@ class Tags(commands.Cog):
     @app_commands.describe(
         old_name="The current tag name.",
         new_name="The new name for the tag.",
-        personal="Whether this is a personal tag."
+        personal="Whether this is a personal tag.",
     )
-    async def rename(self, ctx: commands.Context, old_name: str, new_name: str, personal: bool = False):
+    async def rename(
+        self,
+        ctx: commands.Context,
+        old_name: str,
+        new_name: str,
+        personal: bool = False,
+    ):
         await ctx.typing()
         old_name = old_name.lower()
         new_name = new_name.lower()
@@ -7768,43 +8681,60 @@ class Tags(commands.Cog):
                 exists = await conn.fetchrow(
                     """SELECT 1 FROM tags
                     WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4))""",
-                    new_name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None
+                    new_name,
+                    personal,
+                    ctx.author.id,
+                    ctx.guild.id if ctx.guild else None,
                 )
                 if exists:
-                    return await ctx.send(f"A tag named `{new_name}` already exists in this context.")
-
+                    return await ctx.send(
+                        f"A tag named `{new_name}` already exists in this context."
+                    )
 
                 tag = await conn.fetchrow(
                     """SELECT 1 FROM tags
                     WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4 AND author_id = $5))""",
-                    old_name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None, ctx.author.id
+                    old_name,
+                    personal,
+                    ctx.author.id,
+                    ctx.guild.id if ctx.guild else None,
+                    ctx.author.id,
                 )
 
-                if not tag and ctx.author.guild_permissions.manage_messages and not personal:
+                if (
+                    not tag
+                    and ctx.author.guild_permissions.manage_messages
+                    and not personal
+                ):
                     tag = await conn.fetchrow(
                         """SELECT 1 FROM tags
                         WHERE name = $1 AND guild_id = $2""",
-                        old_name, ctx.guild.id
+                        old_name,
+                        ctx.guild.id,
                     )
 
                 if not tag:
                     scope = "personal" if personal else "server"
-                    return await ctx.send(f"No {scope} tag named `{old_name}` found that you can rename.")
-
+                    return await ctx.send(
+                        f"No {scope} tag named `{old_name}` found that you can rename."
+                    )
 
                 if personal:
                     await conn.execute(
                         """UPDATE tags SET name = $1
                         WHERE name = $2 AND user_id = $3""",
-                        new_name, old_name, ctx.author.id
+                        new_name,
+                        old_name,
+                        ctx.author.id,
                     )
                 else:
                     await conn.execute(
                         """UPDATE tags SET name = $1
                         WHERE name = $2 AND guild_id = $3""",
-                        new_name, old_name, ctx.guild.id
+                        new_name,
+                        old_name,
+                        ctx.guild.id,
                     )
-
 
                 await conn.execute(
                     """UPDATE tag_aliases SET tag_name = $1
@@ -7812,23 +8742,29 @@ class Tags(commands.Cog):
                         ($3 AND user_id = $4) OR
                         (NOT $3 AND guild_id = $5)
                     )""",
-                    new_name, old_name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None
+                    new_name,
+                    old_name,
+                    personal,
+                    ctx.author.id,
+                    ctx.guild.id if ctx.guild else None,
                 )
 
         await ctx.send(f"Renamed tag from `{old_name}` to `{new_name}`")
 
     @rename.autocomplete("old_name")
     async def autocomplete_tag_rename_name(
-        self,
-        interaction: discord.Interaction,
-        current: str
+        self, interaction: discord.Interaction, current: str
     ):
         return await self.tag_name_autocomplete(interaction, current)
 
-    @tag.command(name="remove", description="Remove a tag.", with_app_command=True, aliases=["rm", "delete", "del"])
+    @tag.command(
+        name="remove",
+        description="Remove a tag.",
+        with_app_command=True,
+        aliases=["rm", "delete", "del"],
+    )
     @app_commands.describe(
-        name="The tag name.",
-        personal="Whether this is a personal tag."
+        name="The tag name.", personal="Whether this is a personal tag."
     )
     async def remove(self, ctx: commands.Context, *, name: str, personal: bool = False):
         await ctx.typing()
@@ -7840,7 +8776,8 @@ class Tags(commands.Cog):
             if personal:
                 deleted = await conn.execute(
                     "DELETE FROM tags WHERE name = $1 AND user_id = $2",
-                    name, ctx.author.id
+                    name,
+                    ctx.author.id,
                 )
                 if deleted != "DELETE 0":
                     return await ctx.send(f"Removed personal tag `{name}`")
@@ -7848,20 +8785,21 @@ class Tags(commands.Cog):
                 if not ctx.guild:
                     return await ctx.send("Server tags can only be removed in servers.")
 
-
                 deleted = await conn.execute(
                     """DELETE FROM tags
                     WHERE name = $1 AND guild_id = $2 AND author_id = $3""",
-                    name, ctx.guild.id, ctx.author.id
+                    name,
+                    ctx.guild.id,
+                    ctx.author.id,
                 )
                 if deleted != "DELETE 0":
                     return await ctx.send(f"Removed server tag `{name}`")
 
-
                 if ctx.author.guild_permissions.manage_messages:
                     deleted = await conn.execute(
                         "DELETE FROM tags WHERE name = $1 AND guild_id = $2",
-                        name, ctx.guild.id
+                        name,
+                        ctx.guild.id,
                     )
                     if deleted != "DELETE 0":
                         return await ctx.send(f"Forcefully removed server tag `{name}`")
@@ -7870,15 +8808,22 @@ class Tags(commands.Cog):
 
     @remove.autocomplete("name")
     async def autocomplete_tag_remove_name(
-        self,
-        interaction: discord.Interaction,
-        current: str
+        self, interaction: discord.Interaction, current: str
     ):
         return await self.tag_name_autocomplete(interaction, current)
 
-    @tag.command(name="list", description="List available tags.", with_app_command=True, aliases=["ls"])
-    @app_commands.describe(user="Filter tags by this user.", personal="Only show your personal tags.")
-    async def list(self, ctx: commands.Context, user: discord.User = None, personal: bool = False):
+    @tag.command(
+        name="list",
+        description="List available tags.",
+        with_app_command=True,
+        aliases=["ls"],
+    )
+    @app_commands.describe(
+        user="Filter tags by this user.", personal="Only show your personal tags."
+    )
+    async def list(
+        self, ctx: commands.Context, user: discord.User = None, personal: bool = False
+    ):
         await ctx.typing()
         async with self.pool.acquire() as conn:
             target_user = user or ctx.author
@@ -7887,7 +8832,7 @@ class Tags(commands.Cog):
                     return await ctx.send("You can only view your own personal tags.")
                 tags = await conn.fetch(
                     "SELECT name FROM tags WHERE user_id = $1 ORDER BY name",
-                    target_user.id
+                    target_user.id,
                 )
                 title = "Your personal tags"
             else:
@@ -7896,12 +8841,13 @@ class Tags(commands.Cog):
                 if user is None:
                     tags = await conn.fetch(
                         "SELECT name FROM tags WHERE guild_id IS NOT DISTINCT FROM $1 ORDER BY name",
-                        ctx.guild.id
+                        ctx.guild.id,
                     )
                 else:
                     tags = await conn.fetch(
                         "SELECT name FROM tags WHERE guild_id IS NOT DISTINCT FROM $1 AND author_id IS NOT DISTINCT FROM $2 ORDER BY name",
-                        ctx.guild.id, target_user.id
+                        ctx.guild.id,
+                        target_user.id,
                     )
                 if user:
                     title = f"Tags created by {target_user} in {ctx.guild.name}"
@@ -7909,24 +8855,29 @@ class Tags(commands.Cog):
                     title = f"Server tags in {ctx.guild.name}"
 
             if not tags:
-                return await ctx.send(f"No {'personal' if personal else 'server'} tags found.")
+                return await ctx.send(
+                    f"No {'personal' if personal else 'server'} tags found."
+                )
 
             per_page = 10
             pages = []
             for i in range(0, len(tags), per_page):
                 embed = discord.Embed(title=title, color=discord.Color.blue())
-                for idx, tag in enumerate(tags[i:i+per_page], start=i + 1):
-                    embed.add_field(name=f"{idx}.", value=tag['name'], inline=False)
-                embed.set_footer(text=f"Page {i//per_page + 1} of {(len(tags)-1)//per_page + 1}")
+                for idx, tag in enumerate(tags[i : i + per_page], start=i + 1):
+                    embed.add_field(name=f"{idx}.", value=tag["name"], inline=False)
+                embed.set_footer(
+                    text=f"Page {i // per_page + 1} of {(len(tags) - 1) // per_page + 1}"
+                )
                 pages.append(embed)
 
             view = TagPaginator(pages, ctx.interaction, ctx.author)
             view.message = await ctx.send(embed=pages[0], view=view)
 
-    @tag.command(name="info", description="Get information about a tag.", with_app_command=True)
+    @tag.command(
+        name="info", description="Get information about a tag.", with_app_command=True
+    )
     @app_commands.describe(
-        name="The tag name.",
-        personal="Whether to look for a personal tag."
+        name="The tag name.", personal="Whether to look for a personal tag."
     )
     async def info(self, ctx: commands.Context, *, name: str, personal: bool = False):
         await ctx.typing()
@@ -7940,34 +8891,50 @@ class Tags(commands.Cog):
                 guild_id IS NOT NULL as is_guild_tag
                 FROM tags
                 WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4))""",
-                name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None
+                name,
+                personal,
+                ctx.author.id,
+                ctx.guild.id if ctx.guild else None,
             )
 
             if not tag:
                 return await ctx.send(f"Tag `{name}` not found.")
 
             embed = discord.Embed(title=f"Tag: {name}", color=discord.Color.blue())
-            embed.add_field(name="Type", value="Server" if tag['is_guild_tag'] else "Personal", inline=True)
-            embed.add_field(name="Uses", value=tag['uses'], inline=True)
-            embed.add_field(name="Created", value=tag['created_at'].strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)"), inline=True)
-            author = self.bot.get_user(tag['author_id'])
+            embed.add_field(
+                name="Type",
+                value="Server" if tag["is_guild_tag"] else "Personal",
+                inline=True,
+            )
+            embed.add_field(name="Uses", value=tag["uses"], inline=True)
+            embed.add_field(
+                name="Created",
+                value=tag["created_at"].strftime(
+                    "%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)"
+                ),
+                inline=True,
+            )
+            author = self.bot.get_user(tag["author_id"])
             if author:
-                embed.set_author(name=f"Owned by {author}", icon_url=author.display_avatar.url, url=f"https://discord.com/users/{author.id}")
+                embed.set_author(
+                    name=f"Owned by {author}",
+                    icon_url=author.display_avatar.url,
+                    url=f"https://discord.com/users/{author.id}",
+                )
 
             await ctx.send(embed=embed)
 
     @info.autocomplete("name")
     async def autocomplete_tag_info_name(
-        self,
-        interaction: discord.Interaction,
-        current: str
+        self, interaction: discord.Interaction, current: str
     ):
         return await self.tag_name_autocomplete(interaction, current)
 
-    @tag.command(name="raw", description="Get the raw content of a tag.", with_app_command=True)
+    @tag.command(
+        name="raw", description="Get the raw content of a tag.", with_app_command=True
+    )
     @app_commands.describe(
-        name="The tag name.",
-        personal="Whether to look for a personal tag."
+        name="The tag name.", personal="Whether to look for a personal tag."
     )
     async def raw(self, ctx: commands.Context, *, name: str, personal: bool = False):
         await ctx.typing()
@@ -7979,7 +8946,10 @@ class Tags(commands.Cog):
             tag = await conn.fetchrow(
                 """SELECT content FROM tags
                 WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id = $4))""",
-                name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None
+                name,
+                personal,
+                ctx.author.id,
+                ctx.guild.id if ctx.guild else None,
             )
 
             if not tag:
@@ -7989,72 +8959,130 @@ class Tags(commands.Cog):
 
     @raw.autocomplete("name")
     async def autocomplete_tag_raw_name(
-        self,
-        interaction: discord.Interaction,
-        current: str
+        self, interaction: discord.Interaction, current: str
     ):
         return await self.tag_name_autocomplete(interaction, current)
 
-    @tag.command(name="transfer", description="Transfer ownership of a tag (server or personal).", with_app_command=True, aliases=["gift"])
-    @app_commands.describe(name="The tag name.", new_owner="The user to transfer to.", personal="Whether this is a personal tag.")
-    async def transfer(self, ctx: commands.Context, name: str, new_owner: discord.User, personal: bool = False):
+    @tag.command(
+        name="transfer",
+        description="Transfer ownership of a tag (server or personal).",
+        with_app_command=True,
+        aliases=["gift"],
+    )
+    @app_commands.describe(
+        name="The tag name.",
+        new_owner="The user to transfer to.",
+        personal="Whether this is a personal tag.",
+    )
+    async def transfer(
+        self,
+        ctx: commands.Context,
+        name: str,
+        new_owner: discord.User,
+        personal: bool = False,
+    ):
         await ctx.typing()
         name = name.lower()
         name, flag_from_name = self.parse_personal_flag(name)
         personal = personal or flag_from_name
 
         async with self.pool.acquire() as conn:
-            tag = await conn.fetchrow("""
+            tag = await conn.fetchrow(
+                """
                 SELECT user_id, guild_id, author_id FROM tags
                 WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id IS NOT DISTINCT FROM $4))
-            """, name, personal, ctx.author.id, ctx.guild.id if ctx.guild else None)
+            """,
+                name,
+                personal,
+                ctx.author.id,
+                ctx.guild.id if ctx.guild else None,
+            )
 
             if not tag:
-                return await ctx.send(f"No {'personal' if personal else 'server'} tag named `{name}` found that you own.")
+                return await ctx.send(
+                    f"No {'personal' if personal else 'server'} tag named `{name}` found that you own."
+                )
 
             if not personal:
                 if not ctx.guild:
-                    return await ctx.send("Server tags can only be transferred in servers.")
-                if ctx.author.id != tag['author_id']:
-                    return await ctx.send("You don't have permission to transfer this server tag.")
+                    return await ctx.send(
+                        "Server tags can only be transferred in servers."
+                    )
+                if ctx.author.id != tag["author_id"]:
+                    return await ctx.send(
+                        "You don't have permission to transfer this server tag."
+                    )
 
             if personal:
-                result = await conn.execute("""
+                result = await conn.execute(
+                    """
                         UPDATE tags SET user_id = $1
                         WHERE name = $2 AND user_id = $3
-                    """, new_owner.id, name, ctx.author.id)
+                    """,
+                    new_owner.id,
+                    name,
+                    ctx.author.id,
+                )
             else:
-                result = await conn.execute("""
+                result = await conn.execute(
+                    """
                         UPDATE tags SET author_id = $1
                         WHERE name = $2 AND guild_id = $3
-                    """, new_owner.id, name, ctx.guild.id)
+                    """,
+                    new_owner.id,
+                    name,
+                    ctx.guild.id,
+                )
 
             if result == "UPDATE 0":
                 return await ctx.send("Failed to transfer tag; no matching tag found.")
 
-            await conn.execute("UPDATE tag_aliases SET user_id = $1 WHERE tag_name = $2 AND guild_id = $3", new_owner.id, name, ctx.guild.id)
+            await conn.execute(
+                "UPDATE tag_aliases SET user_id = $1 WHERE tag_name = $2 AND guild_id = $3",
+                new_owner.id,
+                name,
+                ctx.guild.id,
+            )
 
-            await ctx.send(f"Transferred {'personal' if personal else 'server'} tag `{name}` to {new_owner.mention}")
+            await ctx.send(
+                f"Transferred {'personal' if personal else 'server'} tag `{name}` to {new_owner.mention}"
+            )
 
-    @tag.command(name="search", description="Search for tags by name or content.", with_app_command=True)
-    @app_commands.describe(query="The search term.", personal="Whether to search only your personal tags.")
-    async def search(self, ctx: commands.Context, *, query: str, personal: bool = False):
+    @tag.command(
+        name="search",
+        description="Search for tags by name or content.",
+        with_app_command=True,
+    )
+    @app_commands.describe(
+        query="The search term.", personal="Whether to search only your personal tags."
+    )
+    async def search(
+        self, ctx: commands.Context, *, query: str, personal: bool = False
+    ):
         await ctx.typing()
         query, flag_from_query = self.parse_personal_flag(query)
         personal = personal or flag_from_query
         async with self.pool.acquire() as conn:
             if personal:
-                rows = await conn.fetch("""
+                rows = await conn.fetch(
+                    """
                     SELECT name, content FROM tags
                     WHERE user_id = $1 AND (name ILIKE '%' || $2 || '%' OR content ILIKE '%' || $2 || '%')""",
-                    ctx.author.id, query)
+                    ctx.author.id,
+                    query,
+                )
             else:
                 if not ctx.guild:
-                    return await ctx.send("Server tags can only be searched in servers.")
-                rows = await conn.fetch("""
+                    return await ctx.send(
+                        "Server tags can only be searched in servers."
+                    )
+                rows = await conn.fetch(
+                    """
                     SELECT name, content FROM tags
                     WHERE guild_id = $1 AND (name ILIKE '%' || $2 || '%' OR content ILIKE '%' || $2 || '%')""",
-                    ctx.guild.id, query)
+                    ctx.guild.id,
+                    query,
+                )
 
             if not rows:
                 return await ctx.send("No tags found matching your query.")
@@ -8062,18 +9090,30 @@ class Tags(commands.Cog):
             per_page = 5
             pages = []
             for i in range(0, len(rows), per_page):
-                embed = discord.Embed(title=f"Tag Search Results {'(Personal)' if personal else ''}", color=discord.Color.orange())
-                for row in rows[i:i+per_page]:
-                    embed.add_field(name=row['name'], value=row['content'][:100], inline=False)
-                embed.set_footer(text=f"Page {i//per_page + 1} of {(len(rows)-1)//per_page + 1}")
+                embed = discord.Embed(
+                    title=f"Tag Search Results {'(Personal)' if personal else ''}",
+                    color=discord.Color.orange(),
+                )
+                for row in rows[i : i + per_page]:
+                    embed.add_field(
+                        name=row["name"], value=row["content"][:100], inline=False
+                    )
+                embed.set_footer(
+                    text=f"Page {i // per_page + 1} of {(len(rows) - 1) // per_page + 1}"
+                )
                 pages.append(embed)
 
             view = TagPaginator(pages, ctx.interaction, ctx.author)
             view.message = await ctx.send(embed=pages[0], view=view)
 
     @tag.command(name="random", description="Show a random tag.", with_app_command=True)
-    @app_commands.describe(args="Arguments and flags. (e.g. --personal, --user @User, --hide-name)", personal="Whether to fetch from personal tags.")
-    async def random(self, ctx: commands.Context, *, args: str = "", personal: bool = False):
+    @app_commands.describe(
+        args="Arguments and flags. (e.g. --personal, --user @User, --hide-name)",
+        personal="Whether to fetch from personal tags.",
+    )
+    async def random(
+        self, ctx: commands.Context, *, args: str = "", personal: bool = False
+    ):
         await ctx.typing()
         hide_name = False
         user_str = None
@@ -8092,7 +9132,7 @@ class Tags(commands.Cog):
             else:
                 rest.append(parts[i])
             i += 1
-        new_args = ' '.join(rest)
+        new_args = " ".join(rest)
         if user_str:
             try:
                 user = await commands.UserConverter().convert(ctx, user_str)
@@ -8104,34 +9144,59 @@ class Tags(commands.Cog):
         async with self.pool.acquire() as conn:
             if personal:
                 if target_user.id != ctx.author.id:
-                    return await ctx.send("You can only use your own personal tags for random selection.")
-                rows = await conn.fetch("SELECT name FROM tags WHERE user_id = $1", target_user.id)
+                    return await ctx.send(
+                        "You can only use your own personal tags for random selection."
+                    )
+                rows = await conn.fetch(
+                    "SELECT name FROM tags WHERE user_id = $1", target_user.id
+                )
             else:
                 if not ctx.guild:
                     return await ctx.send("Cannot fetch server tags outside a server.")
                 if user is None:
-                    rows = await conn.fetch("SELECT name FROM tags WHERE guild_id IS NOT DISTINCT FROM $1", ctx.guild.id)
+                    rows = await conn.fetch(
+                        "SELECT name FROM tags WHERE guild_id IS NOT DISTINCT FROM $1",
+                        ctx.guild.id,
+                    )
                 else:
-                    rows = await conn.fetch("SELECT name from tags WHERE guild_id IS NOT DISTINCT FROM $1 AND author_id IS NOT DISTINCT FROM $2", ctx.guild.id, target_user.id)
+                    rows = await conn.fetch(
+                        "SELECT name from tags WHERE guild_id IS NOT DISTINCT FROM $1 AND author_id IS NOT DISTINCT FROM $2",
+                        ctx.guild.id,
+                        target_user.id,
+                    )
 
             if not rows:
                 return await ctx.send("No tags found.")
 
-            tag_name = random.choice(rows)['name']
-            tag = await conn.fetchrow("""
+            tag_name = random.choice(rows)["name"]
+            tag = await conn.fetchrow(
+                """
                 SELECT content FROM tags
                 WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id IS NOT DISTINCT FROM $4))
-            """, tag_name, personal, target_user.id, ctx.guild.id if ctx.guild else None)
+            """,
+                tag_name,
+                personal,
+                target_user.id,
+                ctx.guild.id if ctx.guild else None,
+            )
 
             if not tag:
                 return await ctx.send("Failed to fetch tag content.")
 
-            await conn.execute("""
+            await conn.execute(
+                """
                 UPDATE tags SET uses = uses + 1
                 WHERE name = $1 AND (($2 AND user_id = $3) OR (NOT $2 AND guild_id IS NOT DISTINCT FROM $4))
-            """, tag_name, personal, target_user.id, ctx.guild.id if ctx.guild else None)
+            """,
+                tag_name,
+                personal,
+                target_user.id,
+                ctx.guild.id if ctx.guild else None,
+            )
 
-            text, embeds, view, files = await self.formatter.format(tag['content'], ctx, args=new_args)
+            text, embeds, view, files = await self.formatter.format(
+                tag["content"], ctx, args=new_args
+            )
             if not hide_name:
                 header = f"Showing tag: `{tag_name}`\n\n"
                 if text:
@@ -8141,10 +9206,7 @@ class Tags(commands.Cog):
 
             try:
                 await ctx.send(
-                    content=text[:2000],
-                    embeds=embeds[:10],
-                    view=view,
-                    files=files[:10]
+                    content=text[:2000], embeds=embeds[:10], view=view, files=files[:10]
                 )
             except discord.HTTPException as e:
                 await ctx.send(f"Failed to send tag: {e}")
@@ -8158,9 +9220,11 @@ class Tags(commands.Cog):
     @app_commands.describe(
         tag_name="The original tag name",
         alias="The new alias",
-        personal="Whether this is for a personal tag"
+        personal="Whether this is for a personal tag",
     )
-    async def alias_add(self, ctx: commands.Context, tag_name: str, alias: str, personal: bool = False):
+    async def alias_add(
+        self, ctx: commands.Context, tag_name: str, alias: str, personal: bool = False
+    ):
         await ctx.typing()
         tag_name = tag_name.lower().strip()
         alias = alias.lower().strip()
@@ -8169,87 +9233,136 @@ class Tags(commands.Cog):
 
         async with self.pool.acquire() as conn:
             if personal:
-                tag = await conn.fetchrow("""
+                tag = await conn.fetchrow(
+                    """
                     SELECT user_id FROM tags WHERE name = $1 AND user_id = $2
-                """, tag_name, ctx.author.id)
+                """,
+                    tag_name,
+                    ctx.author.id,
+                )
             else:
                 if not ctx.guild:
                     return await ctx.send("Server tags can only be managed in servers.")
-                tag = await conn.fetchrow("""
+                tag = await conn.fetchrow(
+                    """
                     SELECT user_id FROM tags WHERE name = $1 AND guild_id = $2
-                """, tag_name, ctx.guild.id)
+                """,
+                    tag_name,
+                    ctx.guild.id,
+                )
 
             if not tag:
-                return await ctx.send(f"No such {'personal' if personal else 'server'} tag exists.")
+                return await ctx.send(
+                    f"No such {'personal' if personal else 'server'} tag exists."
+                )
 
-            tag_author_id = tag['user_id']
+            tag_author_id = tag["user_id"]
 
             if ctx.author.id != tag_author_id:
                 return await ctx.send("You can only add aliases to tags you own.")
 
             try:
                 if personal:
-                    await conn.execute("""
+                    await conn.execute(
+                        """
                         INSERT INTO tag_aliases (alias, tag_name, user_id)
                         VALUES ($1, $2, $3)
-                    """, alias, tag_name, ctx.author.id)
+                    """,
+                        alias,
+                        tag_name,
+                        ctx.author.id,
+                    )
                 else:
-                    await conn.execute("""
+                    await conn.execute(
+                        """
                         INSERT INTO tag_aliases (alias, tag_name, guild_id)
                         VALUES ($1, $2, $3)
-                    """, alias, tag_name, ctx.guild.id)
+                    """,
+                        alias,
+                        tag_name,
+                        ctx.guild.id,
+                    )
                 await ctx.send(f"Added alias `{alias}` for tag `{tag_name}`")
             except asyncpg.UniqueViolationError:
                 await ctx.send("This alias already exists for another tag.")
 
-    @alias.command(name="remove", description="Remove a tag alias.", aliases=["delete", "rm", "del"])
-    @app_commands.describe(
-        alias="The alias to remove",
-        personal="Whether this is a personal tag alias"
+    @alias.command(
+        name="remove",
+        description="Remove a tag alias.",
+        aliases=["delete", "rm", "del"],
     )
-    async def alias_remove(self, ctx: commands.Context, alias: str, personal: bool = False):
+    @app_commands.describe(
+        alias="The alias to remove", personal="Whether this is a personal tag alias"
+    )
+    async def alias_remove(
+        self, ctx: commands.Context, alias: str, personal: bool = False
+    ):
         await ctx.typing()
         alias = alias.lower().strip()
 
         async with self.pool.acquire() as conn:
             if personal:
-                row = await conn.fetchrow("""
+                row = await conn.fetchrow(
+                    """
                     SELECT tag_name FROM tag_aliases WHERE alias = $1 AND user_id = $2
-                """, alias, ctx.author.id)
+                """,
+                    alias,
+                    ctx.author.id,
+                )
                 if not row:
                     return await ctx.send("No personal alias found with that name.")
-                tag_name = row['tag_name']
-                tag = await conn.fetchrow("""
+                tag_name = row["tag_name"]
+                tag = await conn.fetchrow(
+                    """
                     SELECT user_id FROM tags WHERE name = $1 AND user_id = $2
-                """, tag_name, ctx.author.id)
+                """,
+                    tag_name,
+                    ctx.author.id,
+                )
             else:
                 if not ctx.guild:
                     return await ctx.send("Server tags can only be managed in servers.")
-                row = await conn.fetchrow("""
+                row = await conn.fetchrow(
+                    """
                     SELECT tag_name FROM tag_aliases WHERE alias = $1 AND guild_id = $2
-                """, alias, ctx.guild.id)
+                """,
+                    alias,
+                    ctx.guild.id,
+                )
                 if not row:
                     return await ctx.send("No server alias found with that name.")
-                tag_name = row['tag_name']
-                tag = await conn.fetchrow("""
+                tag_name = row["tag_name"]
+                tag = await conn.fetchrow(
+                    """
                     SELECT user_id FROM tags WHERE name = $1 AND guild_id = $2
-                """, tag_name, ctx.guild.id)
+                """,
+                    tag_name,
+                    ctx.guild.id,
+                )
 
             if not tag:
                 return await ctx.send("Tag no longer exists.")
 
-            tag_author_id = tag['user_id']
+            tag_author_id = tag["user_id"]
             if ctx.author.id != tag_author_id:
                 return await ctx.send("You can only remove aliases from tags you own.")
 
             if personal:
-                await conn.execute("""
+                await conn.execute(
+                    """
                     DELETE FROM tag_aliases WHERE alias = $1 AND user_id = $2
-                """, alias, ctx.author.id)
+                """,
+                    alias,
+                    ctx.author.id,
+                )
             else:
-                await conn.execute("""
+                await conn.execute(
+                    """
                     DELETE FROM tag_aliases WHERE alias = $1 AND guild_id = $2
-                """, alias, ctx.guild.id)
+                """,
+                    alias,
+                    ctx.guild.id,
+                )
 
             await ctx.send(f"Removed alias `{alias}`")
 
@@ -8267,14 +9380,14 @@ class Tags(commands.Cog):
                     aliases = await conn.fetch(
                         """SELECT alias, tag_name FROM tag_aliases
                         WHERE user_id = $1 ORDER BY alias""",
-                        ctx.author.id
+                        ctx.author.id,
                     )
                     title = "Your personal tag aliases"
                 else:
                     aliases = await conn.fetch(
                         """SELECT alias, tag_name FROM tag_aliases
                         WHERE guild_id = $1 ORDER BY alias""",
-                        ctx.guild.id
+                        ctx.guild.id,
                     )
                     title = f"Tag aliases in {ctx.guild.name}"
 
@@ -8286,10 +9399,15 @@ class Tags(commands.Cog):
                 pages = []
                 for i in range(0, len(aliases), per_page):
                     embed = discord.Embed(title=f"{title}", color=discord.Color.blue())
-                    current_aliases = aliases[i:i+per_page]
-                    description = "\n".join(f"- `{a['alias']}` -> `{a['tag_name']}`" for a in current_aliases)
+                    current_aliases = aliases[i : i + per_page]
+                    description = "\n".join(
+                        f"- `{a['alias']}` -> `{a['tag_name']}`"
+                        for a in current_aliases
+                    )
                     embed.description = description
-                    embed.set_footer(text=f"Page {i//per_page + 1} of {(len(aliases)-1)//per_page + 1}")
+                    embed.set_footer(
+                        text=f"Page {i // per_page + 1} of {(len(aliases) - 1) // per_page + 1}"
+                    )
                     pages.append(embed)
 
                 view = TagPaginator(pages, ctx.interaction, ctx.author)
@@ -8298,7 +9416,8 @@ class Tags(commands.Cog):
             except Exception as e:
                 await ctx.send(f"An error occurred: {str(e)}")
 
+
 async def setup(bot):
-    if not hasattr(bot, 'pool'):
-        bot.pool = await asyncpg.create_pool(bot_info.data['database'])
+    if not hasattr(bot, "pool"):
+        bot.pool = await asyncpg.create_pool(bot_info.data["database"])
     await bot.add_cog(Tags(bot))
