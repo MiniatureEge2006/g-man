@@ -4643,6 +4643,13 @@ class Tags(commands.Cog):
                 web_mode = re.search(r"(^|\s)--web($|\s)", prompt) is not None
                 if web_mode:
                     prompt = re.sub(r"(^|\s)--web($|\s)", " ", prompt).strip()
+                use_match = re.search(r"(^|\s)--use\s+(\S+)", prompt)
+                model_name = use_match.group(2) if use_match else None
+                if use_match:
+                    prompt = re.sub(r"(^|\s)--use\s+\S+", " ", prompt).strip()
+                debug_mode = re.search(r"(^|\s)--debug($|\s)", prompt) is not None
+                if debug_mode:
+                    prompt = re.sub(r"(^|\s)--debug($|\s)", " ", prompt).strip()
 
                 class AIContext:
                     __slots__ = (
@@ -4704,7 +4711,7 @@ class Tags(commands.Cog):
                         "web_fetch": ollama_client.web_fetch,
                     }
                     response = await ollama_client.chat(
-                        model=bot_info.data["ollama_model"],
+                        model=model_name or bot_info.data["ollama_model"],
                         messages=messages,
                         think=think_mode,
                         tools=[ollama_client.web_search, ollama_client.web_fetch]
@@ -4740,6 +4747,18 @@ class Tags(commands.Cog):
 
                     final_content = msg.content
                     display_content = final_content
+                    if debug_mode:
+                        stats_text = (
+                            "**Debug**\n"
+                            f"Model: {response.model}\n"
+                            f"Done Reason: {response.done_reason}\n"
+                            f"Total Duration: {response.total_duration}\n"
+                            f"Prompt Eval Count: {response.prompt_eval_count}\n"
+                            f"Prompt Eval Duration: {response.prompt_eval_duration}\n"
+                            f"Eval Count: {response.eval_count}\n"
+                            f"Eval Duration: {response.eval_duration}\n"
+                        )
+                        display_content = f"{stats_text}\n\n{display_content}"
                     if show_thinking and getattr(msg, "thinking", None):
                         display_content = (
                             "**Thinking...**\n"
