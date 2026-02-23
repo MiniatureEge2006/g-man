@@ -394,6 +394,16 @@ class AI(commands.Cog):
 
                     continue
                 return response
+        except ollama.ResponseError as e:
+            if e.status_code == 404:
+                models = []
+                model_list = await ollama_client.list()
+                for model in model_list.models:
+                    available_model_name = model.model
+                    models.append(available_model_name)
+                raise RuntimeError(
+                    f"Model `{model_name}` not found. Available models:\n `{'\n'.join(models)}`"
+                )
         except Exception as e:
             raise RuntimeError(f"AI request failed: {str(e)}")
 

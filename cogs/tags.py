@@ -4779,6 +4779,14 @@ class Tags(commands.Cog):
 
                     return display_content
 
+            except ollama.ResponseError as e:
+                if e.status_code == 404:
+                    models = []
+                    model_list = await ollama_client.list()
+                    for model in model_list.models:
+                        available_model_name = model.model
+                        models.append(available_model_name)
+                    return f"[AI error: Model `{model_name}` not found. Available models:\n `{'\n'.join(models)}`]"
             except Exception as e:
                 return f"[AI error: {str(e)}]"
 
