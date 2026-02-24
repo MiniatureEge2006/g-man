@@ -1,4 +1,3 @@
-import inspect
 import io
 import json
 import re
@@ -21,53 +20,6 @@ class AI(commands.Cog):
         self.bot = bot
         self.conversations = {}
         self.db: Optional[asyncpg.Pool] = None
-
-    def _get_tagscript_function_docs(
-        self, ctx: commands.Context, function_names: list[str] = None
-    ) -> dict[str, str]:
-        tags_cog = ctx.bot.get_cog("Tags")
-        if (
-            not tags_cog
-            or not hasattr(tags_cog, "formatter")
-            or not hasattr(tags_cog.formatter, "functions")
-        ):
-            return {}
-
-        formatter = tags_cog.formatter
-        available_functions = formatter.functions
-
-        target_function_names = (
-            function_names if function_names is not None else available_functions.keys()
-        )
-        target_function_names = [
-            name for name in target_function_names if name in available_functions
-        ]
-
-        docs = {}
-        for name in target_function_names:
-            func = available_functions.get(name)
-            if func:
-                try:
-                    docstring = inspect.getdoc(func)
-                    if docstring:
-                        lines = docstring.strip().splitlines()
-                        cleaned_lines = []
-                        for line in lines:
-                            stripped_line = line.strip()
-                            if stripped_line:
-                                cleaned_lines.append(stripped_line)
-                            if len(cleaned_lines) >= 10:
-                                break
-                        cleaned_doc = "\n".join(cleaned_lines)
-                        docs[name] = cleaned_doc
-                    else:
-                        docs[name] = f"{name}: No documentation string found."
-                except Exception as e:
-                    docs[name] = f"{name}: Error retrieving documentation ({e})."
-            else:
-                docs[name] = f"{name}: Function reference not found."
-
-        return docs
 
     def get_conversation(self, ctx) -> tuple:
         return (
@@ -133,48 +85,76 @@ class AI(commands.Cog):
             if user_row and user_row["prompt"]:
                 base_prompt = user_row["prompt"]
 
-        formatted_docs = ""
-        if content:
-            tags_cog = ctx.bot.get_cog("Tags")
-            available_function_names = set()
-            if (
-                tags_cog
-                and hasattr(tags_cog, "formatter")
-                and hasattr(tags_cog.formatter, "functions")
-            ):
-                available_function_names = set(tags_cog.formatter.functions.keys())
+        return base_prompt.strip()
 
-            potential_function_mentions = set(
-                re.findall(r"\{(\w+)(?:[^\}]*)\}", content)
+    def _get_tagscript_tool_definition(self, ctx: commands.Context) -> dict:
+        tags_cog = ctx.bot.get_cog("Tags")
+        available_functions = []
+
+        if (
+            tags_cog
+            and hasattr(tags_cog, "formatter")
+            and hasattr(tags_cog.formatter, "functions")
+        ):
+            available_functions = sorted(tags_cog.formatter.functions.keys())
+
+        function_list = (
+            ", ".join(available_functions[:50])
+            if available_functions
+            else "No functions available"
+        )
+        if len(available_functions) > 50:
+            function_list += f"... and {len(available_functions) - 50} more"
+
+        description = f"""Execute TagScript to get dynamic information or perform actions.
+TagScript uses curly braces syntax like {{function_name:args}}.
+Available functions: {function_list}
+Returns the result of executing the TagScript."""
+
+        return {
+            "type": "function",
+            "function": {
+                "name": "execute_tagscript",
+                "description": description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "script": {
+                            "type": "string",
+                            "description": "The TagScript to execute. Use curly braces syntax like {user}, {range:1|10}, {eval:{user} is cool}. Overall syntax: {function:value|value2?|...?}",
+                        }
+                    },
+                    "required": ["script"],
+                },
+            },
+        }
+
+    async def _execute_tagscript(self, ctx: commands.Context, script: str) -> str:
+        tags_cog = ctx.bot.get_cog("Tags")
+        if not tags_cog or not hasattr(tags_cog, "formatter"):
+            return "[TagScript Error: Tags cog not available]"
+
+        try:
+            text, embeds, view, files = await tags_cog.formatter.format(script, ctx)
+            result_parts = []
+            if text:
+                result_parts.append(text)
+            if embeds:
+                for embed in embeds:
+                    if embed.title:
+                        result_parts.append(f"[Embed: {embed.title}]")
+                    if embed.description:
+                        result_parts.append(embed.description[:500])
+            if files:
+                result_parts.append(f"[{len(files)} file(s) attached]")
+
+            return (
+                "\n".join(result_parts)
+                if result_parts
+                else "[TagScript executed with no output]"
             )
-            content_words = set(re.findall(r"\b\w+\b", content))
-            direct_name_mentions = content_words.intersection(available_function_names)
-
-            mentioned_function_names = potential_function_mentions.union(
-                direct_name_mentions
-            )
-            relevant_function_names = list(
-                mentioned_function_names.intersection(available_function_names)
-            )
-
-            if relevant_function_names:
-                function_docs_dict = self._get_tagscript_function_docs(
-                    ctx, relevant_function_names
-                )
-                if function_docs_dict:
-                    formatted_docs_lines = [
-                        "\n\n--- Relevant Tag Functions (Contextual Reference) ---"
-                    ]
-                    for func_name in sorted(function_docs_dict.keys()):
-                        doc_str = function_docs_dict.get(
-                            func_name, f"{func_name}: No documentation retrieved."
-                        )
-                        formatted_docs_lines.append(f"\n{func_name}:\n{doc_str}\n---")
-                    formatted_docs = "\n".join(formatted_docs_lines)
-
-        final_prompt = f"{base_prompt.strip()}{formatted_docs}"
-
-        return final_prompt.strip()
+        except Exception as e:
+            return f"[TagScript Error: {str(e)}]"
 
     @commands.hybrid_command(
         name="ai", description="Use G-AI to chat and execute TagScript."
@@ -224,8 +204,8 @@ class AI(commands.Cog):
             if user_history:
                 messages[1:1] = user_history[-MAX_CONVERSATION_HISTORY_LENGTH:]
 
-            response = await self.get_ai_response(
-                messages, think_mode, web_mode, model_name
+            response, tool_calls_info = await self.get_ai_response(
+                ctx, messages, think_mode, web_mode, model_name
             )
             final_content = response.message.content
             display_content = final_content
@@ -241,6 +221,24 @@ class AI(commands.Cog):
                     f"Eval Count: {response.eval_count}\n"
                     f"Eval Duration: {response.eval_duration}\n"
                 )
+                if tool_calls_info:
+                    tool_display_parts = ["**Tool Calls:**"]
+                    for i, tool_call in enumerate(tool_calls_info, 1):
+                        if tool_call["name"] == "TagScript":
+                            script = tool_call.get("script", "")
+                            result = tool_call.get("result", "")
+                            tool_display_parts.append(
+                                f"{i}. **TagScript:** `{{ignore:{script[:100]}{'...' if len(script) > 100 else ''}}}`"
+                            )
+                            tool_display_parts.append(
+                                f"   **Result:** {result[:500]}{'...' if len(result) > 500 else ''}"
+                            )
+                        else:
+                            tool_display_parts.append(
+                                f"{i}. **{tool_call['name']}**: {tool_call.get('result', 'No result')[:200]}"
+                            )
+                    tool_display = "\n".join(tool_display_parts)
+                    display_content = f"{tool_display}\n\n{display_content}"
                 display_content = f"{stats_text}\n\n{display_content}"
 
             if show_thinking and getattr(response.message, "thinking", None):
@@ -342,11 +340,13 @@ class AI(commands.Cog):
 
     async def get_ai_response(
         self,
+        ctx: commands.Context,
         messages: list,
         think_mode: bool = False,
         web_mode: bool = False,
         model_name: Optional[str] = None,
-    ):
+    ) -> tuple:
+        tool_calls_info = []
         try:
             while True:
                 ollama_client = ollama.AsyncClient(
@@ -356,44 +356,87 @@ class AI(commands.Cog):
                         else None
                     }
                 )
-                available_tools = {
-                    "web_search": ollama_client.web_search,
-                    "web_fetch": ollama_client.web_fetch,
-                }
+
+                tools = []
+
+                tagscript_tool = self._get_tagscript_tool_definition(ctx)
+                tools.append(tagscript_tool)
+
+                if web_mode:
+                    tools.extend([ollama_client.web_search, ollama_client.web_fetch])
+
                 response = await ollama_client.chat(
                     model=model_name or bot_info.data["ollama_model"],
                     messages=messages,
                     think=think_mode,
-                    tools=[ollama_client.web_search, ollama_client.web_fetch]
-                    if web_mode
-                    else None,
+                    tools=tools if tools else None,
                 )
                 msg = response.message
 
-                if web_mode and getattr(msg, "tool_calls", None):
+                if getattr(msg, "tool_calls", None):
+                    has_more_calls = False
                     for tool_call in msg.tool_calls:
-                        function_to_call = available_tools.get(tool_call.function.name)
-                        if function_to_call:
-                            args = tool_call.function.arguments
-                            result = await function_to_call(**args)
+                        tool_name = tool_call.function.name
+                        args = tool_call.function.arguments
+
+                        if tool_name == "execute_tagscript":
+                            script = args.get("script", "")
+                            result = await self._execute_tagscript(ctx, script)
+                            tool_calls_info.append(
+                                {
+                                    "name": "TagScript",
+                                    "script": script,
+                                    "result": result,
+                                }
+                            )
                             messages.append(
                                 {
                                     "role": "tool",
-                                    "tool_name": tool_call.function.name,
+                                    "tool_name": tool_name,
                                     "content": str(result)[:2000],
                                 }
                             )
+                            has_more_calls = True
+                        elif web_mode and tool_name in ("web_search", "web_fetch"):
+                            function_to_call = getattr(ollama_client, tool_name, None)
+                            if function_to_call:
+                                result = await function_to_call(**args)
+                                tool_calls_info.append(
+                                    {
+                                        "name": tool_name,
+                                        "args": args,
+                                        "result": str(result)[:500],
+                                    }
+                                )
+                                messages.append(
+                                    {
+                                        "role": "tool",
+                                        "tool_name": tool_name,
+                                        "content": str(result)[:2000],
+                                    }
+                                )
+                                has_more_calls = True
+                            else:
+                                messages.append(
+                                    {
+                                        "role": "tool",
+                                        "content": f"Tool {tool_name} not found",
+                                        "tool_name": tool_name,
+                                    }
+                                )
                         else:
                             messages.append(
                                 {
                                     "role": "tool",
-                                    "content": f"Tool {tool_call.function.name} not found",
-                                    "tool_name": tool_call.function.name,
+                                    "content": f"Unknown tool: {tool_name}",
+                                    "tool_name": tool_name,
                                 }
                             )
 
-                    continue
-                return response
+                    if has_more_calls:
+                        continue
+                    return response, tool_calls_info
+                return response, tool_calls_info
         except ollama.ResponseError as e:
             if e.status_code == 404:
                 models = []
@@ -403,6 +446,10 @@ class AI(commands.Cog):
                     models.append(available_model_name)
                 raise RuntimeError(
                     f"Model `{model_name}` not found. Available models:\n `{'\n'.join(models)}`"
+                )
+            else:
+                raise RuntimeError(
+                    f"Ollama API error (status {e.status_code}): {str(e)}"
                 )
         except Exception as e:
             raise RuntimeError(f"AI request failed: {str(e)}")
