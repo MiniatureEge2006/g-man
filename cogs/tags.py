@@ -4619,6 +4619,23 @@ class Tags(commands.Cog):
             except Exception as e:
                 return f"[attachtext error: {str(e)}", [], None, []
 
+        @self.formatter.register("codeblock")
+        @self.formatter.register("code")
+        def _codeblock(ctx, text, **kwargs):
+            """
+            ### {codeblock:text|language}
+                * Sends a codeblock with an optional programming language syntax highlighting.
+                * Example: `{code:hello}`
+            """
+            try:
+                parts = str(text).split("|", 1)
+                text = parts[0].strip()
+                language = parts[1].strip() if len(parts) >= 2 else "txt"
+
+                return f"```{language}\n{text}```"
+            except Exception as e:
+                return f"[codeblock error: {str(e)}]"
+
         @self.formatter.register("ai")
         async def _ai(ctx, prompt, **kwargs):
             """
@@ -4860,26 +4877,16 @@ class Tags(commands.Cog):
             split_args = kwargs.get("args", "").split()
             return " ".join(split_args[int(i) :]) if i.isdigit() else ""
 
-        @self.formatter.register("default")
-        def default(ctx, val, fb, **kwargs):
-            """
-            ### {default:value|fallback}
-                * Returns `value` if it exists, otherwise returns `fallback`.
-                * Example: `{default:{arg:0}|No argument provided}`
-            """
-            val_str = str(val) if val is not None else ""
-            fb_str = str(fb) if fb is not None else ""
-            return val_str if val_str else fb_str
-
         @self.formatter.register("newline")
-        def _newline(ctx, _, **kwargs):
+        def _newline(ctx, amount, **kwargs):
             """
-            ### {newline}
+            ### {newline:amount}
                 * Inserts a newline character.
                 * Example: `Line1{newline}Line2`
                 * Can be useful inside slash commands.
             """
-            return "\n"
+            amount = int(amount) if amount else 1
+            return "\n" * amount
 
         @self.formatter.register("jsonify")
         def _jsonify(ctx, text, **kwargs):
