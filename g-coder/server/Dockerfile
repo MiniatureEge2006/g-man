@@ -41,8 +41,7 @@ RUN curl -LO https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz 
 RUN groupadd -g 1000 gcoder && useradd -r -u 1000 -g gcoder -m -d /home/gcoder gcoder
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && rm requirements.txt
-RUN pip install numpy requests pillow typed-ffmpeg
-RUN pip install --pre -U "yt-dlp[default,curl-cffi]"
+RUN pip install numpy requests pillow typed-ffmpeg yt-dlp[curl-cffi,default] pyvips[binary]
 RUN npm install -g typescript node ts-node @types/node mathjs imagescript deno
 ENV NODE_PATH=/usr/local/lib/node_modules
 USER gcoder
