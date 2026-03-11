@@ -33,7 +33,11 @@ You can now just type `g-help` in a channel to see all the commands.
   * see the `setup.sql` file and run the query. This is required for the prefix, command/bot block/allowlisting system, reminder system, and tags.
 * All the Python packages in requirements.txt
 
-You can install the Python packages, preferably in a virtual environment, by running
+You can install the Python packages, preferably in a virtual environment, by first running
+```
+python -m venv .venv
+```
+then
 ```
 pip install -r requirements.txt
 ```
@@ -44,11 +48,8 @@ pip3 install -r requirements.txt
 ```
 ## Installation
 * Download/install all requirements.
-* Set up these folders with the following contents (if a folder doesn't exist, create it):
-  * vids
-    * Keep this folder empty as its contents are often deleted.
 * Create a copy of `bot_info_template.json` and rename it to `bot_info.json`. Fill it in with the appropriate information (keep the quotes).
-* Go to the g-coder directory and run `docker-compose up -d --build` to set up the code execution server.
+* Go to the g-coder directory and run `docker compose up -d --build` to set up the code execution server.
   * Code execution server's port is 8000.
 * Run `py gman.py` (or if you are on Linux/macOS, `python gman.py`)
 # Terms of Service & Privacy Policy

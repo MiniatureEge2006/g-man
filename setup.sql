@@ -117,7 +117,7 @@ CREATE TABLE IF NOT EXISTS tags (
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint 
+        SELECT 1 FROM pg_constraint
         WHERE conname = 'unique_tag' AND conrelid = 'tags'::regclass
     ) THEN
         BEGIN
@@ -145,10 +145,10 @@ CREATE TABLE IF NOT EXISTS tag_aliases (
 );
 
 
-CREATE UNIQUE INDEX IF NOT EXISTS tag_aliases_guild_unique 
+CREATE UNIQUE INDEX IF NOT EXISTS tag_aliases_guild_unique
     ON tag_aliases (alias, guild_id) WHERE guild_id IS NOT NULL;
 
-CREATE UNIQUE INDEX IF NOT EXISTS tag_aliases_user_unique 
+CREATE UNIQUE INDEX IF NOT EXISTS tag_aliases_user_unique
     ON tag_aliases (alias, user_id) WHERE user_id IS NOT NULL;
 
 
@@ -212,13 +212,13 @@ CREATE TABLE IF NOT EXISTS manual_slowmodes (
     )
 );
 
-CREATE INDEX IF NOT EXISTS idx_manual_slowmodes_guild_enabled 
+CREATE INDEX IF NOT EXISTS idx_manual_slowmodes_guild_enabled
 ON manual_slowmodes (guild_id) WHERE enabled;
-CREATE INDEX IF NOT EXISTS idx_manual_slowmodes_channel_enabled 
+CREATE INDEX IF NOT EXISTS idx_manual_slowmodes_channel_enabled
 ON manual_slowmodes (guild_id, channel_id) WHERE enabled AND channel_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_manual_slowmodes_user_enabled 
+CREATE INDEX IF NOT EXISTS idx_manual_slowmodes_user_enabled
 ON manual_slowmodes (guild_id, user_id) WHERE enabled AND user_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_manual_slowmodes_role_enabled 
+CREATE INDEX IF NOT EXISTS idx_manual_slowmodes_role_enabled
 ON manual_slowmodes (guild_id, role_id) WHERE enabled AND role_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS logging_rules (
@@ -232,3 +232,42 @@ CREATE TABLE IF NOT EXISTS logging_rules (
     created_at TIMESTAMP DEFAULT NOW(),
     UNIQUE(guild_id, log_channel_id, event_category)
 );
+
+CREATE TABLE IF NOT EXISTS guild_music_settings (
+    guild_id BIGINT PRIMARY KEY,
+    volume REAL DEFAULT 0.25,
+    loop_mode TEXT DEFAULT 'off' CHECK (loop_mode IN ('off', 'track', 'queue')),
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS music_playlists (
+    id SERIAL PRIMARY KEY,
+    owner_id BIGINT NOT NULL,
+    name TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(owner_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS music_playlist_entries (
+    playlist_id INT REFERENCES music_playlists(id) ON DELETE CASCADE,
+    url TEXT NOT NULL,
+    title TEXT,
+    position INT NOT NULL,
+    PRIMARY KEY (playlist_id, position)
+);
+
+CREATE TABLE IF NOT EXISTS music_play_logs (
+    id SERIAL PRIMARY KEY,
+    guild_id BIGINT,
+    channel_id BIGINT,
+    user_id BIGINT,
+    track_url TEXT,
+    track_title TEXT,
+    duration_sec INT,
+    played_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_music_logs_user ON music_play_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_music_logs_guild ON music_play_logs(guild_id);
+CREATE INDEX IF NOT EXISTS idx_music_playlists_owner ON music_playlists(owner_id);
+CREATE INDEX IF NOT EXISTS idx_music_playlist_entries ON music_playlist_entries(playlist_id);

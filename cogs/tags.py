@@ -4715,14 +4715,14 @@ class Tags(commands.Cog):
                     messages.extend(history[-MAX_CONVERSATION_HISTORY_LENGTH:])
 
                 messages.append({"role": "user", "content": prompt})
+                ollama_client = ollama.AsyncClient(
+                    headers={
+                        "Authorization": "Bearer " + bot_info.data["ollama_api_key"]
+                        if web_mode
+                        else None
+                    }
+                )
                 while True:
-                    ollama_client = ollama.AsyncClient(
-                        headers={
-                            "Authorization": "Bearer " + bot_info.data["ollama_api_key"]
-                            if web_mode
-                            else None
-                        }
-                    )
                     available_tools = {
                         "web_search": ollama_client.web_search,
                         "web_fetch": ollama_client.web_fetch,
@@ -4755,8 +4755,8 @@ class Tags(commands.Cog):
                                 messages.append(
                                     {
                                         "role": " tool",
-                                        "content": f"Tool {tool_call.function.name} not found",
                                         "tool_name": tool_call.function.name,
+                                        "content": f"Tool {tool_call.function.name} not found",
                                     }
                                 )
 

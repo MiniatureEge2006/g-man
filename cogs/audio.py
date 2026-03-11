@@ -1,359 +1,390 @@
+import asyncio
+import os
+import random
+import tempfile
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
+
+import asyncpg
 import discord
+import yt_dlp
 from discord import app_commands
 from discord.ext import commands
-import yt_dlp
-import spotipy
+
 import bot_info
-import os
-import asyncio
-import random
-from urllib.parse import urlparse, parse_qs
-from collections import deque
-from datetime import datetime
-from typing import Optional
-from concurrent.futures import ThreadPoolExecutor
 
-YDL_OPTIONS = {
-    'format': 'bestaudio/best',
-    'outtmpl': 'vids/%(extractor)s-%(id)s-%(title)s.%(ext)s',
-    'restrictfilenames': True,
-    'extract_flat': 'in_playlist',
-    'quiet': True,
-    'no_warnings': True
-}
 
-spotify = spotipy.Spotify(auth_manager=spotipy.SpotifyClientCredentials(
-    client_id=bot_info.data['spotify_client_id'],
-    client_secret=bot_info.data['spotify_client_secret']
-))
+class GuildMusicState:
+    def __init__(self):
+        self.queue: deque = deque()
+        self.currently_playing: Optional[Dict[str, Any]] = None
+        self.loop_mode: str = "off"
+        self.volume: float = 0.25
+        self.paused_at: Optional[datetime] = None
+        self.original_queue: List[Any] = []
+        self.voice_channel_id: Optional[int] = None
+        self.is_seeking: bool = False
+
 
 class Audio(commands.Cog):
-    def __init__(self, bot):
+    def __init__(self, bot: commands.AutoShardedBot):
         self.bot = bot
-        self.queues = {}
-        self.currently_playing = {}
-        self.loop_mode = {}
-        self.original_queues = {}
-        self.metadata_cache = {}
-        self.executor = ThreadPoolExecutor(max_workers=4)
-        self.paused_times = {}
-        self.volumes = {}
+        self.db_pool: Optional[asyncpg.Pool] = None
+        self.guild_states: Dict[int, GuildMusicState] = {}
+        self.paused_times: Dict[int, datetime] = {}
+        self.executor = ThreadPoolExecutor(max_workers=5)
+        self.ydl_options = {
+            "format": "bestaudio/best",
+            "outtmpl": f"{os.path.join(tempfile.gettempdir())}/%(extractor)s-%(id)s-%(title)s.%(ext)s",
+            "restrictfilenames": True,
+            "quiet": True,
+            "no_warnings": True,
+            "extract_flat": "in_playlist",
+        }
         self.default_volume = 0.25
 
-    def get_queue(self, guild_id):
-        if guild_id not in self.queues:
-            self.queues[guild_id] = deque()
-        return self.queues[guild_id]
+    async def cog_load(self):
+        db_url = bot_info.data["database"]
+        try:
+            self.db_pool = await asyncpg.create_pool(db_url)
+        except Exception:
+            self.db_pool = None
+
+    async def cog_unload(self):
+        if self.db_pool:
+            await self.db_pool.close()
+        for guild_id, state in self.guild_states.items():
+            if guild := self.bot.get_guild(guild_id):
+                if vc := guild.voice_client:
+                    await vc.disconnect()
+        self.executor.shutdown(wait=False)
+
+    def get_state(self, guild_id: int) -> GuildMusicState:
+        if guild_id not in self.guild_states:
+            self.guild_states[guild_id] = GuildMusicState()
+        return self.guild_states[guild_id]
 
     async def run_in_executor(self, func, *args):
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(self.executor, func, *args)
 
-    @commands.Cog.listener()
-    async def on_voice_state_update(self, member, before, after):
-        voice_client = member.guild.voice_client
-        if voice_client is None:
+    async def load_guild_settings(self, guild_id: int):
+        if not self.db_pool:
             return
-        await asyncio.sleep(5)
-        if len(voice_client.channel.members) == 1 and voice_client.channel.members[0] == self.bot.user:
-            guild_id = member.guild.id
-            if guild_id in self.queues:
-                self.queues[guild_id].clear()
-            if guild_id in self.currently_playing:
-                del self.currently_playing[guild_id]
-            if guild_id in self.loop_mode:
-                del self.loop_mode[guild_id]
-            await voice_client.disconnect()
+        state = self.get_state(guild_id)
+        async with self.db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT volume, loop_mode FROM guild_music_settings WHERE guild_id = $1",
+                guild_id,
+            )
+            if row:
+                state.volume = row["volume"] or self.default_volume
+                state.loop_mode = row["loop_mode"] or "off"
+
+    async def save_guild_settings(
+        self,
+        guild_id: int,
+        volume: Optional[float] = None,
+        loop_mode: Optional[str] = None,
+    ):
+        if not self.db_pool:
+            return
+        async with self.db_pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO guild_music_settings (guild_id, volume, loop_mode)
+                   VALUES ($1, $2, $3)
+                   ON CONFLICT (guild_id)
+                   DO UPDATE SET volume = COALESCE($2, guild_music_settings.volume),
+                                 loop_mode = COALESCE($3, guild_music_settings.loop_mode),
+                                 updated_at = NOW()""",
+                guild_id,
+                volume,
+                loop_mode,
+            )
+
+    async def log_play(
+        self,
+        guild_id: int,
+        channel_id: int,
+        user_id: int,
+        url: str,
+        title: str,
+        duration: int,
+    ):
+        if not self.db_pool:
+            return
+        async with self.db_pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO music_play_logs (guild_id, channel_id, user_id, track_url, track_title, duration_sec)
+                    VALUES ($1, $2, $3, $4, $5, $6)""",
+                guild_id,
+                channel_id,
+                user_id,
+                url,
+                title,
+                duration,
+            )
+
+    async def fetch_yt_info(self, url: str, download: bool = False) -> Dict:
+        def sync_extract():
+            with yt_dlp.YoutubeDL(self.ydl_options) as ydl:
+                return ydl.extract_info(url, download=download)
+
+        return await self.run_in_executor(sync_extract)
 
     async def connect_to_channel(self, ctx: commands.Context) -> bool:
-        if ctx.voice_client:
-            if ctx.voice_client.is_playing():
-                if not (ctx.author.voice and ctx.author.voice.channel == ctx.voice_client.channel):
-                    await ctx.send("You must be in the same voice channel as me to play audio.")
+        if not ctx.author.voice:
+            await ctx.send("You are not connected to a voice channel.")
+            return False
+
+        channel = ctx.author.voice.channel
+        voice_client = ctx.voice_client
+
+        if voice_client:
+            if voice_client.channel != channel:
+                if (
+                    len([m for m in voice_client.channel.members if not m.bot]) > 0
+                    and voice_client.is_playing()
+                ):
+                    await ctx.send("I'm already being used in another voice channel.")
                     return False
-            if ctx.author.voice and ctx.author.voice.channel != ctx.voice_client.channel:
-                await ctx.voice_client.move_to(ctx.author.voice.channel)
-                await ctx.send(f"Moved to {ctx.author.voice.channel.name}.")
+                await voice_client.move_to(channel)
+                await ctx.send(f"Moved to {channel.name}.")
             return True
-        if ctx.author.voice:
-            channel = ctx.author.voice.channel
+        else:
             await channel.connect()
             await ctx.send(f"Connected to {channel.name}.")
             return True
-        else:
-            await ctx.send("You are not connected to a voice channel.")
-            return False
-    
-    def clean_spotify_url(self, url: str) -> str:
-        parsed = urlparse(url)
-        path_parts = [part for part in parsed.path.split('/') if not part.startswith('intl-')]
-        base_path = '/'.join(path_parts)
-        return f"{parsed.scheme}://{parsed.netloc}{base_path}"
 
-    async def process_spotify_url(self, url: str) -> list:
-        try:
-            url = self.clean_spotify_url(url)
-            if 'track' in url:
-                track = await self.run_in_executor(spotify.track, url)
-                return [f"{track['name']} {track['artists'][0]['name']}"]
-            elif 'playlist' in url:
-                playlist = await self.run_in_executor(spotify.playlist, url)
-                tracks = []
-                for item in playlist['tracks']['items']:
-                    track = item['track']
-                    tracks.append(f"{track['name']} {track['artists'][0]['name']}")
-                return tracks
-            elif 'album' in url:
-                album = await self.run_in_executor(spotify.album, url)
-                tracks = []
-                for track in album['tracks']['items']:
-                    tracks.append(f"{track['name']} {track['artists'][0]['name']}")
-                return tracks
-            elif 'artist' in url:
-                top_tracks = await self.run_in_executor(spotify.artist_top_tracks, url)
-                tracks = []
-                for track in top_tracks['tracks'][:10]:
-                    tracks.append(f"{track['name']} {track['artists'][0]['name']}")
-                return tracks
-        except Exception:
-            return None
-
-    async def play_next_stream(self, ctx: commands.Context):
-        guild_id = ctx.guild.id
-        queue = self.get_queue(guild_id)
-
-        if self.loop_mode.get(guild_id) == "track":
-            if guild_id in self.currently_playing:
-                current = self.currently_playing[guild_id]
-                if current.get('is_stream', False):
-                    return await self.play_stream(ctx, current['url'], current['filters'])
-                else:
-                    return await self.play_audio(ctx, current['url'], current['filters'])
-
-        if not queue and self.loop_mode.get(guild_id) == "queue":
-            if guild_id in self.original_queues and self.original_queues[guild_id]:
-                self.queues[guild_id] = deque(self.original_queues[guild_id])
-                queue = self.get_queue(guild_id)
-                await ctx.send("Restarting queue loop.")
-                return await self.play_next_stream(ctx)
-
-        if queue:
-            url, filters, is_stream, title = queue.popleft()
-            if guild_id not in self.original_queues and self.loop_mode.get(guild_id) == "queue":
-                self.original_queues[guild_id] = list(queue) + [(url, filters, is_stream, title)]
-
-            if is_stream:
-                await self.play_stream(ctx, url, filters)
-            else:
-                await self.play_audio(ctx, url, filters)
-
-    async def play_next(self, ctx: commands.Context):
-        guild_id = ctx.guild.id
-        queue = self.get_queue(guild_id)
-        if self.loop_mode.get(guild_id) == "track":
-            if guild_id in self.currently_playing:
-                current = self.currently_playing[guild_id]
-                if current.get('is_stream', False):
-                    return await self.play_stream(ctx, current['url'], current['filters'])
-                else:
-                    return await self.play_audio(ctx, current['url'], current['filters'])
-        if not queue and self.loop_mode.get(guild_id) == "queue":
-            if guild_id in self.original_queues and self.original_queues[guild_id]:
-                self.queues[guild_id] = deque(self.original_queues[guild_id])
-                queue = self.get_queue(guild_id)
-                await ctx.send("Restarting queue loop.")
-                return await self.play_next(ctx)
-        if queue:
-            url, filters, is_stream, title = queue.popleft()
-            if self.loop_mode.get(guild_id) == "queue" and guild_id not in self.original_queues:
-                self.original_queues[guild_id] = list(queue) + [(url, filters, is_stream, title)]
-            if is_stream:
-                await self.play_stream(ctx, url, filters)
-            else:
-                await self.play_audio(ctx, url, filters)
-
-    async def process_playlist(self, ctx: commands.Context, url: str, filters=None, is_stream: bool = False):
-        try:
-            if 'spotify.com' in url:
-                queries = await self.process_spotify_url(url)
-                if not queries:
-                    await ctx.send("Failed to process Spotify playlist.")
-                    return
-                queue = self.get_queue(ctx.guild.id)
-                search_tasks = [self.search_youtube(query) for query in queries]
-                youtube_results = await asyncio.gather(*search_tasks)
-                youtube_urls = [url for url in youtube_results if url]
-                if not youtube_urls:
-                    await ctx.send("Could not find any YouTube videos which match the Spotify tracks.")
-                    return
-                valid_results = [r for r in youtube_results if r]
-                for result in valid_results:
-                    youtube_url = result['url']
-                    title = result['title']
-                    queue.append((youtube_url, filters, is_stream, title))
-                await ctx.send(f"Added {len(youtube_urls)} tracks from the Spotify playlist to the queue.")
-                if not ctx.voice_client or not ctx.voice_client.is_playing():
-                    if is_stream:
-                        await self.play_next_stream(ctx)
-                    else:
-                        await self.play_next(ctx)
+    async def play_next(self, ctx: Optional[commands.Context], guild_id: int):
+        if not ctx:
+            guild = self.bot.get_guild(guild_id)
+            if not guild or not guild.voice_client:
                 return
-            def sync_playlist_process():
-                with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-                    return ydl.extract_info(url, download=False)
-            info = await self.run_in_executor(sync_playlist_process)
-            if 'entries' not in info:
-                if is_stream:
-                    return await self.play_stream(ctx, url, filters)
-                else:
-                    return await self.play_audio(ctx, url, filters)
-            entries = [e for e in info['entries'] if e]
-            queue = self.get_queue(ctx.guild.id)
-            for entry in entries:
-                title = entry.get('title', 'Unknown Title')
-                queue.append((entry['url'], filters, is_stream, title))
-            if self.loop_mode.get(ctx.guild.id) == "queue":
-                self.original_queues[ctx.guild.id] = list(queue)
-            await ctx.send(f"Added {len(entries)} tracks from {info.get('title', 'Unknown Playlist')}.")
-            if not ctx.voice_client or not ctx.voice_client.is_playing():
-                if is_stream:
-                    await self.play_next_stream(ctx)
-                else:
-                    await self.play_next(ctx)
-        except Exception as e:
-            await ctx.send(f"Error processing playlist: {e}")
-
-    async def search_youtube(self, query: str) -> Optional[str]:
-        try:
-            def sync_search():
-                with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-                    results = ydl.extract_info(f"ytsearch:{query}", download=False)
-                    if results and 'entries' in results and results['entries']:
-                        entry = results['entries'][0]
-                        return {
-                            'url': entry['url'],
-                            'title': entry.get('title', 'Unknown Title')
-                        }
-                return None
-            result = await self.run_in_executor(sync_search)
-            return result
-        except Exception:
-            return None
-
-    async def extract_info(self, url: str):
-        def sync_extract():
-            with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-                return ydl.extract_info(url, download=True)
-        return await self.run_in_executor(sync_extract)
-
-    async def play_audio(self, ctx: commands.Context, url: str, filters=None):
-        if 'spotify.com' in url and 'track' in url:
-            query = await self.process_spotify_url(url)
-            if query:
-                youtube_url = await self.search_youtube(query[0])
-                if youtube_url:
-                    url = youtube_url['url']
-                else:
-                    await ctx.send("Could not find any YouTube video for this Spotify track.")
-                    return
-        cached_info = self.metadata_cache.get(url)
-        loop_mode_active = self.loop_mode.get(ctx.guild.id) == "track"
-        if cached_info and loop_mode_active:
-            info = cached_info
-            file_path = yt_dlp.YoutubeDL(YDL_OPTIONS).prepare_filename(info)
+            voice_client = guild.voice_client
         else:
-            info = await self.extract_info(url)
-            file_path = yt_dlp.YoutubeDL(YDL_OPTIONS).prepare_filename(info)
-            self.metadata_cache[url] = info
-        if not os.path.exists(file_path):
-            info = await self.extract_info(url)
-            self.metadata_cache[url] = info
-        if ctx.voice_client:
-            if ctx.voice_client.is_playing() and ctx.author.voice.channel != ctx.voice_client.channel:
-                await ctx.send("You must be in the same voice channel as me to play audio.")
-                return
-            if ctx.author.voice and ctx.author.voice.channel != ctx.voice_client.channel:
-                moved = await self.connect_to_channel(ctx)
-                if not moved:
-                    return
-        else:
-            if ctx.author.voice and ctx.author.voice.channel:
-                connected = await self.connect_to_channel(ctx)
-                if not connected:
-                    return
-            else:
-                await ctx.send("You are not connected to a voice channel.")
-                return
-        voice_client = ctx.voice_client
-        if voice_client:
-            ffmpeg_options = {'options': '-vn'}
-            if filters:
-                ffmpeg_options['options'] += f" -af {','.join(filters)}"
-            source = discord.FFmpegPCMAudio(file_path, **ffmpeg_options)
-            source = discord.PCMVolumeTransformer(source, volume=self.volumes.get(ctx.guild.id, self.default_volume))
-            ctx.voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.cleanup_file_and_play_next(ctx, file_path), self.bot.loop))
-            self.currently_playing[ctx.guild.id] = {
-                'info': info,
-                'url': url,
-                'filters': filters,
-                'start_time': datetime.now(),
-                'position': 0,
-                'is_stream': False
-            }
-            embed = discord.Embed(
-                title=f"Playing - {info['title'] or 'Unknown'}",
-                description=f"URL: {info['webpage_url'] or 'Unknown'}",
-                color=discord.Color.og_blurple(),
-                timestamp=discord.utils.utcnow()
+            voice_client = ctx.voice_client
+
+        state = self.get_state(guild_id)
+
+        if not voice_client:
+            return
+
+        if state.loop_mode == "track" and state.currently_playing:
+            track = state.currently_playing
+            state.is_seeking = False
+            await self._play_source(
+                ctx,
+                track["url"],
+                track["filters"],
+                0,
+                track["is_stream"],
+                track["info"],
+                track["file_path"],
             )
-            raw_date = info.get('upload_date')
-            upload_date = datetime.strptime(raw_date, '%Y%m%d').strftime('%B %d, %Y') if raw_date else "Unknown"
-            embed.add_field(name="Length", value=info.get('duration_string', 'Unknown'), inline=True)
-            embed.add_field(name="Author", value=info.get('uploader', 'Unknown'), inline=True)
-            embed.add_field(name="Channel", value=info.get('uploader_url', 'Unknown'), inline=True)
-            if info.get('view_count'):
-                embed.add_field(name="Views", value=f"{info['view_count']:,}", inline=True)
-            if info.get('like_count'):
-                embed.add_field(name="Likes", value=f"{info['like_count']:,}", inline=True)
-            embed.add_field(name="Filters", value=", ".join(filters) if filters else "None", inline=True)
-            embed.add_field(name="Published At", value=upload_date, inline=True)
-            embed.set_image(url=info.get('thumbnail'))
-            embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
-            await ctx.send(embed=embed)
+            return
 
-    async def cleanup_file_and_play_next(self, ctx, file_path):
-        if self.loop_mode.get(ctx.guild.id) != "track":
-            if os.path.exists(file_path):
-                await asyncio.sleep(1)
-                os.remove(file_path)
-        await self.play_next(ctx)
+        if not state.queue:
+            if state.loop_mode == "queue" and state.original_queue:
+                state.queue = deque(state.original_queue)
+                if ctx:
+                    await ctx.send("Restarting queue loop.")
+                await self.play_next(ctx, guild_id)
+            else:
+                state.currently_playing = None
+            return
+
+        url, filters, is_stream, title = state.queue.popleft()
+
+        if state.loop_mode == "queue" and not state.original_queue:
+            state.original_queue = list(state.queue) + [
+                (url, filters, is_stream, title)
+            ]
+
+        try:
+            info = await self.fetch_yt_info(url, download=not is_stream)
+            await self._play_source(ctx, url, filters, 0, is_stream, info)
+        except Exception as e:
+            if ctx:
+                await ctx.send(f"Error playing track: {e}")
+            await self.play_next(ctx, guild_id)
+
+    async def _play_source(
+        self,
+        ctx: Optional[commands.Context],
+        url: str,
+        filters: List[str],
+        position: float,
+        is_stream: bool,
+        info: Dict,
+        file_path: Optional[str] = None,
+    ):
+        if not ctx:
+            return
+
+        guild_id = ctx.guild.id
+        state = self.get_state(guild_id)
+        voice_client = ctx.voice_client
+
+        if not voice_client:
+            return
+
+        actual_file_path = None
+
+        if is_stream:
+            formats = info.get("formats", [])
+            stream_url = None
+            for f in sorted(
+                formats, key=lambda x: x.get("filesize") or 0, reverse=True
+            ):
+                if f.get("acodec") != "none" and f.get("vcodec") == "none":
+                    if f.get("url", "").startswith("http"):
+                        stream_url = f["url"]
+                        break
+            if not stream_url:
+                stream_url = info.get("url", "")
+            ffmpeg_opts = {
+                "before_options": f"-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -ss {position}",
+                "options": "-vn -f s16le",
+            }
+            source = discord.FFmpegPCMAudio(
+                stream_url,
+                **ffmpeg_opts,
+            )
+        else:
+            if file_path and os.path.exists(file_path):
+                actual_file_path = file_path
+            else:
+                ydl = yt_dlp.YoutubeDL(self.ydl_options)
+                actual_file_path = ydl.prepare_filename(info)
+                if not os.path.exists(actual_file_path):
+                    info = await self.fetch_yt_info(url, download=True)
+                    actual_file_path = ydl.prepare_filename(info)
+            ffmpeg_opts = {
+                "before_options": f"-ss {position}",
+                "options": "-vn -f s16le",
+            }
+            if filters:
+                ffmpeg_opts["options"] += f" -af {','.join(filters)}"
+            source = discord.FFmpegPCMAudio(
+                actual_file_path,
+                **ffmpeg_opts,
+            )
+        source = discord.PCMVolumeTransformer(source, volume=state.volume)
+        voice_client.play(
+            source,
+            after=lambda e: asyncio.run_coroutine_threadsafe(
+                self._after_play(ctx, actual_file_path, guild_id), self.bot.loop
+            ),
+        )
+        duration = info.get("duration", 0)
+        state.currently_playing = {
+            "url": url,
+            "filters": filters,
+            "position": position,
+            "is_stream": is_stream,
+            "info": info,
+            "start_time": datetime.now(),
+            "file_path": actual_file_path,
+        }
+
+        await self.log_play(
+            guild_id,
+            ctx.channel.id,
+            ctx.author.id,
+            url,
+            info.get("title", "Unknown"),
+            int(duration),
+        )
+
+        if position == 0:
+            embed = discord.Embed(
+                title=f"{'Streaming' if is_stream else 'Playing'} - {info.get('title', 'Unknown')}",
+                description=f"URL: {info.get('webpage_url', 'Unknown')}",
+                color=discord.Color.og_blurple()
+                if not is_stream
+                else discord.Color.blurple(),
+                timestamp=discord.utils.utcnow(),
+            )
+            if info.get("thumbnail"):
+                embed.set_image(url=info["thumbnail"])
+            embed.add_field(
+                name="Duration", value=self.format_time(duration), inline=True
+            )
+            embed.add_field(
+                name="Uploader", value=info.get("uploader", "Unknown"), inline=True
+            )
+            if info.get("view_count"):
+                embed.add_field(
+                    name="Views", value=f"{info['view_count']:,}", inline=True
+                )
+            if info.get("like_count"):
+                embed.add_field(
+                    name="Likes", value=f"{info['like_count']:,}", inline=True
+                )
+            raw_date = info.get("upload_date")
+            upload_date = (
+                datetime.strptime(raw_date, "%Y%m%d").strftime("%B %d, %Y")
+                if raw_date
+                else "Unknown"
+            )
+            embed.add_field(name="Published At", value=upload_date, inline=True)
+            if filters:
+                embed.add_field(name="Filters", value=", ".join(filters), inline=True)
+            embed.set_footer(
+                text=f"Requested by {ctx.author.display_name}",
+                icon_url=ctx.author.display_avatar.url,
+            )
+            try:
+                await ctx.send(embed=embed)
+            except discord.errors.Forbidden:
+                pass
+
+    async def _after_play(
+        self, ctx: commands.Context, file_path: Optional[str], guild_id: int
+    ):
+        state = self.get_state(guild_id)
+
+        if state.is_seeking:
+            state.is_seeking = False
+            return
+
+        if file_path and os.path.exists(file_path) and state.loop_mode != "track":
+            try:
+                await asyncio.to_thread(os.remove, file_path)
+            except Exception:
+                pass
+
+        await self.play_next(ctx, guild_id)
 
     def format_time(self, seconds: float) -> str:
+        if not seconds:
+            return "0:00"
         m, s = divmod(int(seconds), 60)
         h, m = divmod(m, 60)
         if h > 0:
             return f"{h}:{m:02d}:{s:02d}"
-        else:
-            return f"{m}:{s:02d}"
+        return f"{m}:{s:02d}"
 
     def parse_time(self, t: str) -> float:
         t = t.strip()
-        if ':' in t:
-            parts = list(map(float, t.split(':')))
+        if ":" in t:
+            parts = list(map(float, t.split(":")))
             if len(parts) == 2:
                 return parts[0] * 60 + parts[1]
             elif len(parts) == 3:
                 return parts[0] * 3600 + parts[1] * 60 + parts[2]
-            else:
-                raise ValueError("Invalid time format.")
-        elif '.' in t or t.replace('.', '', 1).isdigit():
+        elif "." in t or t.replace(".", "", 1).isdigit():
             return float(t)
         elif t.isdigit():
             return float(t)
-        else:
-            raise ValueError(f"Unrecognized time format: {t}")
+        raise ValueError(f"Unrecognized time format: {t}")
 
-    def parse_seek_position(self, pos_str: str, total_duration: float, current_pos: float) -> float:
+    def parse_seek_position(
+        self, pos_str: str, total_duration: float, current_pos: float
+    ) -> float:
         pos_str = pos_str.strip()
         if not pos_str:
             raise ValueError("Empty position string provided.")
@@ -371,73 +402,36 @@ class Audio(commands.Cog):
             return self.parse_time(pos_str)
 
     def get_valid_stream_url(self, info):
-        formats = info.get('formats', [])
-        formats.sort(key=lambda f: f.get('filesize') or 0, reverse=True)
+        formats = info.get("formats", [])
+        formats.sort(key=lambda f: f.get("filesize") or 0, reverse=True)
         for f in formats:
-            if f.get('acodec') != 'none' and f.get('vcodec') == 'none':
-                if f.get('protocol', '').startswith(('http', 'https')):
-                    return f['url']
-        with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-            result = ydl.extract_info(info['webpage_url'], download=False)
-            return result['url']
+            if f.get("acodec") != "none" and f.get("vcodec") == "none":
+                if f.get("protocol", " ").startswith(("http", "https")):
+                    return f["url"]
+        return info.get("url")
 
-    async def play_stream_from_position(self, ctx: commands.Context, url: str, filters, position: float):
-        current_data = self.currently_playing.get(ctx.guild.id)
-        if not current_data or 'info' not in current_data:
-            def sync_extract_info():
-                with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-                    return ydl.extract_info(url, download=False)
-            info = await self.run_in_executor(sync_extract_info)
+    @commands.Cog.listener()
+    async def on_voice_state_update(self, member, before, after):
+        if member == self.bot.user:
+            if not after.channel:
+                guild_id = member.guild.id
+                state = self.get_state(guild_id)
+                state.queue.clear()
+                state.currently_playing = None
         else:
-            info = current_data['info']
-        stream_url = self.get_valid_stream_url(info)
-        before_options = f"-ss {position}"
-        ffmpeg_options = {
-            'before_options': before_options,
-            'options': '-vn'
-        }
-        if filters:
-            ffmpeg_options['options'] += f" -af {','.join(filters)}"
-        source = discord.FFmpegPCMAudio(stream_url, **ffmpeg_options)
-        source = discord.PCMVolumeTransformer(source, volume=self.volumes.get(ctx.guild.id, self.default_volume))
-        ctx.voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.cleanup_file_and_play_next(ctx, ""), self.bot.loop))
-        self.currently_playing[ctx.guild.id] = {
-            'info': info,
-            'url': url,
-            'filters': filters,
-            'start_time': datetime.now(),
-            'position': position,
-            'is_stream': True
-        }
-
-    async def play_audio_from_position(self, ctx: commands.Context, url: str, filters, position: float):
-        current_data = self.currently_playing.get(ctx.guild.id)
-        if not current_data or 'info' not in current_data:
-            def sync_extract_info():
-                with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-                    return ydl.extract_info(url, download=True)
-            info = await self.run_in_executor(sync_extract_info)
-        else:
-            info = current_data['info']
-        file_path = yt_dlp.YoutubeDL(YDL_OPTIONS).prepare_filename(info)
-        before_options = f"-ss {position}"
-        ffmpeg_options = {
-            'before_options': before_options,
-            'options': '-vn'
-        }
-        if filters:
-            ffmpeg_options['options'] += f" -af {','.join(filters)}"
-        source = discord.FFmpegPCMAudio(file_path, **ffmpeg_options)
-        source = discord.PCMVolumeTransformer(source, volume=self.volumes.get(ctx.guild.id, self.default_volume))
-        ctx.voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.cleanup_file_and_play_next(ctx, file_path), self.bot.loop))
-        self.currently_playing[ctx.guild.id] = {
-            'info': info,
-            'url': url,
-            'filters': filters,
-            'start_time': datetime.now(),
-            'position': position,
-            'is_stream': False
-        }
+            if before.channel and before.channel.guild.voice_client:
+                vc = before.channel.guild.voice_client
+                if (
+                    vc.channel == before.channel
+                    and len(before.channel.members) == 1
+                    and self.bot.user in before.channel.members
+                ):
+                    await asyncio.sleep(5)
+                    if (
+                        len(before.channel.members) == 1
+                        and self.bot.user in before.channel.members
+                    ):
+                        await vc.disconnect()
 
     @commands.hybrid_command(name="join", description="Join a voice channel.")
     @app_commands.allowed_installs(guilds=True, users=False)
@@ -445,11 +439,16 @@ class Audio(commands.Cog):
         await ctx.typing()
         await self.connect_to_channel(ctx)
 
-    @commands.hybrid_command(name="leave", description="Leave the current voice channel.")
+    @commands.hybrid_command(
+        name="leave", description="Leave the current voice channel."
+    )
     @app_commands.allowed_installs(guilds=True, users=False)
     async def leave(self, ctx: commands.Context):
         await ctx.typing()
-        if ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
+        if ctx.author.voice is None:
+            await ctx.send("You are not in a voice channel.")
+            return
+        elif ctx.author.voice.channel != ctx.voice_client.channel:
             await ctx.send("You are not in the same voice channel as me.")
             return
         if ctx.voice_client:
@@ -457,629 +456,1088 @@ class Audio(commands.Cog):
             queue.clear()
             await ctx.send(f"Disconnected from {ctx.voice_client.channel}.")
             await ctx.voice_client.disconnect()
-        else:
-            await ctx.send("I am not connected to a voice channel.")
 
-    @commands.hybrid_command(name="play", description="Play an audio/song or playlist from a given URL. Any URL that yt-dlp supports also works.", aliases=["p"])
-    @app_commands.describe(url="The URL of the audio/song or playlist to play.", attachment="The attachment media file to use for playing.", filters="A comma-separated list of filters to apply to the audio.")
-    @app_commands.allowed_installs(guilds=True, users=False)
-    async def play(self, ctx: commands.Context, url: str = None, attachment: Optional[discord.Attachment] = None, filters: str = None):
-        await ctx.typing()
-        if ctx.message.attachments or attachment:
-            source_url = attachment.url if attachment else ctx.message.attachments[0].url
-            if not filters:
-                message_content = ctx.message.content[len(ctx.prefix + ctx.invoked_with):].strip()
-                filters = message_content
-        else:
-            if not url:
-                await ctx.send("Please provide an URL or an attachment file.")
-                return
-            source_url = url
-        filters_list = filters.split(',') if filters else []
-        is_playlist = False
-        if source_url:
-            playlist_patterns = [
-                'youtube.com/playlist',
-                'youtube.com/watch?list=',
-                'youtube.com/playlist?list=',
-                'youtu.be/playlist?list=',
-                'spotify.com/playlist',
-                'spotify.com/album',
-                'spotify.com/artist'
-            ]
-            is_playlist = any(pattern in source_url.lower() for pattern in playlist_patterns)
-            if 'youtube.com/watch' in source_url.lower() and 'list=' in source_url.lower():
-                parsed = urlparse(source_url)
-                query = parse_qs(parsed.query)
-                if 'v' in query:
-                    source_url = f"https://www.youtube.com/watch?v={query['v'][0]}"
-                    is_playlist = False
-        if is_playlist:
-            await self.process_playlist(ctx, source_url, filters_list, is_stream=False)
-            return
-        queue = self.get_queue(ctx.guild.id)
-        if ctx.voice_client and ctx.voice_client.is_playing() and ctx.author.voice and ctx.author.voice.channel == ctx.voice_client.channel:
-            title = await self.get_title(source_url)
-            queue.append((source_url, filters_list, False, title))
-            await ctx.send(f"Added {url} to the queue.")
-            if self.loop_mode.get(ctx.guild.id) == "queue":
-                self.original_queues[ctx.guild.id] = list(queue)
-        elif ctx.voice_client and ctx.voice_client.is_playing() and (ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel):
-            await ctx.send("You must be in the same voice channel as me to play audio.")
-            return
-        elif ctx.voice_client is None or (ctx.author.voice and ctx.author.voice.channel != ctx.voice_client.channel):
-            connected = await self.connect_to_channel(ctx)
-            if not connected:
-                return
-            await self.play_audio(ctx, source_url, filters=filters_list)
-        else:
-            await self.play_audio(ctx, source_url, filters=filters_list)
+    def get_queue(self, guild_id):
+        if guild_id not in self.guild_states:
+            self.guild_states[guild_id] = GuildMusicState()
+        return self.guild_states[guild_id].queue
 
-    @commands.hybrid_command(name="stream", description="Stream an audio/song or playlist from a given URL without downloading.", aliases=["strm", "s"])
-    @app_commands.describe(url="The URL of the audio/song or playlist to stream.", attachment="The attachment media file to use for streaming.", filters="A comma-separated list of filters to apply to the audio.")
-    @app_commands.allowed_installs(guilds=True, users=False)
-    async def stream(self, ctx: commands.Context, url: str = None, attachment: Optional[discord.Attachment] = None, filters: str = None):
-        await ctx.typing()
-        if ctx.message.attachments or attachment:
-            source_url = attachment.url if attachment else ctx.message.attachments[0].url
-            if not filters:
-                message_content = ctx.message.content[len(ctx.prefix + ctx.invoked_with):].strip()
-                filters = message_content
-        else:
-            if not url:
-                await ctx.send("Please provide an URL or an attachment file.")
-                return
-            source_url = url
-        filters_list = filters.split(',') if filters else []
-        is_playlist = False
-        if source_url:
-            playlist_patterns = [
-                'youtube.com/playlist',
-                'youtube.com/watch?list=',
-                'youtube.com/playlist?list=',
-                'youtu.be/playlist?list=',
-                'spotify.com/playlist',
-                'spotify.com/album',
-                'spotify.com/artist'
-            ]
-            is_playlist = any(pattern in source_url.lower() for pattern in playlist_patterns)
-            if 'youtube.com/watch' in source_url.lower() and 'list=' in source_url.lower():
-                parsed = urlparse(source_url)
-                query = parse_qs(parsed.query)
-                if 'v' in query:
-                    source_url = f"https://www.youtube.com/watch?v={query['v'][0]}"
-                    is_playlist = False
-        if is_playlist:
-            await self.process_playlist(ctx, source_url, filters_list, is_stream=True)
-            return
-        queue = self.get_queue(ctx.guild.id)
-        if ctx.voice_client and ctx.voice_client.is_playing() and ctx.author.voice and ctx.author.voice.channel == ctx.voice_client.channel:
-            title = await self.get_title(source_url)
-            queue.append((source_url, filters_list, True, title))
-            await ctx.send(f"Added {url} to the queue.")
-            if self.loop_mode.get(ctx.guild.id) == "queue":
-                self.original_queues[ctx.guild.id] = list(queue)
-        elif ctx.voice_client and ctx.voice_client.is_playing() and (ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel):
-            await ctx.send("You must be in the same voice channel as me to play audio.")
-            return
-        elif ctx.voice_client is None or (ctx.author.voice and ctx.author.voice.channel != ctx.voice_client.channel):
-            connected = await self.connect_to_channel(ctx)
-            if not connected:
-                return
-            await self.play_stream(ctx, source_url, filters_list)
-        else:
-            await self.play_stream(ctx, source_url, filters_list)
+    async def process_playlist(
+        self, ctx: commands.Context, url: str, filters=None, is_stream: bool = False
+    ):
+        try:
+
+            def sync_playlist_process():
+                with yt_dlp.YoutubeDL(self.ydl_options) as ydl:
+                    return ydl.extract_info(url, download=False)
+
+            info = await self.run_in_executor(sync_playlist_process)
+            if "entries" not in info:
+                if is_stream:
+                    return await self.play_stream(ctx, url, filters)
+                else:
+                    return await self.play_audio(ctx, url, filters)
+
+            entries = [e for e in info["entries"] if e]
+            queue = self.get_queue(ctx.guild.id)
+            for entry in entries:
+                title = entry.get("title", "Unknown Title")
+                queue.append((entry["url"], filters, is_stream, title))
+
+            state = self.get_state(ctx.guild.id)
+            if state.loop_mode == "queue":
+                state.original_queue = list(queue)
+
+            await ctx.send(
+                f"Added {len(entries)} tracks from {info.get('title', 'Unknown Playlist')}."
+            )
+            if not ctx.voice_client or not ctx.voice_client.is_playing():
+                if is_stream:
+                    await self.play_next_stream(ctx)
+                else:
+                    await self.play_next(ctx)
+        except Exception as e:
+            await ctx.send(f"Error processing playlist: {e}")
+
+    async def play_audio(self, ctx: commands.Context, url: str, filters=None):
+        await self._generic_play(ctx, url, filters, download=True)
 
     async def play_stream(self, ctx: commands.Context, url: str, filters=None):
-        if 'spotify.com' in url and 'track' in url:
-            query = await self.process_spotify_url(url)
-            if query:
-                youtube_url = await self.search_youtube(query[0])
-                if youtube_url:
-                    url = youtube_url['url']
-                else:
-                    await ctx.send("Could not find any YouTube video for this Spotify track.")
-                    return
-        def sync_extract_info():
-            with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-                return ydl.extract_info(url, download=False)
-        info = await self.run_in_executor(sync_extract_info)
-        stream_url = self.get_valid_stream_url(info)
-        if ctx.voice_client:
-            if ctx.voice_client.is_playing() and ctx.author.voice.channel != ctx.voice_client.channel:
-                await ctx.send("You must be in the same voice channel as me to play audio.")
-                return
-            if ctx.author.voice and ctx.author.voice.channel != ctx.voice_client.channel:
-                moved = await self.connect_to_channel(ctx)
-                if not moved:
-                    return
-        else:
-            if ctx.author.voice:
-                connected = await self.connect_to_channel(ctx)
-                if not connected:
-                    return
-            else:
-                await ctx.send("You are not connected to a voice channel.")
-                return
-        ffmpeg_options = {
-            'options': '-vn'
-        }
-        if filters:
-            ffmpeg_options['options'] += f" -af {','.join(filters)}"
-        source = discord.FFmpegPCMAudio(stream_url, **ffmpeg_options)
-        source = discord.PCMVolumeTransformer(source, volume=self.volumes.get(ctx.guild.id, self.default_volume))
-        ctx.voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next_stream(ctx), self.bot.loop))
-        self.currently_playing[ctx.guild.id] = {
-            'info': info,
-            'url': url,
-            'filters': filters,
-            'start_time': datetime.now(),
-            'position': 0,
-            'is_stream': True
-        }
-        embed = discord.Embed(
-            title=f"Streaming - {info['title']}",
-            description=f"URL: {info['webpage_url']}",
-            color=discord.Color.blurple(),
-            timestamp=discord.utils.utcnow()
-        )
-        raw_date = info.get('upload_date')
-        upload_date = datetime.strptime(raw_date, '%Y%m%d').strftime('%B %d, %Y') if raw_date else "Unknown"
-        embed.add_field(name="Length", value=info.get('duration_string', 'Unknown'), inline=True)
-        embed.add_field(name="Author", value=info.get('uploader', 'Unknown'), inline=True)
-        embed.add_field(name="Channel", value=info.get('uploader_url', 'Unknown'), inline=True)
-        if info.get('view_count'):
-            embed.add_field(name="Views", value=f"{info['view_count']:,}", inline=True)
-        if info.get('like_count'):
-            embed.add_field(name="Likes", value=f"{info['like_count']:,}", inline=True)
-        embed.add_field(name="Filters", value=", ".join(filters) if filters else "None", inline=True)
-        embed.add_field(name="Published At", value=upload_date, inline=True)
-        embed.set_image(url=info.get('thumbnail'))
-        embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
-        await ctx.send(embed=embed)
+        await self._generic_play(ctx, url, filters, download=False)
 
-    @commands.hybrid_command(name="seek", description="Seek to a specific position in the currently playing audio.")
-    @app_commands.describe(position="Position to seek to. Can be absolute (e.g. 2:30), relative (+/- 30), or percentage (50%).")
+    async def _generic_play(
+        self, ctx: commands.Context, url: str, filters=None, download=True
+    ):
+        if not await self.connect_to_channel(ctx):
+            return
+
+        state = self.get_state(ctx.guild.id)
+        filters_list = filters.split(",") if filters else []
+
+        if ctx.voice_client and ctx.voice_client.is_playing():
+            try:
+                info = await self.fetch_yt_info(url, download=False)
+                title = info.get("title", "Unknown")
+            except Exception:
+                title = url
+            state.queue.append((url, filters_list, not download, title))
+            await ctx.send(f"Added {title} to the queue.")
+            if state.loop_mode == "queue":
+                state.original_queue = list(state.queue)
+        else:
+            try:
+                info = await self.fetch_yt_info(url, download=download)
+                await self._play_source(ctx, url, filters_list, 0, not download, info)
+            except Exception as e:
+                raise Exception(str(e))
+
+    async def play_next_stream(self, ctx: commands.Context):
+        await self.play_next(ctx, ctx.guild.id)
+
+    @commands.hybrid_command(
+        name="play",
+        description="Play an audio/song or playlist. Any URL that yt-dlp supports also works.",
+        aliases=["p"],
+    )
+    @app_commands.describe(
+        url="The URL of the audio/song or playlist to play.",
+        attachment="The attachment media file to use for playing.",
+        filters="A comma-separated list of filters to apply to the audio.",
+    )
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def play(
+        self,
+        ctx: commands.Context,
+        url: str = None,
+        attachment: Optional[discord.Attachment] = None,
+        filters: str = None,
+    ):
+        await ctx.typing()
+        source_url = url
+        if ctx.message.attachments or attachment:
+            source_url = (
+                attachment.url if attachment else ctx.message.attachments[0].url
+            )
+
+        if not source_url:
+            await ctx.send("Please provide an URL or an attachment file.")
+            return
+
+        is_playlist = any(p in source_url.lower() for p in ["playlist", "list="])
+        if is_playlist:
+            await self.process_playlist(ctx, source_url, filters, is_stream=False)
+            return
+
+        await self.play_audio(ctx, source_url, filters)
+
+    @commands.hybrid_command(
+        name="stream",
+        description="Stream an audio/song or playlist from a given URL without downloading.",
+        aliases=["s"],
+    )
+    @app_commands.describe(
+        url="The URL of the audio/song or playlist to stream.",
+        attachment="The attachment media file to use for streaming.",
+        filters="A comma-separated list of filters to apply to the audio.",
+    )
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def stream(
+        self,
+        ctx: commands.Context,
+        url: str = None,
+        attachment: Optional[discord.Attachment] = None,
+        filters: str = None,
+    ):
+        await ctx.typing()
+        source_url = url
+        if ctx.message.attachments or attachment:
+            source_url = (
+                attachment.url if attachment else ctx.message.attachments[0].url
+            )
+
+        if not source_url:
+            await ctx.send("Please provide an URL or an attachment file.")
+            return
+
+        is_playlist = any(p in source_url.lower() for p in ["playlist", "list="])
+        if is_playlist:
+            await self.process_playlist(ctx, source_url, filters, is_stream=True)
+            return
+
+        await self.play_stream(ctx, source_url, filters)
+
+    @commands.hybrid_command(
+        name="seek",
+        description="Seek to a specific position in the currently playing audio.",
+    )
+    @app_commands.describe(
+        position="Position to seek to. Can be absolute (e.g. 2:30), relative (+/- 30), or percentage. (50%)"
+    )
     @app_commands.allowed_installs(guilds=True, users=False)
     async def seek(self, ctx: commands.Context, position: str):
         await ctx.typing()
-        if not ctx.voice_client or not ctx.voice_client.is_playing():
+        if ctx.author.voice is None:
+            await ctx.send("You are not in a voice channel.")
+            return
+        elif ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You are not in the same voice channel as me.")
+            return
+        elif ctx.voice_client and not ctx.voice_client.is_playing():
             await ctx.send("Nothing is currently playing.")
             return
-        if ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
-            await ctx.send("You must be in the same voice channel as me to seek.")
+
+        state = self.get_state(ctx.guild.id)
+        current_data = state.currently_playing
+        if not current_data or "info" not in current_data:
+            await ctx.send("No valid data available.")
             return
-        current_data = self.currently_playing.get(ctx.guild.id)
-        if not current_data or 'info' not in current_data:
-            await ctx.send("No valid data available for seeking.")
-            return
-        duration = current_data['info'].get('duration')
+
+        duration = current_data["info"].get("duration")
         if not duration:
-            await ctx.send("Cannot seek; total duration unknown.")
+            await ctx.send("Cannot seek; duration unknown.")
             return
-        start_time = current_data.get('start_time', datetime.now())
+
+        start_time = current_data.get("start_time", datetime.now())
         elapsed = (datetime.now() - start_time).total_seconds()
-        current_pos = int(elapsed + current_data.get('position', 0))
+        if state.paused_at:
+            if ctx.guild.id in self.paused_times:
+                pause_start = self.paused_times[ctx.guild.id]
+                pause_duration = (datetime.now() - pause_start).total_seconds()
+                elapsed -= pause_duration
+
+        current_pos = int(elapsed + current_data.get("position", 0))
+
         try:
             new_pos = self.parse_seek_position(position.strip(), duration, current_pos)
         except ValueError as e:
             await ctx.send(str(e))
             return
-        if new_pos < 0:
-            new_pos = 0
-        elif new_pos >= duration:
-            new_pos = duration
+
+        new_pos = max(0, min(new_pos, duration))
+        state.is_seeking = True
         ctx.voice_client.stop()
-        current_data['position'] = new_pos
-        current_data['start_time'] = datetime.now()
-        url = current_data['url']
-        filters = current_data['filters']
-        is_stream = current_data.get('is_stream', False)
-        if is_stream:
-            await self.play_stream_from_position(ctx, url, filters, new_pos)
-        else:
-            await self.play_audio_from_position(ctx, url, filters, new_pos)
+        current_data["position"] = new_pos
+        current_data["start_time"] = datetime.now()
+
+        await self._play_source(
+            ctx,
+            current_data["url"],
+            current_data["filters"],
+            new_pos,
+            current_data.get("is_stream", False),
+            current_data["info"],
+            current_data.get("file_path"),
+        )
+
         await ctx.send(f"Seeked to {self.format_time(new_pos)}.")
-    
-    @commands.hybrid_command(name="goto", description="Skip to a specific song in the queue by index.")
-    @app_commands.describe(index="The index of the song in the queue to skip to (starting at 1).")
+
+    @commands.hybrid_command(
+        name="goto", description="Skip to a specific song in the queue by index."
+    )
+    @app_commands.describe(
+        index="The index of the song in the queue to skip to. (starting at 1)"
+    )
     @app_commands.allowed_installs(guilds=True, users=False)
     async def goto(self, ctx: commands.Context, index: int):
         await ctx.typing()
-        if ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
-            await ctx.send("You must be in the same voice channel as me.")
+        if ctx.author.voice is None:
+            await ctx.send("You are not in a voice channel.")
             return
-
+        elif ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You are not in the same voice channel as me.")
+            return
         queue = self.get_queue(ctx.guild.id)
-        if not queue:
-            await ctx.send("The queue is empty.")
+        if not queue or index < 1 or index > len(queue):
+            await ctx.send("Invalid index.")
             return
-
-        if index < 1 or index > len(queue):
-            await ctx.send(f"Please provide a valid index between 1 and {len(queue)}.")
-            return
-
 
         for _ in range(index - 1):
             queue.popleft()
 
         if ctx.voice_client.is_playing():
             ctx.voice_client.stop()
-            await ctx.send(f"Skipped to position **{index}** in the queue.")
         else:
-            await self.play_next(ctx)
-    
-    @commands.hybrid_command(name="move", description="Move a song to another position in the queue.")
-    @app_commands.describe(old_index="Current position of the song (starting at 1)", new_index="New position for the song (starting at 1)")
+            await self.play_next(ctx, ctx.guild.id)
+        await ctx.send(f"Skipped to position {index}.")
+
+    @commands.hybrid_command(
+        name="move", description="Move a song to another position in the queue."
+    )
+    @app_commands.describe(
+        old_index="Current position of the song. (starting at 1)",
+        new_index="New position for the song. (starting at 1)",
+    )
     @app_commands.allowed_installs(guilds=True, users=False)
     async def move(self, ctx: commands.Context, old_index: int, new_index: int):
         await ctx.typing()
-        if ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
-            await ctx.send("You must be in the same voice channel as me.")
+        if ctx.author.voice is None:
+            await ctx.send("You are not in a voice channel.")
             return
-
+        elif ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You are not in the same voice channel as me.")
+            return
         queue = list(self.get_queue(ctx.guild.id))
-        if not queue:
-            await ctx.send("The queue is empty.")
-            return
-
         length = len(queue)
         if not (1 <= old_index <= length) or not (1 <= new_index <= length):
-            await ctx.send(f"Please provide valid indices between 1 and {length}.")
+            await ctx.send("Invalid indices.")
             return
 
+        moved_item = queue.pop(old_index - 1)
+        queue.insert(new_index - 1, moved_item)
 
-        old_index -= 1
-        new_index -= 1
+        state = self.get_state(ctx.guild.id)
+        state.queue = deque(queue)
+        if state.loop_mode == "queue":
+            state.original_queue = queue
 
-        if old_index == new_index:
-            await ctx.send("The song is already at that position.")
-            return
+        await ctx.send(f"Moved item from position {old_index} to {new_index}.")
 
-        moved_item = queue.pop(old_index)
-        queue.insert(new_index, moved_item)
-
-        self.queues[ctx.guild.id] = deque(queue)
-        if self.loop_mode.get(ctx.guild.id) == "queue":
-            self.original_queues[ctx.guild.id] = queue
-
-        await ctx.send(f"Moved item from position **{old_index + 1}** to **{new_index + 1}**.")
-    
-    @commands.hybrid_command(name="remove", description="Remove a song from the queue by index.")
-    @app_commands.describe(index="Index of the song to remove (starting at 1)")
+    @commands.hybrid_command(
+        name="remove", description="Remove a song from the queue by index."
+    )
+    @app_commands.describe(index="Index of the song to remove. (starting at 1)")
     @app_commands.allowed_installs(guilds=True, users=False)
     async def remove(self, ctx: commands.Context, index: int):
         await ctx.typing()
-        if ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
-            await ctx.send("You must be in the same voice channel as me.")
+        if ctx.author.voice is None:
+            await ctx.send("You are not in a voice channel.")
             return
-
+        elif ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You are not in the same voice channel as me.")
+            return
         queue = list(self.get_queue(ctx.guild.id))
-        if not queue:
-            await ctx.send("The queue is empty.")
-            return
-
-        length = len(queue)
-        if not (1 <= index <= length):
-            await ctx.send(f"Please provide a valid index between 1 and {length}.")
+        if not queue or not (1 <= index <= len(queue)):
+            await ctx.send("Invalid index.")
             return
 
         removed = queue.pop(index - 1)
-        self.queues[ctx.guild.id] = deque(queue)
-        if self.loop_mode.get(ctx.guild.id) == "queue":
-            self.original_queues[ctx.guild.id] = queue
+        state = self.get_state(ctx.guild.id)
+        state.queue = deque(queue)
+        if state.loop_mode == "queue":
+            state.original_queue = queue
 
-        title = removed[3]
-        await ctx.send(f"Removed **{title}** from the queue.")
-    
-    @commands.hybrid_command(name="volume", description="Adjust the playback volume. (0-100%)", aliases=["vol"])
+        await ctx.send(f"Removed {removed[3]} from the queue.")
+
+    @commands.hybrid_command(
+        name="volume", description="Adjust playback volume (0-100%).", aliases=["vol"]
+    )
     @app_commands.describe(level="Volume level. (0-100)")
     @app_commands.allowed_installs(guilds=True, users=False)
     async def volume(self, ctx: commands.Context, level: int):
         await ctx.typing()
-        if not ctx.voice_client or not ctx.voice_client.is_playing():
-            await ctx.send("Nothing is currently playing.")
+        if ctx.author.voice is None:
+            await ctx.send("You are not in a voice channel.")
             return
-        if ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
-            await ctx.send("You must be in the same voice channel as me to adjust volume.")
+        elif ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You are not in the same voice channel as me.")
             return
-        
         level = max(0, min(100, level))
         volume_level = level / 100.0
-        self.volumes[ctx.guild.id] = volume_level
-        
-        
+
+        state = self.get_state(ctx.guild.id)
+        state.volume = volume_level
+        await self.save_guild_settings(ctx.guild.id, volume=volume_level)
+
         if ctx.voice_client.source:
-            if ctx.voice_client.source and hasattr(ctx.voice_client.source, 'volume'):
-                ctx.voice_client.source.volume = volume_level
-        
+            ctx.voice_client.source.volume = volume_level
         await ctx.send(f"Volume set to {level}%")
 
-    @commands.hybrid_command(name="nowplaying", description="Display information about the currently playing audio/song.", aliases=["np"])
+    @commands.hybrid_command(
+        name="nowplaying",
+        description="Display information about the currently playing audio/song.",
+        aliases=["np"],
+    )
     @app_commands.allowed_installs(guilds=True, users=False)
     async def nowplaying(self, ctx: commands.Context):
         await ctx.typing()
-        if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
-            current = self.currently_playing.get(ctx.guild.id)
+        if ctx.voice_client and (
+            ctx.voice_client.is_playing() or ctx.voice_client.is_paused()
+        ):
+            state = self.get_state(ctx.guild.id)
+            current = state.currently_playing
             if current:
-                info = current['info']
-                filters = current['filters']
-                is_stream = current['is_stream']
-                start_time = current.get('start_time', datetime.now())
+                info = current["info"]
+                filters = current["filters"]
+                is_stream = current["is_stream"]
+                start_time = current.get("start_time", datetime.now())
                 elapsed = (datetime.now() - start_time).total_seconds()
                 if ctx.guild.id in self.paused_times:
-                    pause_duration = (datetime.now() - self.paused_times[ctx.guild.id]).total_seconds()
+                    pause_start = self.paused_times[ctx.guild.id]
+                    pause_duration = (datetime.now() - pause_start).total_seconds()
                     elapsed -= pause_duration
-                current_pos = elapsed + current.get('position', 0)
-                duration = info.get('duration', 0)
-                formatted_position = f"{self.format_time(current_pos)} / {self.format_time(duration)}"
+                current_pos = elapsed + current.get("position", 0)
+                duration = info.get("duration", 0)
+                formatted_position = (
+                    f"{self.format_time(current_pos)} / {self.format_time(duration)}"
+                )
                 if ctx.voice_client.is_paused():
                     status = "Paused"
                     color = discord.Color.dark_grey()
                 else:
                     status = "Playing" if not is_stream else "Streaming"
-                    color = discord.Color.og_blurple() if not is_stream else discord.Color.blurple()
+                    color = (
+                        discord.Color.og_blurple()
+                        if not is_stream
+                        else discord.Color.blurple()
+                    )
                 embed = discord.Embed(
                     title=f"Currently {status} - {info['title'] if info['title'] else 'Unknown'}",
                     description=f"URL: {info['webpage_url'] if info['webpage_url'] else 'Unknown'}",
                     color=color,
-                    timestamp=discord.utils.utcnow()
+                    timestamp=discord.utils.utcnow(),
                 )
-                raw_date = info.get('upload_date')
-                upload_date = datetime.strptime(raw_date, '%Y%m%d').strftime('%B %d, %Y') if raw_date else "Unknown"
+                raw_date = info.get("upload_date")
+                upload_date = (
+                    datetime.strptime(raw_date, "%Y%m%d").strftime("%B %d, %Y")
+                    if raw_date
+                    else "Unknown"
+                )
                 embed.add_field(name="Length", value=formatted_position, inline=True)
-                embed.add_field(name="Author", value=info.get('uploader', 'Unknown'), inline=True)
-                embed.add_field(name="Channel", value=info.get('uploader_url', 'Unknown'), inline=True)
-                if info.get('view_count'):
-                    embed.add_field(name="Views", value=f"{info['view_count']:,}", inline=True)
-                if info.get('like_count'):
-                    embed.add_field(name="Likes", value=f"{info['like_count']:,}", inline=True)
-                embed.add_field(name="Filters", value=", ".join(filters) if filters else "None", inline=True)
+                embed.add_field(
+                    name="Author", value=info.get("uploader", "Unknown"), inline=True
+                )
+                embed.add_field(
+                    name="Channel",
+                    value=info.get("uploader_url", "Unknown"),
+                    inline=True,
+                )
+                if info.get("view_count"):
+                    embed.add_field(
+                        name="Views", value=f"{info['view_count']:,}", inline=True
+                    )
+                if info.get("like_count"):
+                    embed.add_field(
+                        name="Likes", value=f"{info['like_count']:,}", inline=True
+                    )
+                if filters:
+                    embed.add_field(
+                        name="Filters",
+                        value=", ".join(filters) if filters else "None",
+                        inline=True,
+                    )
                 embed.add_field(name="Published At", value=upload_date, inline=True)
-                embed.set_image(url=info.get('thumbnail', None))
-                embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
+                embed.set_image(url=info.get("thumbnail", None))
+                embed.set_footer(
+                    text=f"Requested by {ctx.author}",
+                    icon_url=ctx.author.display_avatar.url,
+                )
                 await ctx.send(embed=embed)
-        elif ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
-            await ctx.send("You are not in the same voice channel as me.")
         else:
             await ctx.send("Nothing is currently playing.")
 
-    @commands.hybrid_command(name="shuffle", description="Shuffle the current queue/playlist.")
+    @commands.hybrid_command(
+        name="shuffle", description="Shuffle the current queue/playlist."
+    )
     @app_commands.allowed_installs(guilds=True, users=False)
     async def shuffle(self, ctx: commands.Context):
-        await ctx.typing()
-        if ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
-            await ctx.send("You must be in the same voice channel as me to shuffle the queue.")
-            return
-        queue = self.get_queue(ctx.guild.id)
-        if len(queue) < 2:
-            await ctx.send("Queue needs at least 2 items to shuffle.")
-            return
-        queue_list = list(queue)
-        random.shuffle(queue_list)
-        self.queues[ctx.guild.id] = deque(queue_list)
-        if self.loop_mode.get(ctx.guild.id) == "queue":
-            self.original_queues[ctx.guild.id] = queue_list
-        await ctx.send("Queue shuffled.")
+        if (
+            ctx.voice_client
+            and ctx.author.voice
+            and ctx.author.voice.channel == ctx.voice_client.channel
+        ):
+            await ctx.typing()
+            queue = self.get_queue(ctx.guild.id)
+            if len(queue) < 2:
+                await ctx.send("Queue must have more than 2 tracks to shuffle.")
+                return
 
-    @commands.hybrid_command(name="repeat", description="Repeat the currently playing audio/song or playlist.", aliases=["loop"])
-    @app_commands.describe(mode="Loop mode (off/track/queue)")
+            queue_list = list(queue)
+            random.shuffle(queue_list)
+            state = self.get_state(ctx.guild.id)
+            state.queue = deque(queue_list)
+            if state.loop_mode == "queue":
+                state.original_queue = queue_list
+
+            await ctx.send("Queue has been shuffled.")
+        elif ctx.author.voice is None:
+            await ctx.send("You are not in a voice channel.")
+        elif ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You are not in the same voice channel as me.")
+
+    @commands.hybrid_command(
+        name="repeat",
+        description="Repeat the currently playing audio/song or playlist.",
+        aliases=["loop"],
+    )
+    @app_commands.describe(mode="Loop mode. (off/track/queue)")
     @app_commands.allowed_installs(guilds=True, users=False)
     async def repeat(self, ctx: commands.Context, mode: str = None):
-        await ctx.typing()
-        modes = {"off": "Loop disabled.", "track": "Set to single track loop.", "queue": "Set to full queue/playlist loop."}
-        if mode is None:
-            current = self.loop_mode.get(ctx.guild.id, "off")
-            new_mode = "track" if current == "off" else "queue" if current == "track" else "off"
-        else:
-            mode = mode.lower()
-            if mode not in modes:
-                return await ctx.send("Invalid mode. Use one of: off, track, or queue")
-            new_mode = mode
-        self.loop_mode[ctx.guild.id] = new_mode
-        if new_mode == "queue":
-            queue = self.get_queue(ctx.guild.id)
-            self.original_queues[ctx.guild.id] = list(queue)
-        await ctx.send(modes[new_mode])
-    
-    async def get_title(self, url):
-        if url in self.metadata_cache:
-            return self.metadata_cache.get(url, {}).get('title', 'Unknown Title')
-        
-        try:
-            def sync_extract():
-                opts = {
-                    **YDL_OPTIONS,
-                    'extract_flat': True
-                }
-                with yt_dlp.YoutubeDL(opts) as ydl:
-                    return ydl.extract_info(url, download=False)
-            
-            info = await self.run_in_executor(sync_extract)
-            title = info.get('title', 'Unknown Title')
-            self.metadata_cache[url] = info
-            return title
-        except Exception:
-            return url
+        if (
+            ctx.voice_client
+            and ctx.voice_client.is_playing()
+            and ctx.author.voice
+            and ctx.author.voice.channel == ctx.voice_client.channel
+        ):
+            await ctx.typing()
+            modes = {
+                "off": "Loop disabled.",
+                "track": "Track loop enabled.",
+                "queue": "Queue loop enabled.",
+            }
+            state = self.get_state(ctx.guild.id)
+
+            if mode is None:
+                new_mode = (
+                    "track"
+                    if state.loop_mode == "off"
+                    else "queue"
+                    if state.loop_mode == "track"
+                    else "off"
+                )
+            else:
+                mode = mode.lower()
+                if mode not in modes:
+                    await ctx.send(
+                        "Not a valid mode. Must be one of: `off`, `track`, and `queue`"
+                    )
+                    return
+                new_mode = mode
+
+            state.loop_mode = new_mode
+            if new_mode == "queue":
+                state.original_queue = list(state.queue)
+
+            await self.save_guild_settings(ctx.guild.id, loop_mode=new_mode)
+            await ctx.send(modes[new_mode])
+        elif ctx.author.voice is None:
+            await ctx.send("You are not in a voice channel.")
+        elif ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You are not in the same voice channel as me.")
 
     @commands.hybrid_command(name="queue", description="Display the current queue.")
     @app_commands.allowed_installs(guilds=True, users=False)
     async def queue(self, ctx: commands.Context):
-        await ctx.typing()
-        queue = self.get_queue(ctx.guild.id)
-        if ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
+        if ctx.author.voice is None:
+            await ctx.send("You are not in a voice channel.")
+            return
+        elif ctx.author.voice.channel != ctx.voice_client.channel:
             await ctx.send("You are not in the same voice channel as me.")
             return
-        if not queue:
-            await ctx.send("The queue is empty.")
-            return
-        ITEMS_PER_PAGE = 10
-        total_pages = (len(queue) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
-        class QueuePaginator(discord.ui.View):
-            def __init__(self, queue, total_pages, original_author):
-                super().__init__(timeout=180)
-                self.queue = queue
-                self.current_page = 0
-                self.total_pages = total_pages
-                self.original_author = original_author
-                self.message = None
-                self.disabled = False
-            async def interaction_check(self, interaction: discord.Interaction):
-                if interaction.user != self.original_author:
-                    await interaction.response.send_message("You can't control this pagination.", ephemeral=True)
-                    return False
-                return True
-            async def on_timeout(self):
-                await self.message.edit(view=None)
-            def create_embed(self):
-                start_idx = self.current_page * ITEMS_PER_PAGE
-                end_idx = min((self.current_page + 1) * ITEMS_PER_PAGE, len(self.queue))
-                embed = discord.Embed(title=f"Queue (Page {self.current_page + 1}/{self.total_pages})", color=discord.Color.og_blurple(), timestamp=discord.utils.utcnow())
-                for i, (url, filters, is_stream, title) in enumerate(self.queue[start_idx:end_idx], start=start_idx + 1):
-                    filter_text = f" ({', '.join(filters)})" if filters else ""
-                    stream_label = " (Stream)" if is_stream else ""
-                    embed.add_field(
-                        name=f"{i}.",
-                        value=f"[{title}]({url}){filter_text}{stream_label}",
-                        inline=False
-                    )
-                return embed
-            @discord.ui.button(emoji="⏮️", style=discord.ButtonStyle.secondary)
-            async def first_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-                if self.current_page == 0:
-                    await interaction.response.defer()
-                    return
-                self.current_page = 0
-                await interaction.response.edit_message(embed=self.create_embed(), view=self)
-            @discord.ui.button(emoji="⬅️", style=discord.ButtonStyle.primary)
-            async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-                if self.current_page == 0:
-                    await interaction.response.defer()
-                    return
-                self.current_page -= 1
-                await interaction.response.edit_message(embed=self.create_embed(), view=self)
-            @discord.ui.button(emoji="➡️", style=discord.ButtonStyle.primary)
-            async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-                if self.current_page == self.total_pages - 1:
-                    await interaction.response.defer()
-                    return
-                self.current_page += 1
-                await interaction.response.edit_message(embed=self.create_embed(), view=self)
-            @discord.ui.button(emoji="⏭️", style=discord.ButtonStyle.secondary)
-            async def last_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-                if self.current_page == self.total_pages - 1:
-                    await interaction.response.defer()
-                    return
-                self.current_page = self.total_pages - 1
-                await interaction.response.edit_message(embed=self.create_embed(), view=self)
-            @discord.ui.button(emoji="🔀", style=discord.ButtonStyle.success)
-            async def random_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-                new_page = random.randint(0, self.total_pages - 1)
-                if new_page == self.current_page:
-                    await interaction.response.defer()
-                    return
-                self.current_page = new_page
-                await interaction.response.edit_message(embed=self.create_embed(), view=self)
-            @discord.ui.button(emoji="🔢", style=discord.ButtonStyle.secondary)
-            async def jump_to_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-                if self.disabled:
-                    await interaction.response.defer()
-                    return
-                class PageJumpModal(discord.ui.Modal, title="Jump to Page"):
-                    page_num = discord.ui.TextInput(label=f"Page Number (1-{self.total_pages})", placeholder=f"Enter a number between 1 and {self.total_pages}", min_length=1, max_length=len(str(self.total_pages)))
-                    async def on_submit(self, interaction: discord.Interaction):
-                        try:
-                            page = int(self.page_num.value)
-                            if 1 <= page <= self.view.total_pages:
-                                self.view.current_page = page - 1
-                                await interaction.response.edit_message(embed=self.view.create_embed(), view=self.view)
-                            else:
-                                await interaction.response.send_message(f"Please enter a number between 1 and {self.view.total_pages}.", ephemeral=True)
-                        except ValueError:
-                            await interaction.response.send_message("Please enter a valid number.", ephemeral=True)
-                modal = PageJumpModal()
-                modal.view = self
-                await interaction.response.send_modal(modal)
-            @discord.ui.button(emoji="⏹️", style=discord.ButtonStyle.danger)
-            async def disable_components(self, interaction: discord.Interaction, button: discord.ui.Button):
-                await interaction.response.edit_message(view=None)
-            @discord.ui.button(emoji="🗑️", style=discord.ButtonStyle.danger)
-            async def delete_message(self, interaction: discord.Interaction, button: discord.ui.Button):
-                await interaction.message.delete()
-                self.stop()
-        paginator = QueuePaginator(list(queue), total_pages, ctx.author)
-        embed = paginator.create_embed()
-        paginator.message = await ctx.send(embed=embed, view=paginator)
+        elif (
+            ctx.voice_client
+            and ctx.author.voice
+            and ctx.author.voice.channel == ctx.voice_client.channel
+        ):
+            await ctx.typing()
+            queue = self.get_queue(ctx.guild.id)
+            if not queue:
+                await ctx.send("The queue is empty.")
+                return
+            ITEMS_PER_PAGE = 10
+            total_pages = (len(queue) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
 
-    @commands.hybrid_command(name="skip", description="Skip the currently playing audio/song.")
+            class QueuePaginator(discord.ui.View):
+                def __init__(self, queue, total_pages, original_author):
+                    super().__init__(timeout=180)
+                    self.queue = queue
+                    self.current_page = 0
+                    self.total_pages = total_pages
+                    self.original_author = original_author
+                    self.message = None
+                    self.disabled = False
+
+                async def interaction_check(self, interaction: discord.Interaction):
+                    if interaction.user != self.original_author:
+                        await interaction.response.send_message(
+                            "You can't control this pagination.", ephemeral=True
+                        )
+                        return False
+                    return True
+
+                async def on_timeout(self):
+                    await self.message.edit(view=None)
+
+                def create_embed(self):
+                    start_idx = self.current_page * ITEMS_PER_PAGE
+                    end_idx = min(
+                        (self.current_page + 1) * ITEMS_PER_PAGE, len(self.queue)
+                    )
+                    embed = discord.Embed(
+                        title=f"Queue (Page {self.current_page + 1}/{self.total_pages})",
+                        color=discord.Color.og_blurple(),
+                        timestamp=discord.utils.utcnow(),
+                    )
+                    for i, (url, filters, is_stream, title) in enumerate(
+                        self.queue[start_idx:end_idx], start=start_idx + 1
+                    ):
+                        filter_text = f" ({', '.join(filters)})" if filters else ""
+                        stream_label = " (Stream)" if is_stream else ""
+                        embed.add_field(
+                            name=f"{i}.",
+                            value=f"[{title}]({url}){filter_text}{stream_label}",
+                            inline=False,
+                        )
+                    return embed
+
+                @discord.ui.button(emoji="⏮️", style=discord.ButtonStyle.secondary)
+                async def first_page(
+                    self, interaction: discord.Interaction, button: discord.ui.Button
+                ):
+                    if self.current_page == 0:
+                        await interaction.response.defer()
+                        return
+                    self.current_page = 0
+                    await interaction.response.edit_message(
+                        embed=self.create_embed(), view=self
+                    )
+
+                @discord.ui.button(emoji="⬅️", style=discord.ButtonStyle.primary)
+                async def prev_page(
+                    self, interaction: discord.Interaction, button: discord.ui.Button
+                ):
+                    if self.current_page == 0:
+                        await interaction.response.defer()
+                        return
+                    self.current_page -= 1
+                    await interaction.response.edit_message(
+                        embed=self.create_embed(), view=self
+                    )
+
+                @discord.ui.button(emoji="➡️", style=discord.ButtonStyle.primary)
+                async def next_page(
+                    self, interaction: discord.Interaction, button: discord.ui.Button
+                ):
+                    if self.current_page == self.total_pages - 1:
+                        await interaction.response.defer()
+                        return
+                    self.current_page += 1
+                    await interaction.response.edit_message(
+                        embed=self.create_embed(), view=self
+                    )
+
+                @discord.ui.button(emoji="⏭️", style=discord.ButtonStyle.secondary)
+                async def last_page(
+                    self, interaction: discord.Interaction, button: discord.ui.Button
+                ):
+                    if self.current_page == self.total_pages - 1:
+                        await interaction.response.defer()
+                        return
+                    self.current_page = self.total_pages - 1
+                    await interaction.response.edit_message(
+                        embed=self.create_embed(), view=self
+                    )
+
+                @discord.ui.button(emoji="🔀", style=discord.ButtonStyle.success)
+                async def random_page(
+                    self, interaction: discord.Interaction, button: discord.ui.Button
+                ):
+                    new_page = random.randint(0, self.total_pages - 1)
+                    if new_page == self.current_page:
+                        await interaction.response.defer()
+                        return
+                    self.current_page = new_page
+                    await interaction.response.edit_message(
+                        embed=self.create_embed(), view=self
+                    )
+
+                @discord.ui.button(emoji="🔢", style=discord.ButtonStyle.secondary)
+                async def jump_to_page(
+                    self, interaction: discord.Interaction, button: discord.ui.Button
+                ):
+                    if self.disabled:
+                        await interaction.response.defer()
+                        return
+
+                    class PageJumpModal(discord.ui.Modal, title="Jump to Page"):
+                        page_num = discord.ui.TextInput(
+                            label=f"Page Number (1-{self.total_pages})",
+                            placeholder=f"Enter a number between 1 and {self.total_pages}",
+                            min_length=1,
+                            max_length=len(str(self.total_pages)),
+                        )
+
+                        async def on_submit(self, interaction: discord.Interaction):
+                            try:
+                                page = int(self.page_num.value)
+                                if 1 <= page <= self.view.total_pages:
+                                    self.view.current_page = page - 1
+                                    await interaction.response.edit_message(
+                                        embed=self.view.create_embed(), view=self.view
+                                    )
+                                else:
+                                    await interaction.response.send_message(
+                                        f"Please enter a number between 1 and {self.view.total_pages}.",
+                                        ephemeral=True,
+                                    )
+                            except ValueError:
+                                await interaction.response.send_message(
+                                    "Please enter a valid number.", ephemeral=True
+                                )
+
+                    modal = PageJumpModal()
+                    modal.view = self
+                    await interaction.response.send_modal(modal)
+
+                @discord.ui.button(emoji="⏹️", style=discord.ButtonStyle.danger)
+                async def disable_components(
+                    self, interaction: discord.Interaction, button: discord.ui.Button
+                ):
+                    await interaction.response.edit_message(view=None)
+
+                @discord.ui.button(emoji="🗑️", style=discord.ButtonStyle.danger)
+                async def delete_message(
+                    self, interaction: discord.Interaction, button: discord.ui.Button
+                ):
+                    await interaction.message.delete()
+                    self.stop()
+
+            paginator = QueuePaginator(list(queue), total_pages, ctx.author)
+            embed = paginator.create_embed()
+            paginator.message = await ctx.send(embed=embed, view=paginator)
+
+    @commands.hybrid_command(
+        name="skip", description="Skip the currently playing audio/song."
+    )
     @app_commands.allowed_installs(guilds=True, users=False)
     async def skip(self, ctx: commands.Context):
         await ctx.typing()
-        if ctx.voice_client and ctx.voice_client.is_playing() and ctx.author.voice and ctx.author.voice.channel == ctx.voice_client.channel:
+        if (
+            ctx.voice_client
+            and ctx.voice_client.is_playing()
+            and ctx.author.voice
+            and ctx.author.voice.channel == ctx.voice_client.channel
+        ):
+            state = self.get_state(ctx.guild.id)
+            if state.loop_mode == "track":
+                state.loop_mode = "off"
+                await self.save_guild_settings(ctx.guild.id, loop_mode="off")
             ctx.voice_client.stop()
             await ctx.send("Skipped playback.")
-        elif ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
-            await ctx.send("You must be in the same voice channel as me to skip the audio.")
-        else:
-            await ctx.send("I am not playing anything.")
+        elif ctx.author.voice is None:
+            await ctx.send("You are not in a voice channel.")
+        elif ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You are not in the same voice channel as me.")
+        elif not ctx.voice_client.is_playing():
+            await ctx.send("Nothing is playing.")
 
-    @commands.hybrid_command(name="stop", description="Stop the currently playing audio.")
+    @commands.hybrid_command(name="stop", description="Stop and clear queue.")
     @app_commands.allowed_installs(guilds=True, users=False)
     async def stop(self, ctx: commands.Context):
         await ctx.typing()
-        if ctx.voice_client and ctx.voice_client.is_playing() and ctx.author.voice and ctx.author.voice.channel == ctx.voice_client.channel:
-            queue = self.get_queue(ctx.guild.id)
-            queue.clear()
+        if (
+            ctx.voice_client
+            and ctx.voice_client.is_playing()
+            and ctx.author.voice
+            and ctx.author.voice.channel == ctx.voice_client.channel
+        ):
+            state = self.get_state(ctx.guild.id)
+            state.queue.clear()
+            state.original_queue = []
             ctx.voice_client.stop()
             await ctx.send("Stopped playback and cleared the queue.")
-        elif ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
-            await ctx.send("You must be in the same voice channel as me to stop the audio.")
-        elif not (ctx.voice_client and ctx.voice_client.channel):
-            await ctx.send("I am not connected to a voice channel.")
-        else:
-            await ctx.send("I am not playing anything.")
+        elif ctx.author.voice is None:
+            await ctx.send("You are not in a voice channel.")
+        elif ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You are not in the same voice channel as me.")
+        elif (
+            not ctx.voice_client.is_playing()
+            and self.get_state(ctx.guild.id).queue is None
+        ):
+            await ctx.send("Nothing is currently playing.")
+        elif (
+            not ctx.voice_client.is_playing()
+            and self.get_state(ctx.guild.id).queue
+            and ctx.author.voice
+            and ctx.author.voice.channel == ctx.voice_client.channel
+        ):
+            self.get_state(ctx.guild.id).queue.clear()
+            self.get_state(ctx.guild.id).original_queue = []
+            await ctx.send("Cleared the queue.")
 
     @commands.hybrid_command(name="clear", description="Clear the queue.")
     @app_commands.allowed_installs(guilds=True, users=False)
     async def clear(self, ctx: commands.Context):
-        await ctx.typing()
-        if ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
+        if (
+            ctx.voice_client
+            and ctx.author.voice
+            and ctx.author.voice.channel == ctx.voice_client.channel
+        ):
+            await ctx.typing()
+            state = self.get_state(ctx.guild.id)
+            state.queue.clear()
+            await ctx.send("Cleared the queue.")
+        elif ctx.author.voice is None:
+            await ctx.send("You are not in a voice channel.")
+        elif ctx.author.voice.channel != ctx.voice_client.channel:
             await ctx.send("You are not in the same voice channel as me.")
-            return
-        queue = self.get_queue(ctx.guild.id)
-        queue.clear()
-        await ctx.send("Cleared the queue.")
 
-    @commands.hybrid_command(name="pause", description="Pause the currently playing audio.")
+    @commands.hybrid_command(
+        name="pause", description="Pause the currently playing song/audio."
+    )
     @app_commands.allowed_installs(guilds=True, users=False)
     async def pause(self, ctx: commands.Context):
         await ctx.typing()
-        if ctx.voice_client and ctx.voice_client.is_playing() and ctx.author.voice and ctx.author.voice.channel == ctx.voice_client.channel:
+        if (
+            ctx.voice_client
+            and ctx.voice_client.is_playing()
+            and ctx.author.voice
+            and ctx.author.voice.channel == ctx.voice_client.channel
+        ):
+            state = self.get_state(ctx.guild.id)
+            state.paused_at = datetime.now()
             self.paused_times[ctx.guild.id] = datetime.now()
             ctx.voice_client.pause()
             await ctx.send("Paused playback.")
-        elif ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
-            await ctx.send("You must be in the same voice channel as me to pause the audio.")
-        else:
-            await ctx.send("Nothing is currently playing.")
+        elif ctx.author.voice is None:
+            await ctx.send("You are not in a voice channel.")
+        elif ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You are not in the same voice channel as me.")
 
-    @commands.hybrid_command(name="resume", description="Resume the currently paused audio.")
+    @commands.hybrid_command(
+        name="resume", description="Resume the currently paused song/audio."
+    )
     @app_commands.allowed_installs(guilds=True, users=False)
     async def resume(self, ctx: commands.Context):
         await ctx.typing()
-        if ctx.voice_client and ctx.voice_client.is_paused() and ctx.author.voice and ctx.author.voice.channel == ctx.voice_client.channel:
-            if ctx.guild.id in self.paused_times:
-                pause_duration = datetime.now() - self.paused_times[ctx.guild.id]
-                current = self.currently_playing.get(ctx.guild.id)
-                if current:
-                    current['start_time'] += pause_duration
-                del self.paused_times[ctx.guild.id]
+        if (
+            ctx.voice_client
+            and ctx.voice_client.is_paused()
+            and ctx.author.voice
+            and ctx.author.voice.channel == ctx.voice_client.channel
+        ):
+            state = self.get_state(ctx.guild.id)
+            if state.paused_at and state.currently_playing:
+                pause_dur = (datetime.now() - state.paused_at).total_seconds()
+                state.currently_playing["start_time"] += timedelta(seconds=pause_dur)
+            state.paused_at = None
+            self.paused_times.pop(ctx.guild.id, None)
             ctx.voice_client.resume()
             await ctx.send("Resumed playback.")
-        elif ctx.author.voice is None or ctx.author.voice.channel != ctx.voice_client.channel:
-            await ctx.send("You must be in the same voice channel as me to resume the audio.")
-        else:
-            await ctx.send("Nothing is currently paused.")
+        elif ctx.author.voice is None:
+            await ctx.send("You are not in a voice channel.")
+        elif ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You are not in the same voice channel as me.")
+
+    @commands.hybrid_command(
+        name="musicprofile",
+        description="View your or someone else's music listening profile.",
+        aliases=["profile", "mprofile", "mp", "musicp"],
+    )
+    @app_commands.describe(target_user="The user to view.")
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def musicprofile(
+        self, ctx: commands.Context, target_user: Optional[discord.Member] = None
+    ):
+        await ctx.typing()
+        if not self.db_pool:
+            await ctx.send(
+                "Statistics are currently not available, sorry. (is the database connected?)"
+            )
+            return
+
+        user = target_user or ctx.author
+        async with self.db_pool.acquire() as conn:
+            total_tracks = await conn.fetchval(
+                "SELECT COUNT(*) FROM music_play_logs WHERE user_id = $1", user.id
+            )
+            total_time = await conn.fetchval(
+                "SELECT COALESCE(SUM(duration_sec), 0) FROM music_play_logs WHERE user_id = $1",
+                user.id,
+            )
+            unique_tracks = await conn.fetchval(
+                "SELECT COUNT(DISTINCT track_title) FROM music_play_logs WHERE user_id = $1",
+                user.id,
+            )
+            first_listen = await conn.fetchval(
+                "SELECT MIN(played_at) FROM music_play_logs WHERE user_id = $1", user.id
+            )
+            last_listen = await conn.fetchval(
+                "SELECT MAX(played_at) FROM music_play_logs WHERE user_id = $1", user.id
+            )
+            top_tracks = await conn.fetch(
+                "SELECT track_title, track_url, COUNT(*) as play_count FROM music_play_logs WHERE user_id = $1 GROUP BY track_title, track_url ORDER BY play_count DESC LIMIT 5",
+                user.id,
+            )
+            top_guild = await conn.fetchrow(
+                "SELECT guild_id, COUNT(*) as play_count FROM music_play_logs WHERE user_id = $1 GROUP BY guild_id ORDER BY play_count DESC LIMIT 1",
+                user.id,
+            )
+            active_day_row = await conn.fetchrow(
+                """SELECT EXTRACT(DOW FROM played_at) AS dow, COUNT(*) as play_count
+                FROM music_play_logs WHERE user_id = $1
+                GROUP BY dow ORDER BY play_count DESC LIMIT 1""",
+                user.id,
+            )
+            recent_tracks = await conn.fetch(
+                """SELECT track_title, track_url FROM music_play_logs WHERE user_id = $1 ORDER BY played_at DESC LIMIT 10""",
+                user.id,
+            )
+
+        day_names = [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+        ]
+
+        embed = discord.Embed(
+            title=f"Music Profile: {user.display_name}",
+            color=discord.Color.green(),
+            timestamp=discord.utils.utcnow(),
+        )
+        embed.set_thumbnail(url=user.display_avatar.url)
+
+        embed.add_field(name="Total Plays", value=f"{total_tracks:,}", inline=True)
+        embed.add_field(name="Unique Tracks", value=f"{unique_tracks:,}", inline=True)
+        embed.add_field(
+            name="Time Listened", value=self.format_time(total_time), inline=True
+        )
+
+        if first_listen and last_listen:
+            first_str = (
+                first_listen.strftime("%b %d, %Y")
+                if hasattr(first_listen, "strftime")
+                else str(first_listen)[:10]
+            )
+            last_str = (
+                last_listen.strftime("%b %d, %Y")
+                if hasattr(last_listen, "strftime")
+                else str(last_listen)[:10]
+            )
+            embed.add_field(
+                name="Listening Since", value=f"{first_str} -> {last_str}", inline=False
+            )
+
+        if top_tracks:
+            lines = []
+            for i, row in enumerate(top_tracks):
+                title = (row["track_title"] or "Unknown")[:50]
+                url = row["track_url"]
+                label = f"[{title}]({url})" if url else title
+                lines.append(f"{i + 1}. {label} - **{row['play_count']}**")
+            embed.add_field(name="Top Tracks", value="\n".join(lines), inline=False)
+
+        if top_guild:
+            guild_obj = self.bot.get_guild(top_guild["guild_id"])
+            g_name = guild_obj.name if guild_obj else "Unknown Server"
+            embed.add_field(
+                name="Most Active Server",
+                value=f"{g_name} ({top_guild['play_count']:,} plays)",
+                inline=True,
+            )
+
+        if active_day_row:
+            dow_index = int(active_day_row["dow"])
+            embed.add_field(
+                name="Busiest Day",
+                value=f"{day_names[dow_index]} ({active_day_row['play_count']:,} plays)",
+                inline=True,
+            )
+
+        if recent_tracks:
+            lines = []
+            for row in recent_tracks:
+                title = (row["track_title"] or "Unknown")[:50]
+                url = row["track_url"]
+                label = f"[{title}]({url})" if url else title
+                lines.append(f"- {label}")
+            embed.add_field(
+                name="Recently Played", value="\n".join(lines), inline=False
+            )
+
+        embed.set_footer(
+            text=f"Requested by {ctx.author.name}",
+            icon_url=ctx.author.display_avatar.url,
+        )
+        await ctx.send(embed=embed)
+
+    @commands.hybrid_group(
+        name="playlist",
+        description="Manage your playlists.",
+        invoke_without_command=True,
+    )
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def playlist(self, ctx: commands.Context):
+        await ctx.send(
+            "Usage: `playlist create <name>`, `playlist add <name> <url>`, `playlist play <name>`",
+        )
+
+    @playlist.command(name="create", description="Create a music playlist.")
+    @app_commands.describe(name="The name of the playlist to create.")
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def playlist_create(self, ctx: commands.Context, name: str):
+        await ctx.typing()
+        if not self.db_pool:
+            await ctx.send(
+                "Database is currently not available, sorry. (is the database connected?)."
+            )
+            return
+        try:
+            async with self.db_pool.acquire() as conn:
+                await conn.execute(
+                    "INSERT INTO music_playlists (owner_id, name) VALUES ($1, $2)",
+                    ctx.author.id,
+                    name,
+                )
+            await ctx.send(f"Successfully created playlist with name `{name}`")
+        except asyncpg.UniqueViolationError:
+            await ctx.send("This playlist already exists.")
+
+    @playlist.command(name="add", description="Add a track to an existing playlist.")
+    @app_commands.describe(
+        name="The name of the playlist to add a track to.",
+        url="URL of the track to add.",
+    )
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def playlist_add(self, ctx: commands.Context, name: str, url: str):
+        await ctx.typing()
+        if not self.db_pool:
+            await ctx.send(
+                "Database is currently not available, sorry. (is the database connected?)"
+            )
+            return
+        async with self.db_pool.acquire() as conn:
+            pid = await conn.fetchval(
+                "SELECT id FROM music_playlists WHERE owner_id = $1 AND name = $2",
+                ctx.author.id,
+                name,
+            )
+            if not pid:
+                await ctx.send(f"You don't have a playlist named `{name}`")
+                return
+            pos = await conn.fetchval(
+                "SELECT COALESCE(MAX(position), 0) + 1 FROM music_playlist_entries WHERE playlist_id = $1",
+                pid,
+            )
+            try:
+                info = await self.fetch_yt_info(url, download=False)
+                title = info.get("title", "Unknown")
+            except Exception:
+                title = url
+            await conn.execute(
+                "INSERT INTO music_playlist_entries (playlist_id, url, title, position) VALUES ($1, $2, $3, $4)",
+                pid,
+                url,
+                title,
+                pos,
+            )
+        await ctx.send(f"Added {title} `({url})` to playlist `{name}` successfully.")
+
+    @playlist.command(name="play", description="Play a playlist.")
+    @app_commands.describe(name="The name of the playlist to play.")
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def playlist_play(self, ctx: commands.Context, name: str):
+        await ctx.typing()
+        if ctx.author.voice is None:
+            await ctx.send("You are not in a voice channel.")
+            return
+        elif ctx.voice_client and ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You are not in the same voice channel as me.")
+            return
+        if not self.db_pool:
+            await ctx.send(
+                "Database is currently not available, sorry. (is the database connected?)"
+            )
+            return
+        async with self.db_pool.acquire() as conn:
+            pid = await conn.fetchval(
+                "SELECT id FROM music_playlists WHERE owner_id = $1 AND name = $2",
+                ctx.author.id,
+                name,
+            )
+            if not pid:
+                await ctx.send(f"Playlist `{name}` does not exist.")
+                return
+            rows = await conn.fetch(
+                "SELECT url, title FROM music_playlist_entries WHERE playlist_id = $1 ORDER BY position",
+                pid,
+            )
+
+        if not await self.connect_to_channel(ctx):
+            return
+
+        if not rows:
+            await ctx.send("This playlist does not have any tracks, yet.")
+            return
+
+        state = self.get_state(ctx.guild.id)
+        for row in rows:
+            state.queue.append((row["url"], [], False, row["title"]))
+
+        await ctx.send(f"Enqueued {len(rows)} tracks from playlist `{name}`")
+        if not ctx.voice_client.is_playing() or not ctx.voice_client:
+            await self.play_next(ctx, ctx.guild.id)
+
+    @playlist.command(name="list", description="List your current playlists.")
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def playlist_list(self, ctx: commands.Context):
+        await ctx.typing()
+        if not self.db_pool:
+            await ctx.send(
+                "Database is currently not available, sorry. (is the database connected?)"
+            )
+            return
+        async with self.db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT name FROM music_playlists WHERE owner_id = $1", ctx.author.id
+            )
+        if not rows:
+            await ctx.send("You don't have any playlists, yet.")
+            return
+        names = "\n".join([r["name"] for r in rows])
+        await ctx.send(f"Here is your list of playlists:\n{names}")
+
+    @playlist.command(name="delete", description="Delete an existing playlist.")
+    @app_commands.describe(name="The playlist to delete.")
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def playlist_delete(self, ctx: commands.Context, name: str):
+        await ctx.typing()
+        if not self.db_pool:
+            await ctx.send(
+                "Database is currently not available, sorry. (is the database connected?)"
+            )
+            return
+        async with self.db_pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM music_playlists WHERE owner_id = $1 AND name = $2",
+                ctx.author.id,
+                name,
+            )
+        await ctx.send(f"Successfully deleted playlist `{name}`")
+
 
 async def setup(bot):
     await bot.add_cog(Audio(bot))

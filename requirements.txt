@@ -1,15 +1,15 @@
 aiohttp
 discord.py
 roblox
-Pillow
+pillow
 webcolors
 psutil
 colorlog
 asyncpg
-spotipy
 dateparser
 PyNaCl
 yt-dlp
 matplotlib
 jsonschema
 ollama
+davey

@@ -3,7 +3,6 @@ import copy
 import datetime
 import io
 import logging
-import os
 import random
 import textwrap
 import time
@@ -21,11 +20,6 @@ from discord.ext import commands
 import bot_info
 
 uptime_start = datetime.datetime.now(datetime.timezone.utc)
-
-# If any videos were not deleted while the bot was last up, remove them
-vid_files = [f for f in os.listdir("vids") if os.path.isfile(os.path.join("vids", f))]
-for f in vid_files:
-    os.remove(f"vids/{f}")
 
 
 async def get_prefix(bot, message: discord.Message):

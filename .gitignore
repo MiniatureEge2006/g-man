@@ -3,7 +3,6 @@ cache.json
 bot_info.json
 
 # These should be downloaded manually
-vids/*
 g-coder/executions/*
 
 !tutorial/bg.mp4
