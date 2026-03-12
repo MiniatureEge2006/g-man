@@ -334,7 +334,7 @@ class Audio(commands.Cog):
             if filters:
                 embed.add_field(name="Filters", value=", ".join(filters), inline=True)
             embed.set_footer(
-                text=f"Requested by {ctx.author.display_name}",
+                text=f"Requested by {ctx.author.name}",
                 icon_url=ctx.author.display_avatar.url,
             )
             try:
