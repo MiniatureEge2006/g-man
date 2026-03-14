@@ -253,6 +253,7 @@ CREATE TABLE IF NOT EXISTS music_playlist_entries (
     url TEXT NOT NULL,
     title TEXT,
     position INT NOT NULL,
+    duration INT DEFAULT 0,
     PRIMARY KEY (playlist_id, position)
 );
 

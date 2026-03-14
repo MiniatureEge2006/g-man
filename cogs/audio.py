@@ -196,16 +196,18 @@ class Audio(commands.Cog):
                 state.currently_playing = None
             return
 
-        url, filters, is_stream, title = state.queue.popleft()
+        url, filters, is_stream, title, requester = state.queue.popleft()
 
         if state.loop_mode == "queue" and not state.original_queue:
             state.original_queue = list(state.queue) + [
-                (url, filters, is_stream, title)
+                (url, filters, is_stream, title, requester)
             ]
 
         try:
             info = await self.fetch_yt_info(url, download=not is_stream)
-            await self._play_source(ctx, url, filters, 0, is_stream, info)
+            await self._play_source(
+                ctx, url, filters, 0, is_stream, info, requester=requester
+            )
         except Exception as e:
             if ctx:
                 await ctx.send(f"Error playing track: {e}")
@@ -220,6 +222,7 @@ class Audio(commands.Cog):
         is_stream: bool,
         info: Dict,
         file_path: Optional[str] = None,
+        requester=None,
     ):
         if not ctx:
             return
@@ -288,59 +291,66 @@ class Audio(commands.Cog):
             "info": info,
             "start_time": datetime.now(),
             "file_path": actual_file_path,
+            "requester": requester or ctx.author,
         }
 
-        await self.log_play(
-            guild_id,
-            ctx.channel.id,
-            ctx.author.id,
-            url,
-            info.get("title", "Unknown"),
-            int(duration),
-        )
+        actual_requester = requester or (ctx.author if ctx else None)
 
-        if position == 0:
-            embed = discord.Embed(
-                title=f"{'Streaming' if is_stream else 'Playing'} - {info.get('title', 'Unknown')}",
-                description=f"URL: {info.get('webpage_url', 'Unknown')}",
-                color=discord.Color.og_blurple()
-                if not is_stream
-                else discord.Color.blurple(),
-                timestamp=discord.utils.utcnow(),
+        if actual_requester:
+            await self.log_play(
+                guild_id,
+                ctx.channel.id,
+                actual_requester.id,
+                url,
+                info.get("title", "Unknown"),
+                int(duration),
             )
-            if info.get("thumbnail"):
-                embed.set_image(url=info["thumbnail"])
-            embed.add_field(
-                name="Duration", value=self.format_time(duration), inline=True
-            )
-            embed.add_field(
-                name="Uploader", value=info.get("uploader", "Unknown"), inline=True
-            )
-            if info.get("view_count"):
-                embed.add_field(
-                    name="Views", value=f"{info['view_count']:,}", inline=True
+
+            if position == 0:
+                embed = discord.Embed(
+                    title=f"{'Streaming' if is_stream else 'Playing'} - {info.get('title', 'Unknown')}",
+                    description=f"URL: {info.get('webpage_url', 'Unknown')}",
+                    color=discord.Color.og_blurple()
+                    if not is_stream
+                    else discord.Color.blurple(),
+                    timestamp=discord.utils.utcnow(),
                 )
-            if info.get("like_count"):
+                if info.get("thumbnail"):
+                    embed.set_image(url=info["thumbnail"])
                 embed.add_field(
-                    name="Likes", value=f"{info['like_count']:,}", inline=True
+                    name="Duration", value=self.format_time(duration), inline=True
                 )
-            raw_date = info.get("upload_date")
-            upload_date = (
-                datetime.strptime(raw_date, "%Y%m%d").strftime("%B %d, %Y")
-                if raw_date
-                else "Unknown"
-            )
-            embed.add_field(name="Published At", value=upload_date, inline=True)
-            if filters:
-                embed.add_field(name="Filters", value=", ".join(filters), inline=True)
-            embed.set_footer(
-                text=f"Requested by {ctx.author.name}",
-                icon_url=ctx.author.display_avatar.url,
-            )
-            try:
-                await ctx.send(embed=embed)
-            except discord.errors.Forbidden:
-                pass
+                embed.add_field(
+                    name="Uploader", value=info.get("uploader", "Unknown"), inline=True
+                )
+                if info.get("view_count"):
+                    embed.add_field(
+                        name="Views", value=f"{info['view_count']:,}", inline=True
+                    )
+                if info.get("like_count"):
+                    embed.add_field(
+                        name="Likes", value=f"{info['like_count']:,}", inline=True
+                    )
+                raw_date = info.get("upload_date")
+                upload_date = (
+                    datetime.strptime(raw_date, "%Y%m%d").strftime("%B %d, %Y")
+                    if raw_date
+                    else "Unknown"
+                )
+                embed.add_field(name="Published At", value=upload_date, inline=True)
+                if filters:
+                    embed.add_field(
+                        name="Filters", value=", ".join(filters), inline=True
+                    )
+                if actual_requester:
+                    embed.set_footer(
+                        text=f"Requested by {actual_requester.name}",
+                        icon_url=actual_requester.display_avatar.url,
+                    )
+                try:
+                    await ctx.send(embed=embed)
+                except discord.errors.Forbidden:
+                    pass
 
     async def _after_play(
         self, ctx: commands.Context, file_path: Optional[str], guild_id: int
@@ -485,7 +495,7 @@ class Audio(commands.Cog):
             queue = self.get_queue(ctx.guild.id)
             for entry in entries:
                 title = entry.get("title", "Unknown Title")
-                queue.append((entry["url"], filters_list, is_stream, title))
+                queue.append((entry["url"], filters_list, is_stream, title, ctx.author))
 
             state = self.get_state(ctx.guild.id)
             if state.loop_mode == "queue":
@@ -523,7 +533,7 @@ class Audio(commands.Cog):
                 title = info.get("title", "Unknown")
             except Exception:
                 title = url
-            state.queue.append((url, filters_list, not download, title))
+            state.queue.append((url, filters_list, not download, title, ctx.author))
             await ctx.send(f"Added {title} to the queue.")
             if state.loop_mode == "queue":
                 state.original_queue = list(state.queue)
@@ -575,7 +585,7 @@ class Audio(commands.Cog):
 
     @commands.hybrid_command(
         name="stream",
-        description="Stream an audio/song or playlist from a given URL without downloading.",
+        description="Stream an audio/song or playlist from a given URL without downloading to disk.",
         aliases=["s"],
     )
     @app_commands.describe(
@@ -803,6 +813,7 @@ class Audio(commands.Cog):
                 filters = current["filters"]
                 is_stream = current["is_stream"]
                 start_time = current.get("start_time", datetime.now())
+                requester = current.get("requester", ctx.author)
                 elapsed = (datetime.now() - start_time).total_seconds()
                 if ctx.guild.id in self.paused_times:
                     pause_start = self.paused_times[ctx.guild.id]
@@ -861,8 +872,8 @@ class Audio(commands.Cog):
                 embed.add_field(name="Published At", value=upload_date, inline=True)
                 embed.set_image(url=info.get("thumbnail", None))
                 embed.set_footer(
-                    text=f"Requested by {ctx.author}",
-                    icon_url=ctx.author.display_avatar.url,
+                    text=f"Requested by {requester.name}",
+                    icon_url=requester.display_avatar.url,
                 )
                 await ctx.send(embed=embed)
         else:
@@ -1000,14 +1011,15 @@ class Audio(commands.Cog):
                         color=discord.Color.og_blurple(),
                         timestamp=discord.utils.utcnow(),
                     )
-                    for i, (url, filters, is_stream, title) in enumerate(
+                    for i, (url, filters, is_stream, title, requester) in enumerate(
                         self.queue[start_idx:end_idx], start=start_idx + 1
                     ):
                         filter_text = f" ({', '.join(filters)})" if filters else ""
                         stream_label = " (Stream)" if is_stream else ""
+                        requester_label = f" - Requested by {requester.name}"
                         embed.add_field(
                             name=f"{i}.",
-                            value=f"[{title}]({url}){filter_text}{stream_label}",
+                            value=f"[{title}]({url}){filter_text}{stream_label}{requester_label}",
                             inline=False,
                         )
                     return embed
@@ -1302,7 +1314,7 @@ class Audio(commands.Cog):
                 user.id,
             )
             recent_tracks = await conn.fetch(
-                """SELECT track_title, track_url FROM music_play_logs WHERE user_id = $1 ORDER BY played_at DESC LIMIT 10""",
+                """SELECT track_title, track_url FROM music_play_logs WHERE user_id = $1 ORDER BY played_at DESC LIMIT 5""",
                 user.id,
             )
 
@@ -1450,12 +1462,14 @@ class Audio(commands.Cog):
                 title = info.get("title", "Unknown")
             except Exception:
                 title = url
+            duration = info.get("duration", 0) if isinstance(info, dict) else 0
             await conn.execute(
-                "INSERT INTO music_playlist_entries (playlist_id, url, title, position) VALUES ($1, $2, $3, $4)",
+                "INSERT INTO music_playlist_entries (playlist_id, url, title, position, duration) VALUES ($1, $2, $3, $4, $5)",
                 pid,
                 url,
                 title,
                 pos,
+                int(duration),
             )
         await ctx.send(f"Added {title} `({url})` to playlist `{name}` successfully.")
 
@@ -1498,10 +1512,53 @@ class Audio(commands.Cog):
 
         state = self.get_state(ctx.guild.id)
         for row in rows:
-            state.queue.append((row["url"], [], False, row["title"]))
+            state.queue.append((row["url"], [], False, row["title"], ctx.author))
 
         await ctx.send(f"Enqueued {len(rows)} tracks from playlist `{name}`")
         if not ctx.voice_client.is_playing() or not ctx.voice_client:
+            await self.play_next(ctx, ctx.guild.id)
+
+    @playlist.command(
+        name="stream", description="Stream a playlist without downloading to disk."
+    )
+    @app_commands.describe(name="The name of the playlist to stream.")
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def playlist_stream(self, ctx: commands.Context, name: str):
+        await ctx.typing()
+        if ctx.author.voice is None:
+            await ctx.send("You are not in a voice channel.")
+            return
+        elif ctx.voice_client and ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You are not in the same voice channel as me.")
+            return
+        if not self.db_pool:
+            await ctx.send(
+                "Database is currently not available, sorry. (is the database connected?)"
+            )
+            return
+        async with self.db_pool.acquire() as conn:
+            pid = await conn.fetchval(
+                "SELECT id FROM music_playlists WHERE owner_id = $1 AND name = $2",
+                ctx.author.id,
+                name,
+            )
+            if not pid:
+                await ctx.send(f"Playlist `{name}` does not exist.")
+                return
+            rows = await conn.fetch(
+                "SELECT url, title FROM music_playlist_entries WHERE playlist_id = $1 ORDER BY position",
+                pid,
+            )
+        if not await self.connect_to_channel(ctx):
+            return
+        if not rows:
+            await ctx.send("This playlist does not have any tracks, yet.")
+            return
+        state = self.get_state(ctx.guild.id)
+        for row in rows:
+            state.queue.append((row["url"], [], True, row["title"], ctx.author))
+        await ctx.send(f"Streaming {len(rows)} tracks from playlist `{name}`")
+        if not ctx.voice_client or not ctx.voice_client.is_playing():
             await self.play_next(ctx, ctx.guild.id)
 
     @playlist.command(name="list", description="List your current playlists.")
@@ -1515,13 +1572,120 @@ class Audio(commands.Cog):
             return
         async with self.db_pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT name FROM music_playlists WHERE owner_id = $1", ctx.author.id
+                """SELECT p.name, COUNT(*) AS track_count, COALESCE(SUM(e.duration), 0) AS total_duration
+                FROM music_playlists p
+                LEFT JOIN music_playlist_entries e ON e.playlist_id = p.id
+                WHERE p.owner_id = $1
+                GROUP BY p.name
+                ORDER BY p.name""",
+                ctx.author.id,
             )
         if not rows:
             await ctx.send("You don't have any playlists, yet.")
             return
-        names = "\n".join([r["name"] for r in rows])
-        await ctx.send(f"Here is your list of playlists:\n{names}")
+        embed = discord.Embed(
+            title=f"{ctx.author.display_name}'s Playlists",
+            color=discord.Color.og_blurple(),
+        )
+        lines = []
+        for r in rows:
+            duration_str = (
+                self.format_time(r["total_duration"]) if r["total_duration"] else "0:00"
+            )
+            lines.append(
+                f"**{r['name']}** - {r['track_count']} track(s), {duration_str}"
+            )
+        embed.description = "\n".join(lines)
+        embed.set_footer(
+            text=f"Requested by {ctx.author.name}",
+            icon_url=ctx.author.display_avatar.url,
+        )
+        await ctx.send(embed=embed)
+
+    @playlist.command(name="view", description="View the contents of a playlist.")
+    @app_commands.describe(name="The name of the playlist to view.")
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def playlist_view(self, ctx: commands.Context, name: str):
+        await ctx.typing()
+        if not self.db_pool:
+            await ctx.send(
+                "Database is currently not available, sorry. (is the database connected?)"
+            )
+            return
+        async with self.db_pool.acquire() as conn:
+            pid = await conn.fetchval(
+                "SELECT id FROM music_playlists WHERE owner_id = $1 AND name = $2",
+                ctx.author.id,
+                name,
+            )
+            if not pid:
+                await ctx.send(f"You don't have a playlist named `{name}`")
+                return
+            rows = await conn.fetch(
+                "SELECT position, title, url, duration FROM music_playlist_entries WHERE playlist_id = $1 ORDER BY position",
+                pid,
+            )
+        if not rows:
+            await ctx.send(f"Playlist `{name}` has no tracks yet.")
+            return
+        embed = discord.Embed(
+            title=f"Playlist: {name}", color=discord.Color.og_blurple()
+        )
+        lines = []
+        for row in rows:
+            title = (row["title"] or "Unknown")[:50]
+            label = f"[{title}]({row['url']})" if row["url"] else title
+            duration_str = self.format_time(row["duration"]) if row["duration"] else "?"
+            lines.append(f"`{row['position']}.` {label} - {duration_str}")
+        embed.description = "\n".join(lines)
+        embed.set_footer(
+            text=f"{len(rows)} tracks(s) | Requested by {ctx.author.name}",
+            icon_url=ctx.author.display_avatar.url,
+        )
+        await ctx.send(embed=embed)
+
+    @playlist.command(
+        name="remove", description="Remove a track from a playlist by its position."
+    )
+    @app_commands.describe(
+        name="The name of the playlist.",
+        position="The position of the track to remove.",
+    )
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def playlist_remove(self, ctx: commands.Context, name: str, position: int):
+        await ctx.typing()
+        if not self.db_pool:
+            await ctx.send(
+                "Database is currently not available, sorry. (is the database connected?"
+            )
+            return
+        async with self.db_pool.acquire() as conn:
+            pid = await conn.fetchval(
+                "SELECT id FROM music_playlists WHERE owner_id = $1 AND name = $2",
+                ctx.author.id,
+                name,
+            )
+            if not pid:
+                await ctx.send(f"You don't have a playlist named `{name}`")
+                return
+            deleted = await conn.fetchval(
+                "DELETE FROM music_playlist_entries WHERE playlist_id = $1 AND position = $2 RETURNING title",
+                pid,
+                position,
+            )
+            if not deleted:
+                await ctx.send(
+                    f"No track at position `{position}` in playlist `{name}`"
+                )
+                return
+            await conn.execute(
+                "UPDATE music_playlist_entries SET position = position - 1 WHERE playlist_id = $1 AND position > $2",
+                pid,
+                position,
+            )
+        await ctx.send(
+            f"Removed track `{deleted}` (position {position}) from playlist `{name}`"
+        )
 
     @playlist.command(name="delete", description="Delete an existing playlist.")
     @app_commands.describe(name="The playlist to delete.")
