@@ -105,14 +105,32 @@ bot = commands.AutoShardedBot(
 )
 
 
+class NestedColonFormatter(colorlog.ColoredFormatter):
+    def format(self, record):
+        parts = record.name.split(".")
+
+        if len(parts) == 1:
+            record.name = parts[0]
+        else:
+            name = parts[0]
+            for i, part in enumerate(parts[1:], start=1):
+                name += ":" * i + part
+            record.name = name
+
+        return super().format(record)
+
+
 def setup_logger():
-    log_format = "%(log_color)s%(asctime)s - %(levelname)s - %(name)s - %(message)s"
-    logger = logging.getLogger()
+    log_format = "%(log_color)s[%(asctime)s] [%(levelname)s] %(name)s => %(message)s"
+    logger = logging.getLogger("gman")
+    logger.setLevel(logging.INFO)
     handler = logging.StreamHandler()
-    formatter = colorlog.ColoredFormatter(log_format)
+    formatter = NestedColonFormatter(log_format)
     handler.setFormatter(formatter)
     logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
+    discord_logger = logging.getLogger("discord")
+    discord_logger.setLevel(logging.INFO)
+    discord_logger.addHandler(handler)
 
 
 # Loads extensions, returns string saying what reloaded
@@ -327,7 +345,7 @@ async def check_access(ctx: commands.Context):
 # Set up stuff
 @bot.event
 async def on_ready():
-    logger = logging.getLogger()
+    logger = logging.getLogger("gman.on.ready")
     global extensions
     try:
         logger.info(await reload_extensions(extensions))
@@ -430,7 +448,7 @@ async def on_message_edit(before: discord.Message, after: discord.Message):
 
 @bot.event
 async def on_command(ctx: commands.Context):
-    logger = logging.getLogger()
+    logger = logging.getLogger("gman.on.command")
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     user = f"{ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
     guild = f"{ctx.guild.name} (ID: {ctx.guild.id})" if ctx.guild else "DMs"
@@ -477,7 +495,8 @@ async def on_command(ctx: commands.Context):
 # Command error
 @bot.event
 async def on_command_error(ctx: commands.Context, error):
-    logger = logging.getLogger()
+    logger = logging.getLogger("gman.on.command.error")
+    logger.setLevel(logging.DEBUG)
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     user = f"{ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
     guild = f"{ctx.guild.name} (ID: {ctx.guild.id})" if ctx.guild else "DMs"
@@ -545,7 +564,7 @@ async def on_command_error(ctx: commands.Context, error):
 
 @bot.event
 async def on_command_completion(ctx: commands.Context):
-    logger = logging.getLogger()
+    logger = logging.getLogger("gman.on.command.completion")
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     user = f"{ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
     guild = f"{ctx.guild.name} (ID: {ctx.guild.id})" if ctx.guild else "DMs"
@@ -581,25 +600,25 @@ async def on_command_completion(ctx: commands.Context):
 
 @bot.event
 async def on_guild_join(guild: discord.Guild):
-    logger = logging.getLogger()
+    logger = logging.getLogger("gman.on.guild.join")
     logger.info(f"Joined guild {guild.name} (ID: {guild.id})")
 
 
 @bot.event
 async def on_guild_remove(guild: discord.Guild):
-    logger = logging.getLogger()
+    logger = logging.getLogger("gman.on.guild.remove")
     logger.info(f"Removed from guild {guild.name} (ID: {guild.id})")
 
 
 @bot.event
 async def on_guild_unavailable(guild: discord.Guild):
-    logger = logging.getLogger()
+    logger = logging.getLogger("gman.on.guild.unavailable")
     logger.info(f"Guild unavailable: {guild.name} (ID: {guild.id})")
 
 
 @bot.event
 async def on_guild_available(guild: discord.Guild):
-    logger = logging.getLogger()
+    logger = logging.getLogger("gman.on.guild.available")
     logger.info(f"Guild available: {guild.name} (ID: {guild.id})")
 
 
@@ -629,8 +648,8 @@ async def ping(ctx: commands.Context):
 
 @bot.command(
     name="sudo",
-    description="Execute a command as another user. Use sudo! to bypass checks and permissions.",
-    aliases=["sudo!"],
+    description="Execute a command as another user. Append an ! at the end of the command name to bypass checks and permissions.",
+    aliases=["sudo!", "doas", "doas!"],
 )
 @bot_info.is_owner()
 async def sudo(
@@ -673,7 +692,7 @@ async def sync(
     guilds: commands.Greedy[discord.Object],
     spec: Optional[Literal["~", "*", "^"]] = None,
 ) -> None:
-    logger = logging.getLogger()
+    logger = logging.getLogger("gman.commands.owner.sync")
     message = await ctx.send("Syncing...")
     if not guilds:
         if spec == "~":
@@ -2067,7 +2086,7 @@ async def setup(bot):
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @bot_info.is_owner()
 async def eval(ctx, *, code):
-    logger = logging.getLogger()
+    logger = logging.getLogger("gman.commands.owner.eval")
     code = cleanup_code(code)
     result = None
 

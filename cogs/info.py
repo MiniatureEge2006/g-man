@@ -91,12 +91,12 @@ class Info(commands.Cog):
             raise ValueError(f"Invalid color format: {color_input}")
 
     @staticmethod
-    def hsl_to_rgb(h, s, l):
+    def hsl_to_rgb(h, s, ll):
         s /= 100
-        l /= 100
-        c = (1 - abs(2 * l - 1)) * s
+        ll /= 100
+        c = (1 - abs(2 * ll - 1)) * s
         x = c * (1 - abs((h / 60) % 2 - 1))
-        m = l - c / 2
+        m = ll - c / 2
 
         if 0 <= h < 60:
             r, g, b = c, x, 0
@@ -172,12 +172,12 @@ class Info(commands.Cog):
     def rgba_to_hsl(r: int, g: int, b: int, a: float):
         r, g, b = r / 255, g / 255, b / 255
         max_val, min_val = max(r, g, b), min(r, g, b)
-        l = (max_val + min_val) / 2
+        ll = (max_val + min_val) / 2
         if max_val == min_val:
             h = s = 0
         else:
             d = max_val - min_val
-            s = d / (2 - max_val - min_val) if l > 0.5 else d / (max_val + min_val)
+            s = d / (2 - max_val - min_val) if ll > 0.5 else d / (max_val + min_val)
             if max_val == r:
                 h = (g - b) / d + (6 if g < b else 0)
             elif max_val == g:
@@ -185,7 +185,7 @@ class Info(commands.Cog):
             elif max_val == b:
                 h = (r - g) / d + 4
             h = fmod(h * 60, 360)
-        return round(h), round(s * 100), round(l * 100), round(a * 100)
+        return round(h), round(s * 100), round(ll * 100), round(a * 100)
 
     @staticmethod
     def rgba_to_hsv(r: int, g: int, b: int, a: float):
@@ -1104,7 +1104,6 @@ class Info(commands.Cog):
                             data = await response.json()
                             city = data["name"]
                             country = data["sys"]["country"]
-                            weather = data["weather"][0]["main"]
                             description = data["weather"][0]["description"].capitalize()
                             temperature = data["main"]["temp"]
                             pressure = data["main"]["pressure"]
@@ -1204,14 +1203,14 @@ class Info(commands.Cog):
                     hex_color = f"#{r:02x}{g:02x}{b:02x}"
                 elif color.lower().startswith("hsla("):
                     hsla_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
-                    h, s, l, a = hsla_values
-                    r, g, b = self.hsl_to_rgb(h, s, l)
+                    h, s, h, a = hsla_values
+                    r, g, b = self.hsl_to_rgb(h, s, h)
                     hex_color = f"#{r:02x}{g:02x}{b:02x}"
                 elif color.lower().startswith("hsl("):
                     hsl_values = list(map(float, re.findall(r"\d+\.?\d*", color)))
-                    h, s, l = hsl_values
+                    h, s, h = hsl_values
                     a = 1.0
-                    r, g, b = self.hsl_to_rgb(h, s, l)
+                    r, g, b = self.hsl_to_rgb(h, s, h)
                     hex_color = f"#{r:02x}{g:02x}{b:02x}"
                 elif color.lower().startswith("hsva("):
                     hsva_values = list(map(float, re.findall(r"\d+\.?\d*", color)))

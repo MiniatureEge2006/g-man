@@ -13,8 +13,6 @@ from discord.ext import commands
 
 import bot_info
 
-MAX_CONVERSATION_HISTORY_LENGTH = 5
-
 
 class AI(commands.Cog):
     def __init__(self, bot):
@@ -209,6 +207,9 @@ class AI(commands.Cog):
             web_mode = re.search(r"(^|\s)--web($|\s)", prompt) is not None
             if web_mode:
                 prompt = re.sub(r"(^|\s)--web($|\s)", " ", prompt).strip()
+            stream_mode = re.search(r"(^|\s)--stream($|\s)", prompt) is not None
+            if stream_mode:
+                prompt = re.sub(r"(^|\s)--stream($|\s)", " ", prompt).strip()
             use_match = re.search(r"(^|\s)--use\s+(\S+)", prompt)
             model_name = use_match.group(2) if use_match else None
             if use_match:
@@ -224,7 +225,22 @@ class AI(commands.Cog):
             messages.append({"role": "user", "content": prompt})
 
             if user_history:
-                messages[1:1] = user_history[-MAX_CONVERSATION_HISTORY_LENGTH:]
+                messages[1:1] = user_history
+
+            if stream_mode and not web_mode:
+                final_content = await self.stream_ai_response(
+                    ctx, messages, think_mode, show_thinking, model_name, start_time
+                )
+                if final_content is None:
+                    return
+                user_history.extend(
+                    [
+                        {"role": "user", "content": prompt},
+                        {"role": "assistant", "content": final_content},
+                    ]
+                )
+                await self.save_conversation_history(conversation_key, user_history)
+                return
 
             response = await self.get_ai_response(
                 messages, think_mode, web_mode, model_name
@@ -285,24 +301,19 @@ class AI(commands.Cog):
                                 url=f"https://discord.com/users/{ctx.author.id}",
                             )
                             embed.set_footer(
-                                text=f"AI Response took {time.time() - start_time:.2f} seconds",
+                                text=f"AI response took {time.time() - start_time:.2f} seconds",
                                 icon_url="https://ollama.com/public/og.png",
                             )
                             await ctx.reply(embed=embed)
                         else:
                             await ctx.reply(text)
-                    new_history = (
-                        user_history[-MAX_CONVERSATION_HISTORY_LENGTH * 2 :]
-                        if user_history
-                        else []
-                    )
-                    new_history.extend(
+                    user_history.extend(
                         [
                             {"role": "user", "content": prompt},
                             {"role": "assistant", "content": final_content},
                         ]
                     )
-                    await self.save_conversation_history(conversation_key, new_history)
+                    await self.save_conversation_history(conversation_key, user_history)
                     return
                 except Exception:
                     pass
@@ -319,28 +330,129 @@ class AI(commands.Cog):
                     url=f"https://discord.com/users/{ctx.author.id}",
                 )
                 embed.set_footer(
-                    text=f"AI Response took {time.time() - start_time:.2f} seconds",
+                    text=f"AI response took {time.time() - start_time:.2f} seconds",
                     icon_url="https://ollama.com/public/og.png",
                 )
                 await ctx.reply(embed=embed)
             else:
                 await ctx.reply(display_content)
 
-            new_history = (
-                user_history[-MAX_CONVERSATION_HISTORY_LENGTH * 2 :]
-                if user_history
-                else []
-            )
-            new_history.extend(
+            user_history.extend(
                 [
                     {"role": "user", "content": prompt},
                     {"role": "assistant", "content": final_content},
                 ]
             )
-            await self.save_conversation_history(conversation_key, new_history)
+            await self.save_conversation_history(conversation_key, user_history)
 
         except Exception as e:
             raise commands.CommandError(str(e))
+
+    async def stream_ai_response(
+        self,
+        ctx: commands.Context,
+        messages: list,
+        think_mode: bool = False,
+        show_thinking: bool = False,
+        model_name: Optional[str] = None,
+        start_time: float = None,
+    ) -> Optional[str]:
+        EDIT_INTERVAL = 2
+        PLACEHOLDER = "*Generating...*"
+
+        try:
+            ollama_client = ollama.AsyncClient()
+            stream = await ollama_client.chat(
+                model=model_name or bot_info.data["ollama_model"],
+                messages=messages,
+                think=think_mode,
+                stream=True,
+            )
+
+            sent_message = await ctx.reply(PLACEHOLDER)
+            accumulated = ""
+            accumulated_thinking = ""
+            thinking_done = False
+            last_edit = time.time()
+
+            async for chunk in stream:
+                raw_thinking = getattr(chunk.message, "thinking", None)
+                if raw_thinking and isinstance(raw_thinking, str):
+                    accumulated_thinking += raw_thinking
+
+                raw = chunk.message.content
+                if isinstance(raw, list):
+                    delta = "".join(
+                        part.get("text", "") if isinstance(part, dict) else str(part)
+                        for part in raw
+                    )
+                elif isinstance(raw, str):
+                    delta = raw
+                else:
+                    delta = ""
+
+                if delta and accumulated_thinking:
+                    thinking_done = True
+                accumulated += delta
+
+                now = time.time()
+                if now - last_edit >= EDIT_INTERVAL:
+                    if show_thinking and accumulated_thinking:
+                        if thinking_done:
+                            display = f"**Thinking...**\n{accumulated_thinking}\n**...done thinking.**\n\n{accumulated}"
+                        else:
+                            display = f"**Thinking...**\n{accumulated_thinking}"
+                    else:
+                        display = accumulated
+                    if display.strip():
+                        try:
+                            await sent_message.edit(content=display[:2000])
+                        except discord.HTTPException:
+                            pass
+                        last_edit = now
+
+            if not accumulated:
+                await sent_message.edit(content="AI returned no content.")
+                return None
+
+            if show_thinking and accumulated_thinking:
+                display_content = f"**Thinking...**\n{accumulated_thinking}\n**...done thinking.**\n\n{accumulated}"
+            else:
+                display_content = accumulated
+
+            if len(display_content) > 2000:
+                embed = discord.Embed(
+                    title="G-AI Response",
+                    description=display_content[:4096],
+                    color=discord.Color.blurple(),
+                )
+                embed.set_author(
+                    name=f"{ctx.author.name}#{ctx.author.discriminator}",
+                    icon_url=ctx.author.display_avatar.url,
+                    url=f"https://discord.com/users/{ctx.author.id}",
+                )
+                if start_time:
+                    embed.set_footer(
+                        text=f"AI response took {time.time() - start_time:.2f} seconds",
+                        icon_url="https://ollama.com/public/og.png",
+                    )
+                await sent_message.edit(content=None, embed=embed)
+            else:
+                await sent_message.edit(content=display_content)
+
+            return accumulated
+        except ollama.ResponseError as e:
+            if e.status_code == 404:
+                ollama_client2 = ollama.AsyncClient()
+                models = [m.model for m in (await ollama_client2.list()).models]
+                raise commands.CommandError(
+                    f"Model `{model_name}` not found. Available models:\n `{'\n'.join(models)}`"
+                )
+            raise commands.CommandError(
+                f"Ollama API error (status {e.status_code}): {str(e)}"
+            )
+        except Exception as e:
+            raise commands.CommandError(f"AI stream failed: {str(e)}")
 
     async def get_ai_response(
         self,

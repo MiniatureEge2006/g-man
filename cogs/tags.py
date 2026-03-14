@@ -777,7 +777,7 @@ class MediaProcessor:
                 data = json.loads(output)
                 stream = data["streams"][0]
                 return (int(stream["width"]), int(stream["height"]))
-            except:
+            except Exception:
                 return (0, 0)
         return (0, 0)
 
@@ -811,7 +811,7 @@ class MediaProcessor:
             }
 
             if "_" in dim_str or any(
-                c.isalpha() and c.islower() for c in dim_str if not c in ["w", "h"]
+                c.isalpha() and c.islower() for c in dim_str if c not in ["w", "h"]
             ):
                 parts = (
                     dim_str.split("_")
@@ -1336,7 +1336,7 @@ class MediaProcessor:
 
             return (width, height, duration, has_audio)
 
-        except Exception as e:
+        except Exception:
             return (1, 1, 0.0, False)
 
     async def execute_media_script(self, script):
@@ -1598,16 +1598,23 @@ class MediaProcessor:
 
         input_paths = [Path(self.media_cache[k]) for k in input_keys]
 
-        is_video = lambda p: (
-            p.suffix.lower() in (".mp4", ".mov", ".webm", ".mkv", ".avi", ".wmv")
-        )
-        is_audio = lambda p: (
-            p.suffix.lower()
-            in (".mp3", ".wav", ".ogg", ".opus", ".flac", ".m4a", ".wma", ".mka")
-        )
-        is_image = lambda p: (
-            p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".gif")
-        )
+        def is_video(p: Path) -> bool:
+            return p.suffix.lower() in (".mp4", ".mov", ".webm", ".mkv", ".avi", ".wmv")
+
+        def is_audio(p: Path) -> bool:
+            return p.suffix.lower() in (
+                ".mp3",
+                ".wav",
+                ".ogg",
+                ".opus",
+                ".flac",
+                ".m4a",
+                ".wma",
+                ".mka",
+            )
+
+        def is_image(p: Path) -> bool:
+            return p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".gif")
 
         media_info = []
         all_gifs = True
@@ -2710,7 +2717,7 @@ class MediaProcessor:
         preserve_length = kwargs.get("preserve_length", True)
 
         if base_key not in self.media_cache or overlay_key not in self.media_cache:
-            return f"Error: One of the media keys not found"
+            return "Error: One of the media keys not found"
 
         base_path = Path(self.media_cache[base_key])
         overlay_path = Path(self.media_cache[overlay_key])
@@ -2814,10 +2821,10 @@ class MediaProcessor:
                 f"[tmp]pad=width={out_w}:height={out_h}:x=(ow-iw)/2:y=(oh-ih)/2:color={pad_color}[v]"
             )
         else:
-            filters.append(f"[tmp]format=rgba[v]")
+            filters.append("[tmp]format=rgba[v]")
 
         if has_audio_base and has_audio_overlay:
-            filters.append(f"[0:a][1:a]amix=inputs=2:duration=longest[a]")
+            filters.append("[0:a][1:a]amix=inputs=2:duration=longest[a]")
             cmd += ["-filter_complex", ";".join(filters)]
             cmd += ["-map", "[v]", "-map", "[a]"]
         else:
@@ -3550,7 +3557,7 @@ class MediaProcessor:
 
         audio_filter = []
         if loop_audio and not is_image:
-            audio_filter.append(f"[1:a]aloop=loop=-1:size=2e+9,asetpts=N/SR/TB[looped]")
+            audio_filter.append("[1:a]aloop=loop=-1:size=2e+9,asetpts=N/SR/TB[looped]")
             audio_input = "[looped]"
         else:
             audio_input = "[1:a]"
@@ -3561,7 +3568,7 @@ class MediaProcessor:
                 [
                     f"[0:a]aformat=sample_fmts=fltp,volume={volume}[a0]",
                     f"{audio_input}aformat=sample_fmts=fltp,volume={volume}[a1]",
-                    f"[a0][a1]amix=inputs=2:duration=longest[a]",
+                    "[a0][a1]amix=inputs=2:duration=longest[a]",
                 ]
             )
         else:
@@ -3757,7 +3764,7 @@ class MediaProcessor:
 
         filter_parts = [
             f"[0:v]format=yuva420p,fade=t=in:st=0:d={duration}:alpha=1[fg];",
-            f"[1:v][fg]overlay=format=auto,pad=width=ceil(iw/2)*2:height=ceil(ih/2)*2[v]",
+            "[1:v][fg]overlay=format=auto,pad=width=ceil(iw/2)*2:height=ceil(ih/2)*2[v]",
         ]
 
         if has_audio:
@@ -3845,7 +3852,7 @@ class MediaProcessor:
 
         filter_complex_parts = [
             f"[0:v]format=yuva420p,fade=t=out:st={start_time}:d={duration}:alpha=1[fg];",
-            f"[1:v][fg]overlay=format=auto,pad=width=ceil(iw/2)*2:height=ceil(ih/2)*2[v]",
+            "[1:v][fg]overlay=format=auto,pad=width=ceil(iw/2)*2:height=ceil(ih/2)*2[v]",
         ]
 
         if has_audio:
@@ -4519,7 +4526,7 @@ class Tags(commands.Cog):
                                 filename = os.path.basename(path)
                                 files.append(discord.File(data, filename=filename))
                                 os.remove(path)
-                            except Exception as e:
+                            except Exception:
                                 continue
 
                     if files:
@@ -4644,7 +4651,6 @@ class Tags(commands.Cog):
                 * Example: `{ai:hello}`
             """
             try:
-                MAX_CONVERSATION_HISTORY_LENGTH = 5
                 ai = ctx.bot.get_cog("AI")
                 if not ai:
                     return "[AI error: AI cog not loaded]"
@@ -4712,7 +4718,7 @@ class Tags(commands.Cog):
                 history = await ai.get_conversation_history(conv_key)
 
                 if history:
-                    messages.extend(history[-MAX_CONVERSATION_HISTORY_LENGTH:])
+                    messages.extend(history)
 
                 messages.append({"role": "user", "content": prompt})
                 ollama_client = ollama.AsyncClient(
@@ -4784,15 +4790,11 @@ class Tags(commands.Cog):
                             f"{final_content}"
                         )
 
-                    new_history = (
-                        history[-MAX_CONVERSATION_HISTORY_LENGTH * 2 :]
-                        if history
-                        else []
-                    ) + [
+                    user_history = [
                         {"role": "user", "content": prompt},
                         {"role": "assistant", "content": final_content},
                     ]
-                    await ai.save_conversation_history(conv_key, new_history)
+                    await ai.save_conversation_history(conv_key, user_history)
 
                     return display_content
 
@@ -5464,7 +5466,7 @@ class Tags(commands.Cog):
                     except ValueError:
                         try:
                             return datetime.fromtimestamp(int(d)).date()
-                        except:
+                        except Exception:
                             raise ValueError(f"Invalid date: {d}")
 
                 start_date = parse_date(start_str)
@@ -5583,7 +5585,7 @@ class Tags(commands.Cog):
             """
             try:
                 evaluated_val = ast.literal_eval(val)
-            except:
+            except Exception:
                 evaluated_val = val
             return type(evaluated_val).__name__
 
@@ -5871,7 +5873,7 @@ class Tags(commands.Cog):
             }
 
             for cond in conditions:
-                l, o, r, t = cond
+                ll, o, r, t = cond
                 negate = False
 
                 if o.startswith("!") and o[1:] in ops:
@@ -5883,7 +5885,7 @@ class Tags(commands.Cog):
                     return f"[error: unknown operator '{o}']"
 
                 try:
-                    result = func(l, r)
+                    result = func(ll, r)
                 except Exception as e:
                     return f"[error: failed to evaluate condition - {str(e)}]"
 
@@ -8206,7 +8208,7 @@ class Tags(commands.Cog):
                 await interaction.followup.send(
                     f"Interaction failed: {str(e)}", ephemeral=True
                 )
-            except:
+            except Exception:
                 await interaction.channel.send(f"Interaction failed: {str(e)}")
 
     async def handle_button(self, interaction: discord.Interaction, custom_id: str):
@@ -8258,7 +8260,6 @@ class Tags(commands.Cog):
 
         parts = formatted_str.split()
         command_name = parts[0]
-        args = " ".join(parts[1:])
 
         command = self.bot.get_command(command_name)
         if not command:

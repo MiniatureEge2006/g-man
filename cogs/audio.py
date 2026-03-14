@@ -41,7 +41,7 @@ class Audio(commands.Cog):
             "restrictfilenames": True,
             "quiet": True,
             "no_warnings": True,
-            "extract_flat": "in_playlist",
+            "extract_flat": True,
         }
         self.default_volume = 0.25
 
@@ -466,6 +466,8 @@ class Audio(commands.Cog):
         self, ctx: commands.Context, url: str, filters=None, is_stream: bool = False
     ):
         try:
+            if not await self.connect_to_channel(ctx):
+                return
 
             def sync_playlist_process():
                 with yt_dlp.YoutubeDL(self.ydl_options) as ydl:
@@ -479,10 +481,11 @@ class Audio(commands.Cog):
                     return await self.play_audio(ctx, url, filters)
 
             entries = [e for e in info["entries"] if e]
+            filters_list = filters.split(",") if filters else []
             queue = self.get_queue(ctx.guild.id)
             for entry in entries:
                 title = entry.get("title", "Unknown Title")
-                queue.append((entry["url"], filters, is_stream, title))
+                queue.append((entry["url"], filters_list, is_stream, title))
 
             state = self.get_state(ctx.guild.id)
             if state.loop_mode == "queue":
@@ -495,7 +498,7 @@ class Audio(commands.Cog):
                 if is_stream:
                     await self.play_next_stream(ctx)
                 else:
-                    await self.play_next(ctx)
+                    await self.play_next(ctx, ctx.guild.id)
         except Exception as e:
             await ctx.send(f"Error processing playlist: {e}")
 
