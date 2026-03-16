@@ -848,7 +848,7 @@ class Audio(commands.Cog):
                 )
                 embed.add_field(name="Length", value=formatted_position, inline=True)
                 embed.add_field(
-                    name="Author", value=info.get("uploader", "Unknown"), inline=True
+                    name="Uploader", value=info.get("uploader", "Unknown"), inline=True
                 )
                 embed.add_field(
                     name="Channel",
