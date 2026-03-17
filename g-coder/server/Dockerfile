@@ -1,48 +1,40 @@
-FROM python:3.13.3-slim
+FROM gentoo/stage3:amd64-openrc
+
+RUN echo 'dev-lang/kotlin-bin' >> /etc/portage/package.accept_keywords/accept_keywords
+RUN echo 'dev-dotnet/libgdiplus cairo' >> /etc/portage/package.use/useflags
+RUN getuto
+RUN emerge --sync
+RUN emerge --getbinpkg --update --deep --newuse @world
+RUN emerge --getbinpkg --noreplace \
+    dev-lang/python \
+    dev-python/pip \
+    dev-lang/go \
+    dev-lang/rust-bin \
+    dev-lang/ruby \
+    dev-lang/lua \
+    dev-lang/mono \
+    dev-lang/nim \
+    dev-lang/zig-bin \
+    dev-lang/php \
+    dev-lang/kotlin-bin \
+    dev-vcs/git \
+    dev-java/openjdk-bin \
+    app-portage/gentoolkit \
+    net-misc/curl \
+    net-misc/wget \
+    net-libs/nodejs \
+    app-misc/jq \
+    app-misc/fastfetch \
+    media-video/ffmpeg \
+    media-gfx/imagemagick \
+    media-sound/sox
 
 
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    git \
-    jq \
-    xz-utils \
-    ffmpeg \
-    frei0r-plugins \
-    imagemagick \
-    sox \
-    nodejs \
-    openjdk-17-jdk-headless \
-    kotlin \
-    npm \
-    php \
-    ruby-full \
-    lua5.4 \
-    golang \
-    clang \
-    gcc \
-    g++ \
-    make \
-    cmake \
-    mono-complete \
-    bash \
-    cargo \
-    nim \
-    libc6-dev \
-    libssl-dev \
-    zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN curl -LO https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz \
-    && tar -xf zig-x86_64-linux-0.15.2.tar.xz \
-    && mv zig-x86_64-linux-0.15.2 /opt/zig \
-    && ln -s /opt/zig/zig /usr/local/bin/zig \
-    && rm zig-x86_64-linux-0.15.2.tar.xz
 RUN groupadd -g 1000 gcoder && useradd -r -u 1000 -g gcoder -m -d /home/gcoder gcoder
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt && rm requirements.txt
-RUN pip install numpy requests pillow typed-ffmpeg yt-dlp[curl-cffi,default] pyvips[binary]
-RUN npm install -g typescript node ts-node @types/node mathjs imagescript deno
+RUN pip install --break-system-packages --no-cache-dir -r requirements.txt && rm requirements.txt
+RUN pip install --break-system-packages numpy requests pillow typed-ffmpeg yt-dlp[curl-cffi,default] pyvips[binary]
+RUN npm install -g typescript ts-node @types/node mathjs imagescript deno
 ENV NODE_PATH=/usr/local/lib/node_modules
 USER gcoder
 RUN mkdir -p /home/gcoder/input && \
