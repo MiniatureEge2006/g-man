@@ -225,7 +225,7 @@ class Code(commands.Cog):
             view.language = language
 
             embed.set_author(
-                name=f"{ctx.author.name}",
+                name=f"{ctx.author.name}#{ctx.author.discriminator}",
                 icon_url=ctx.author.display_avatar.url,
                 url=f"https://discord.com/users/{ctx.author.id}",
             )
@@ -272,6 +272,9 @@ class Code(commands.Cog):
         language = {
             "py": "python",
             "sh": "bash",
+            "fish": "fish",
+            "nushell": "nu",
+            "nu": "nu",
             "js": "javascript",
             "node": "javascript",
             "ts": "typescript",
@@ -301,7 +304,7 @@ class Code(commands.Cog):
 
         if not ctx.interaction and language == "bash" and code is None:
             await ctx.send(
-                "Available languages: `python (py)`, `bash (sh)`, `javascript (node, js)`, `typescript (ts)`, `php`, `ruby (rb)`, `lua`, `go`, `rust (rs)`, `c`, `c++ (cpp)`, `c# (cs, csharp)`, `zig`, `java`, `kotlin (kt)`, `nim`"
+                "Available languages: `python (py)`, `bash (sh)`, `fish`, `nu (nushell)`, `javascript (node, js)`, `typescript (ts)`, `php`, `ruby (rb)`, `lua`, `go`, `rust (rs)`, `c`, `c++ (cpp)`, `c# (cs, csharp)`, `zig`, `java`, `kotlin (kt)`, `nim`"
             )
             return
 
@@ -314,6 +317,9 @@ class Code(commands.Cog):
                 language = {
                     "py": "python",
                     "sh": "bash",
+                    "fish": "fish",
+                    "nushell": "nu",
+                    "nu": "nu",
                     "js": "javascript",
                     "node": "javascript",
                     "ts": "typescript",

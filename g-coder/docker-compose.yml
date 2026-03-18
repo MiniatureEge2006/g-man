@@ -1,6 +1,6 @@
 services:
   server:
-    build: 
+    build:
       context: ./server
       dockerfile: Dockerfile
     user: "1000:1000"
@@ -9,8 +9,6 @@ services:
     restart: unless-stopped
     volumes:
       - ./executions:/home/gcoder
-    environment:
-      - FILE_RETENTION_MINUTES=30
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s

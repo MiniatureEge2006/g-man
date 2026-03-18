@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import shutil
+import tempfile
 import time
 import traceback
 from contextlib import asynccontextmanager
@@ -12,11 +13,12 @@ from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadF
 from fastapi.responses import FileResponse
 
 APP_USER = "gcoder"
-EXECUTION_DIR = Path("/home/gcoder")
-INPUT_DIR = EXECUTION_DIR / "input"
-OUTPUT_DIR = EXECUTION_DIR / "output"
+EXECUTION_BASE = Path("/home/gcoder")
+STAGING_DIR = EXECUTION_BASE / "staging"
 ALLOWED_LANGUAGES = [
     "bash",
+    "fish",
+    "nu",
     "python",
     "javascript",
     "typescript",
@@ -36,14 +38,12 @@ ALLOWED_LANGUAGES = [
 
 
 def ensure_dirs():
-    EXECUTION_DIR.mkdir(mode=0o700, exist_ok=True)
-    INPUT_DIR.mkdir(mode=0o700, exist_ok=True)
-    OUTPUT_DIR.mkdir(mode=0o700, exist_ok=True)
+    EXECUTION_BASE.mkdir(mode=0o700, exist_ok=True)
+    STAGING_DIR.mkdir(mode=0o700, exist_ok=True)
 
     if os.getuid() == 0:
-        os.chown(EXECUTION_DIR, 1000, 1000)
-        os.chown(INPUT_DIR, 1000, 1000)
-        os.chown(OUTPUT_DIR, 1000, 1000)
+        os.chown(EXECUTION_BASE, 1000, 1000)
+        os.chown(STAGING_DIR, 1000, 1000)
 
 
 @asynccontextmanager
@@ -56,7 +56,7 @@ app = FastAPI(lifespan=lifespan)
 
 
 def safe_delete(path: Path):
-    if path in [INPUT_DIR, OUTPUT_DIR]:
+    if path in [STAGING_DIR, EXECUTION_BASE]:
         return False
     for _ in range(3):
         try:
@@ -72,33 +72,36 @@ def safe_delete(path: Path):
 
 
 async def validate_file(file: UploadFile):
-    file.file.seek(0, os.SEEK_END)
-    file.file.seek(0)
-    if "../" in file.filename or "/" in file.filename:
+    safe_name = Path(file.filename).name
+    if not safe_name or safe_name != file.filename:
         raise HTTPException(400, detail="Invalid filename")
+    file.filename = safe_name
 
 
 async def execute_code(language: str, code: str, files: List[UploadFile]):
     ensure_dirs()
-    work_dir = EXECUTION_DIR
-    for item in work_dir.iterdir():
-        if item.name not in ["input", "output"] and item.is_dir():
-            safe_delete(item)
-        elif item.name not in ["input", "output"] and item.is_file():
-            item.unlink(missing_ok=True)
+    work_dir = Path(tempfile.mkdtemp(dir=EXECUTION_BASE, prefix="run_"))
+    work_dir.chmod(0o700)
+    input_dir = work_dir / "input"
+    input_dir.mkdir(mode=0o700)
+    output_dir = work_dir / "output"
+    output_dir.mkdir(mode=0o700)
 
     saved_files = []
     for file in files:
         await validate_file(file)
-        file_path = INPUT_DIR / file.filename
+        file_path = input_dir / file.filename
         with file_path.open("wb") as f:
             content = await file.read()
             f.write(content)
         saved_files.append(file.filename)
 
-    env = os.environ.copy()
+    env = {
+        "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+        "HOME": str(work_dir),
+    }
     for i, filename in enumerate(saved_files, start=1):
-        env[f"FILE_{i}"] = str(INPUT_DIR / filename)
+        env[f"FILE_{i}"] = str(input_dir / filename)
 
     async def run_with_timeout(cmd, cwd=None, env=env, input_data=None):
         proc = await asyncio.create_subprocess_exec(
@@ -131,6 +134,22 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
                 f.write(code)
             sh_file.chmod(0o700)
             output, return_code = await run_with_timeout([str(sh_file)], cwd=work_dir)
+        elif language == "fish":
+            fish_file = work_dir / "script.fish"
+            with fish_file.open("w") as f:
+                f.write(code)
+            fish_file.chmod(0o700)
+            output, return_code = await run_with_timeout(
+                ["fish", str(fish_file)], cwd=work_dir
+            )
+        elif language == "nu":
+            nu_file = work_dir / "script.nu"
+            with nu_file.open("w") as f:
+                f.write(code)
+            nu_file.chmod(0o700)
+            output, return_code = await run_with_timeout(
+                ["nu", str(nu_file)], cwd=work_dir
+            )
         elif language in ["javascript", "typescript"]:
             if language == "typescript":
                 script_path = work_dir / "script.ts"
@@ -311,11 +330,12 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
                 )
 
         ensure_dirs()
-        final_files = [
-            f
-            for f in os.listdir(OUTPUT_DIR)
-            if f not in saved_files and (OUTPUT_DIR / f).is_file()
-        ]
+        produced = [f for f in output_dir.iterdir() if f.is_file()]
+        final_files = []
+        for f in produced:
+            dest = STAGING_DIR / f.name
+            shutil.copy2(f, dest)
+            final_files.append(f.name)
 
         return {
             "output": output.strip(),
@@ -328,11 +348,7 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
         print(f"Code execution Error: {traceback.format_exc()}")
         raise HTTPException(500, detail=f"Code execution failed: {str(e)}")
     finally:
-        for item in INPUT_DIR.iterdir():
-            safe_delete(item)
-        for item in OUTPUT_DIR.iterdir():
-            if item.is_dir():
-                safe_delete(item)
+        shutil.rmtree(work_dir, ignore_errors=True)
         ensure_dirs()
 
 
@@ -348,7 +364,7 @@ async def execute_endpoint(
 @app.get("/files/{filename}")
 async def get_file(filename: str, background_tasks: BackgroundTasks):
     ensure_dirs()
-    file_path = OUTPUT_DIR / filename
+    file_path = STAGING_DIR / filename
     if not file_path.exists():
         raise HTTPException(404, detail="File not found.")
 
@@ -367,8 +383,6 @@ async def health_check():
         "status": "healthy",
         "user": APP_USER,
         "uid": os.getuid(),
-        "execution_dir": str(EXECUTION_DIR),
-        "input_dir_exists": INPUT_DIR.exists(),
-        "output_dir_exists": OUTPUT_DIR.exists(),
-        "is_empty": len(list(EXECUTION_DIR.iterdir())) == 0,
+        "execution_base": str(EXECUTION_BASE),
+        "staging_dir_exists": STAGING_DIR.exists(),
     }

@@ -6233,6 +6233,25 @@ class Tags(commands.Cog):
             """
             return await self.execute_language(ctx, "bash", code, **kwargs)
 
+        @self.formatter.register("fish")
+        async def _fish(ctx, code, **kwargs):
+            """
+            ### {fish:code}
+                * Execute Fish code.
+                * Example: `{fish:echo hi}` -> "hi"
+            """
+            return await self.execute_language(ctx, "fish", code, **kwargs)
+
+        @self.formatter.register("nu")
+        @self.formatter.register("nushell")
+        async def _nu(ctx, code, **kwargs):
+            """
+            ### {nu:code}
+                * Execute Nu code.
+                * Example: `{nu:"hi"}` -> "hi"
+            """
+            return await self.execute_language(ctx, "nu", code, **kwargs)
+
         @self.formatter.register("javascript")
         @self.formatter.register("js")
         @self.formatter.register("node")

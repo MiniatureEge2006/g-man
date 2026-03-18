@@ -9,6 +9,8 @@ RUN echo 'dev-python/pydantic-extra-types' >> /etc/portage/package.accept_keywor
 RUN echo 'dev-python/pydantic-settings' >> /etc/portage/package.accept_keywords/keywords
 RUN echo 'dev-python/strawberry-graphql' >> /etc/portage/package.accept_keywords/keywords
 RUN echo 'dev-python/sqlmodel' >> /etc/portage/package.accept_keywords/keywords
+RUN echo 'app-shells/nushell' >> /etc/portage/package.accept_keywords/keywords
+RUN echo 'app-shells/fish' >> /etc/portage/package.accept_keywords/keywords
 RUN echo 'dev-dotnet/libgdiplus cairo' >> /etc/portage/package.use/use
 RUN getuto
 RUN emerge --sync
@@ -17,6 +19,8 @@ RUN eselect repository enable guru
 RUN emerge --sync guru
 RUN emerge --getbinpkg --update --deep --newuse @world
 RUN emerge --getbinpkg --noreplace \
+    app-shells/nushell \
+    app-shells/fish \
     dev-python/pip \
     dev-python/ffmpeg-python \
     dev-python/pillow \
@@ -52,11 +56,6 @@ RUN emerge --getbinpkg --noreplace \
 RUN groupadd -g 1000 gcoder && useradd -r -u 1000 -g gcoder -m -d /home/gcoder gcoder
 RUN npm install -g ts-node mathjs imagescript
 ENV NODE_PATH=/usr/local/lib/node_modules
-USER gcoder
-RUN mkdir -p /home/gcoder/input && \
-    mkdir -p /home/gcoder/output
-
-USER root
 RUN mkdir -p /app && \
     chown -R root:root /app && \
     chmod -R 555 /app
