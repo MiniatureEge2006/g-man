@@ -9,11 +9,16 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from cogs.tags import MediaProcessor
+
 
 class Media(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.tags_cog = bot.get_cog("Tags")
+
+    def new_processor(self) -> "MediaProcessor":
+        return MediaProcessor()
 
     async def process_media_input(
         self,
@@ -74,16 +79,22 @@ class Media(commands.Cog):
         return None, None, "Invalid input format."
 
     async def run_gscript_command(
-        self, ctx, command_name, input_key, output_key=None, **kwargs
+        self,
+        ctx,
+        command_name,
+        input_key,
+        processor: "MediaProcessor",
+        output_key=None,
+        **kwargs,
     ):
         output_key = output_key or f"{command_name}_{ctx.message.id}"
 
         try:
-            func = self.tags_cog.processor.gscript_commands.get(command_name)
+            func = processor.gscript_commands.get(command_name)
             if not func:
                 raise commands.CommandError(f"Unknown command: {command_name}")
 
-            if input_key not in self.tags_cog.processor.media_cache:
+            if input_key not in processor.media_cache:
                 raise commands.CommandError(f"{input_key} not found in media cache")
 
             result = await func(input_key=input_key, output_key=output_key, **kwargs)
@@ -91,7 +102,7 @@ class Media(commands.Cog):
             if not isinstance(result, str) or not result.startswith("media://"):
                 raise commands.CommandError(f"{command_name} failed: {result}")
 
-            render_result = await self.tags_cog.processor._render_media(
+            render_result = await processor._render_media(
                 media_key=output_key, extra_args=[Path(result[8:]).suffix[1:]]
             )
             if not isinstance(render_result, str) or not render_result.startswith(
@@ -118,7 +129,7 @@ class Media(commands.Cog):
                 await ctx.send(file=file)
 
         finally:
-            await self.tags_cog.processor.cleanup()
+            await processor.cleanup()
 
     @commands.hybrid_group(
         name="media", with_app_command=True, description="Media manipulation commands."
@@ -176,14 +187,17 @@ class Media(commands.Cog):
         format: str = "",
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"convert_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
-        await self.run_gscript_command(ctx, "convert", input_key, format=format)
+        await processor._load_media(url=input_url, media_key=input_key)
+        await self.run_gscript_command(
+            ctx, "convert", input_key, processor, format=format
+        )
 
     @media.command(
         name="audioputreplace",
@@ -210,6 +224,7 @@ class Media(commands.Cog):
         loop_media: bool = False,
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"media_{ctx.message.id}"
         input_parsed = await self.process_media_input(ctx, url, attachment)
         if input_parsed[2]:
@@ -222,13 +237,14 @@ class Media(commands.Cog):
             raise commands.CommandError(audio_parsed[2])
         audio_url = audio_parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
-        await self.tags_cog.processor._load_media(url=audio_url, media_key=audio_key)
+        await processor._load_media(url=input_url, media_key=input_key)
+        await processor._load_media(url=audio_url, media_key=audio_key)
 
         await self.run_gscript_command(
             ctx,
             "audioputreplace",
-            input_key=input_key,
+            input_key,
+            processor,
             media_key=input_key,
             audio_key=audio_key,
             preserve_length=preserve_length,
@@ -263,6 +279,7 @@ class Media(commands.Cog):
         loop_media: bool = False,
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"video_{ctx.message.id}"
         input_parsed = await self.process_media_input(ctx, url, attachment)
         if input_parsed[2]:
@@ -275,13 +292,14 @@ class Media(commands.Cog):
             raise commands.CommandError(audio_parsed[2])
         audio_url = audio_parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
-        await self.tags_cog.processor._load_media(url=audio_url, media_key=audio_key)
+        await processor._load_media(url=input_url, media_key=input_key)
+        await processor._load_media(url=audio_url, media_key=audio_key)
 
         await self.run_gscript_command(
             ctx,
             "audioputmix",
-            input_key=input_key,
+            input_key,
+            processor,
             audio_key=audio_key,
             volume=volume,
             loop_audio=loop_audio,
@@ -305,15 +323,16 @@ class Media(commands.Cog):
         end: str = "10",
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"trim_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
+        await processor._load_media(url=input_url, media_key=input_key)
         await self.run_gscript_command(
-            ctx, "trim", input_key, start_time=start, end_time=end
+            ctx, "trim", input_key, processor, start_time=start, end_time=end
         )
 
     @media.command(name="speed", description="Change a video/audio/image's speed.")
@@ -330,14 +349,15 @@ class Media(commands.Cog):
         speed: float = 1.5,
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"speed_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
-        await self.run_gscript_command(ctx, "speed", input_key, speed=speed)
+        await processor._load_media(url=input_url, media_key=input_key)
+        await self.run_gscript_command(ctx, "speed", input_key, processor, speed=speed)
 
     @media.command(name="reverse", description="Reverse a video/audio/image.")
     @app_commands.describe(url="URL/Emoji/User.", attachment="Video/Audio/Image file.")
@@ -348,13 +368,14 @@ class Media(commands.Cog):
         attachment: Optional[discord.Attachment] = None,
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"reverse_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
+        await processor._load_media(url=input_url, media_key=input_key)
         await self.run_gscript_command(ctx, "reverse", input_key)
 
     @image.command(name="text", description="Add text to an image.")
@@ -395,17 +416,19 @@ class Media(commands.Cog):
         line_spacing: int = 5,
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"text_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
+        await processor._load_media(url=input_url, media_key=input_key)
         await self.run_gscript_command(
             ctx,
             "text",
             input_key,
+            processor,
             text=text,
             x=x,
             y=y,
@@ -459,17 +482,19 @@ class Media(commands.Cog):
         line_spacing: int = 5,
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"caption_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
+        await processor._load_media(url=input_url, media_key=input_key)
         await self.run_gscript_command(
             ctx,
             "caption",
             input_key,
+            processor,
             text=text,
             font_size=font_size,
             font=font,
@@ -497,14 +522,15 @@ class Media(commands.Cog):
         fps: str = "30",
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"fps_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
-        await self.run_gscript_command(ctx, "fps", input_key, fps_value=fps)
+        await processor._load_media(url=input_url, media_key=input_key)
+        await self.run_gscript_command(ctx, "fps", input_key, processor, fps_value=fps)
 
     @iv.command(name="contrast", description="Adjust an image or video's contrast.")
     @app_commands.describe(
@@ -520,15 +546,16 @@ class Media(commands.Cog):
         contrast_level: float = 1.0,
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"contrast_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
+        await processor._load_media(url=input_url, media_key=input_key)
         await self.run_gscript_command(
-            ctx, "contrast", input_key, contrast_level=contrast_level
+            ctx, "contrast", input_key, processor, contrast_level=contrast_level
         )
 
     @iv.command(name="opacity", description="Adjust an image or video's opacity.")
@@ -545,15 +572,16 @@ class Media(commands.Cog):
         opacity_level: float = 1.0,
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"opacity_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
+        await processor._load_media(url=input_url, media_key=input_key)
         await self.run_gscript_command(
-            ctx, "opacity", input_key, opacity_level=opacity_level
+            ctx, "opacity", input_key, processor, opacity_level=opacity_level
         )
 
     @iv.command(name="brightness", description="Adjust an image or video's brightness.")
@@ -570,15 +598,16 @@ class Media(commands.Cog):
         brightness_level: float = 0.0,
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"brightness_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
+        await processor._load_media(url=input_url, media_key=input_key)
         await self.run_gscript_command(
-            ctx, "brightness", input_key, brightness_level=brightness_level
+            ctx, "brightness", input_key, processor, brightness_level=brightness_level
         )
 
     @iv.command(name="gamma", description="Adjust an image or video's gamma.")
@@ -595,14 +624,17 @@ class Media(commands.Cog):
         gamma_level: float = 1.0,
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"gamma_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
-        await self.run_gscript_command(ctx, "gamma", input_key, gamma_level=gamma_level)
+        await processor._load_media(url=input_url, media_key=input_key)
+        await self.run_gscript_command(
+            ctx, "gamma", input_key, processor, gamma_level=gamma_level
+        )
 
     @iv.command(name="saturate", description="Adjust an image or video's saturation.")
     @app_commands.describe(
@@ -618,15 +650,16 @@ class Media(commands.Cog):
         saturation_level: float = 1.0,
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"saturate_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
+        await processor._load_media(url=input_url, media_key=input_key)
         await self.run_gscript_command(
-            ctx, "saturate", input_key, saturation_level=saturation_level
+            ctx, "saturate", input_key, processor, saturation_level=saturation_level
         )
 
     @iv.command(name="hue", description="Adjust an image or video's hue shift.")
@@ -643,14 +676,17 @@ class Media(commands.Cog):
         hue_shift: str = "90",
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"hue_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
-        await self.run_gscript_command(ctx, "hue", input_key, hue_shift=hue_shift)
+        await processor._load_media(url=input_url, media_key=input_key)
+        await self.run_gscript_command(
+            ctx, "hue", input_key, processor, hue_shift=hue_shift
+        )
 
     @iv.command(name="grayscale", description="Convert an image or video to grayscale.")
     @app_commands.describe(url="URL/Emoji/User.", attachment="Image/Video file.")
@@ -661,13 +697,14 @@ class Media(commands.Cog):
         attachment: Optional[discord.Attachment] = None,
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"grayscale_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
+        await processor._load_media(url=input_url, media_key=input_key)
         await self.run_gscript_command(ctx, "grayscale", input_key)
 
     @iv.command(name="sepia", description="Convert an image or video to sepia.")
@@ -679,13 +716,14 @@ class Media(commands.Cog):
         attachment: Optional[discord.Attachment] = None,
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"sepia_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
+        await processor._load_media(url=input_url, media_key=input_key)
         await self.run_gscript_command(ctx, "sepia", input_key)
 
     @iv.command(name="resize", description="Resize an image or video.")
@@ -704,15 +742,16 @@ class Media(commands.Cog):
         height: str = "512",
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"resize_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
+        await processor._load_media(url=input_url, media_key=input_key)
         await self.run_gscript_command(
-            ctx, "resize", input_key, width=width, height=height
+            ctx, "resize", input_key, processor, width=width, height=height
         )
 
     @iv.command(name="rotate", description="Rotate an image or video.")
@@ -729,14 +768,15 @@ class Media(commands.Cog):
         angle: str = "90",
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"rotate_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
-        await self.run_gscript_command(ctx, "rotate", input_key, angle=angle)
+        await processor._load_media(url=input_url, media_key=input_key)
+        await self.run_gscript_command(ctx, "rotate", input_key, processor, angle=angle)
 
     @iv.command(name="crop", description="Crop an image or video.")
     @app_commands.describe(
@@ -758,15 +798,16 @@ class Media(commands.Cog):
         height: str = "512",
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"crop_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
+        await processor._load_media(url=input_url, media_key=input_key)
         await self.run_gscript_command(
-            ctx, "crop", input_key, x=x, y=y, width=width, height=height
+            ctx, "crop", input_key, processor, x=x, y=y, width=width, height=height
         )
 
     @iv.command(name="invert", description="Invert the colors of a video or image.")
@@ -778,13 +819,14 @@ class Media(commands.Cog):
         attachment: Optional[discord.Attachment] = None,
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"invert_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
+        await processor._load_media(url=input_url, media_key=input_key)
         await self.run_gscript_command(ctx, "invert", input_key)
 
     @iv.command(name="fadein", description="Apply fade-in effect to a video or image.")
@@ -805,15 +847,22 @@ class Media(commands.Cog):
         audio: bool = True,
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"fadein_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
+        await processor._load_media(url=input_url, media_key=input_key)
         await self.run_gscript_command(
-            ctx, "fadein", input_key, duration=duration, color=color, audio=audio
+            ctx,
+            "fadein",
+            input_key,
+            processor,
+            duration=duration,
+            color=color,
+            audio=audio,
         )
 
     @iv.command(
@@ -838,17 +887,19 @@ class Media(commands.Cog):
         audio: bool = True,
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"fadeout_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
+        await processor._load_media(url=input_url, media_key=input_key)
         await self.run_gscript_command(
             ctx,
             "fadeout",
             input_key,
+            processor,
             start_time=start_time,
             duration=duration,
             color=color,
@@ -881,6 +932,7 @@ class Media(commands.Cog):
         preserve_length: bool = True,
     ):
         await ctx.typing()
+        processor = self.new_processor()
         base_key = f"base_{ctx.message.id}"
         base_parsed = await self.process_media_input(ctx, base_url, base_attachment)
         if base_parsed[2]:
@@ -895,15 +947,14 @@ class Media(commands.Cog):
             raise commands.CommandError(overlay_parsed[2])
         overlay_url = overlay_parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=base_url, media_key=base_key)
-        await self.tags_cog.processor._load_media(
-            url=overlay_url, media_key=overlay_key
-        )
+        await processor._load_media(url=base_url, media_key=base_key)
+        await processor._load_media(url=overlay_url, media_key=overlay_key)
 
         await self.run_gscript_command(
             ctx,
             "overlay",
-            input_key=base_key,
+            base_key,
+            processor,
             base_key=base_key,
             overlay_key=overlay_key,
             x=x,
@@ -931,15 +982,22 @@ class Media(commands.Cog):
         blend: float = 0.0,
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"colorkey_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
+        await processor._load_media(url=input_url, media_key=input_key)
         await self.run_gscript_command(
-            ctx, "colorkey", input_key, color=color, similarity=similarity, blend=blend
+            ctx,
+            "colorkey",
+            input_key,
+            processor,
+            color=color,
+            similarity=similarity,
+            blend=blend,
         )
 
     @iv.command(name="chromakey", description="YUV colorspace key an image or video.")
@@ -960,15 +1018,22 @@ class Media(commands.Cog):
         blend: float = 0.0,
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"chromakey_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
+        await processor._load_media(url=input_url, media_key=input_key)
         await self.run_gscript_command(
-            ctx, "chromakey", input_key, color=color, similarity=similarity, blend=blend
+            ctx,
+            "chromakey",
+            input_key,
+            processor,
+            color=color,
+            similarity=similarity,
+            blend=blend,
         )
 
     @av.command(name="volume", description="Adjust a video or audio's volume.")
@@ -985,15 +1050,16 @@ class Media(commands.Cog):
         volume_level: float = 1.5,
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"volume_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
+        await processor._load_media(url=input_url, media_key=input_key)
         await self.run_gscript_command(
-            ctx, "volume", input_key, volume_level=volume_level
+            ctx, "volume", input_key, processor, volume_level=volume_level
         )
 
     @av.command(
@@ -1014,15 +1080,16 @@ class Media(commands.Cog):
         depth: float = 0.5,
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"tremolo_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
+        await processor._load_media(url=input_url, media_key=input_key)
         await self.run_gscript_command(
-            ctx, "tremolo", input_key, frequency=frequency, depth=depth
+            ctx, "tremolo", input_key, processor, frequency=frequency, depth=depth
         )
 
     @av.command(
@@ -1043,15 +1110,16 @@ class Media(commands.Cog):
         depth: float = 0.5,
     ):
         await ctx.typing()
+        processor = self.new_processor()
         input_key = f"vibrato_{ctx.message.id}"
         parsed = await self.process_media_input(ctx, url, attachment)
         if parsed[2]:
             raise commands.CommandError(parsed[2])
         input_url = parsed[0][8:]
 
-        await self.tags_cog.processor._load_media(url=input_url, media_key=input_key)
+        await processor._load_media(url=input_url, media_key=input_key)
         await self.run_gscript_command(
-            ctx, "vibrato", input_key, frequency=frequency, depth=depth
+            ctx, "vibrato", input_key, processor, frequency=frequency, depth=depth
         )
 
 

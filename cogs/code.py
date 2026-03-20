@@ -9,6 +9,47 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+LANGUAGE_ALIASES: dict[str, str] = {
+    "py": "python",
+    "python": "python",
+    "sh": "bash",
+    "bash": "bash",
+    "fish": "fish",
+    "nushell": "nu",
+    "nu": "nu",
+    "js": "javascript",
+    "javascript": "javascript",
+    "node": "javascript",
+    "ts": "typescript",
+    "typescript": "typescript",
+    "php": "php",
+    "rb": "ruby",
+    "ruby": "ruby",
+    "lua": "lua",
+    "go": "go",
+    "rs": "rust",
+    "rust": "rust",
+    "c": "c",
+    "c++": "cpp",
+    "cpp": "cpp",
+    "cs": "csharp",
+    "c#": "csharp",
+    "csharp": "csharp",
+    "zig": "zig",
+    "java": "java",
+    "kt": "kotlin",
+    "kotlin": "kotlin",
+    "nim": "nim",
+}
+
+
+SUPPORTED_LANGUAGES: list[str] = list(dict.fromkeys(LANGUAGE_ALIASES.values()))
+LANGUAGES_DISPLAY = ", ".join(f"`{lang}`" for lang in SUPPORTED_LANGUAGES)
+
+
+def resolve_language(raw: str) -> str:
+    return LANGUAGE_ALIASES.get(raw.lower(), raw.lower())
+
 
 class CodeInputModal(discord.ui.Modal, title="Code Input"):
     def __init__(self, cog, language="bash"):
@@ -16,7 +57,7 @@ class CodeInputModal(discord.ui.Modal, title="Code Input"):
         self.cog = cog
         self.language = language
         self.code_input = discord.ui.TextInput(
-            label=f"Enter your {language} code",
+            label=f"Enter your {language.capitalize()} code",
             style=discord.TextStyle.paragraph,
             placeholder="Put your code here...",
             required=True,
@@ -190,7 +231,7 @@ class Code(commands.Cog):
         async with self.session.post(url, data=data) as response:
             return await response.json()
 
-    async def _execute_code(self, ctx: commands.Context, language, code, files=None):
+    async def _execute_code(self, ctx, language: str, code: str, files=None):
         start_time = time.time()
         send = getattr(ctx, "send", None)
         if send is None:
@@ -199,6 +240,7 @@ class Code(commands.Cog):
             )
         if send is None:
             raise ValueError("Cannot determine send method for this context")
+
         try:
             result = await self.execute_code(language, code, files=files)
             output = result.get("output", "").replace("\r\n", "\n").strip()
@@ -215,24 +257,35 @@ class Code(commands.Cog):
 
             pages = [output[i : i + 1980] for i in range(0, len(output), 1980)]
 
-            embed = discord.Embed(
-                title=f"{language.capitalize()} Execution",
-                description=f"```{language}\n{pages[0]}\n```",
-                color=discord.Color.red() if status else discord.Color.green(),
+            display_code = code if len(code) <= 1980 else code[:1977] + "..."
+            input_embed = discord.Embed(
+                title=f"{language.capitalize()} - Input",
+                description=f"```{language}\n{display_code}\n```",
+                color=discord.Color.blurple(),
             )
-
-            view = CodePaginator(total_pages=pages, original_author=ctx.author)
-            view.language = language
-
-            embed.set_author(
+            input_embed.set_author(
                 name=f"{ctx.author.name}#{ctx.author.discriminator}",
                 icon_url=ctx.author.display_avatar.url,
                 url=f"https://discord.com/users/{ctx.author.id}",
             )
-            embed.set_footer(
+
+            output_embed = discord.Embed(
+                title=f"{language.capitalize()} - Output",
+                description=f"```{language}\n{pages[0]}\n```",
+                color=discord.Color.red() if status else discord.Color.green(),
+            )
+            output_embed.set_author(
+                name=f"{ctx.author.name}#{ctx.author.discriminator}",
+                icon_url=ctx.author.display_avatar.url,
+                url=f"https://discord.com/users/{ctx.author.id}",
+            )
+            output_embed.set_footer(
                 text=f"Executed in {time.time() - start_time:.2f}s | Page 1/{len(pages)}",
                 icon_url=self.bot.user.avatar.url,
             )
+
+            view = CodePaginator(total_pages=pages, original_author=ctx.author)
+            view.language = language
 
             if result.get("files"):
                 file_objs = []
@@ -248,64 +301,63 @@ class Code(commands.Cog):
                     except Exception as e:
                         output += f"\nFailed to fetch {filename}: {str(e)}"
 
+                await send(embed=input_embed)
                 if file_objs:
-                    view.message = await send(embed=embed, files=file_objs, view=view)
+                    view.message = await send(
+                        embed=output_embed, files=file_objs, view=view
+                    )
                     return
 
-            view.message = await send(embed=embed, view=view)
+            await send(embed=input_embed)
+            view.message = await send(embed=output_embed, view=view)
 
         except Exception as e:
             raise commands.CommandError(str(e))
+
+    async def language_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> List[app_commands.Choice[str]]:
+        current_lower = current.lower()
+        matches = [lang for lang in SUPPORTED_LANGUAGES if current_lower in lang]
+        if not matches:
+            matches = list(
+                {
+                    canonical
+                    for alias, canonical in LANGUAGE_ALIASES.items()
+                    if current_lower in alias
+                }
+            )
+        return [app_commands.Choice(name=lang, value=lang) for lang in matches[:25]]
 
     @commands.hybrid_command(
         name="code", description="Execute code.", with_app_command=True
     )
     @app_commands.describe(
         language="The programming language. (default: bash)",
-        code="The code to execute. (leave empty to open code input modal.)",
+        code="The code to execute. Leave empty to open the code input modal.",
     )
+    @app_commands.autocomplete(language=language_autocomplete)
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def code(
         self, ctx: commands.Context, language: str = "bash", *, code: str = None
     ):
-        language = {
-            "py": "python",
-            "sh": "bash",
-            "fish": "fish",
-            "nushell": "nu",
-            "nu": "nu",
-            "js": "javascript",
-            "node": "javascript",
-            "ts": "typescript",
-            "php": "php",
-            "rb": "ruby",
-            "lua": "lua",
-            "go": "go",
-            "rs": "rust",
-            "c": "c",
-            "c++": "cpp",
-            "cs": "csharp",
-            "c#": "csharp",
-            "zig": "zig",
-            "java": "java",
-            "kt": "kotlin",
-            "nim": "nim",
-        }.get(language.lower(), language.lower())
+        language = resolve_language(language)
 
         if code is None and isinstance(ctx.interaction, discord.Interaction):
             modal = CodeInputModal(self, language)
             await ctx.interaction.response.send_modal(modal)
             return
+
         await ctx.typing()
 
-        attachments = ctx.message.attachments if hasattr(ctx, "message") else []
+        attachments = (
+            ctx.message.attachments if hasattr(ctx, "message") and ctx.message else []
+        )
         files = attachments if attachments else []
 
-        if not ctx.interaction and language == "bash" and code is None:
-            await ctx.send(
-                "Available languages: `python (py)`, `bash (sh)`, `fish`, `nu (nushell)`, `javascript (node, js)`, `typescript (ts)`, `php`, `ruby (rb)`, `lua`, `go`, `rust (rs)`, `c`, `c++ (cpp)`, `c# (cs, csharp)`, `zig`, `java`, `kotlin (kt)`, `nim`"
-            )
+        if not ctx.interaction and code is None:
+            await ctx.send(f"**Available languages:** {LANGUAGES_DISPLAY}")
             return
 
         markdown_match = re.match(r"```(\w+)\s*([\s\S]+?)```", code)
@@ -313,30 +365,7 @@ class Code(commands.Cog):
             extracted_language = markdown_match.group(1).lower()
             extracted_code = markdown_match.group(2).strip()
             if extracted_language:
-                language = extracted_language
-                language = {
-                    "py": "python",
-                    "sh": "bash",
-                    "fish": "fish",
-                    "nushell": "nu",
-                    "nu": "nu",
-                    "js": "javascript",
-                    "node": "javascript",
-                    "ts": "typescript",
-                    "php": "php",
-                    "rb": "ruby",
-                    "lua": "lua",
-                    "go": "go",
-                    "rs": "rust",
-                    "c": "c",
-                    "c++": "cpp",
-                    "cs": "csharp",
-                    "c#": "csharp",
-                    "zig": "zig",
-                    "java": "java",
-                    "kt": "kotlin",
-                    "nim": "nim",
-                }.get(language.lower(), language.lower())
+                language = resolve_language(extracted_language)
             code = extracted_code
         else:
             inline_match = re.match(r"`([^`]+)`", code)

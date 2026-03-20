@@ -411,7 +411,9 @@ class MediaProcessor:
     def __init__(self):
         self.media_cache: Dict[str, str] = {}
         self.active_processes: Set[asyncio.subprocess.Process] = set()
-        self.temp_dir = Path(os.getenv("TEMP", "/tmp")) / "gscript"
+        base = Path(os.getenv("TEMP", "/tmp")) / "gscript"
+        base.mkdir(exist_ok=True)
+        self.temp_dir = base / uuid.uuid4().hex
         self.temp_dir.mkdir(exist_ok=True)
         self.temp_files = set()
         self.session = None
@@ -419,6 +421,10 @@ class MediaProcessor:
             "load": {
                 "url": {"required": True, "type": str},
                 "media_key": {"required": True, "type": str},
+            },
+            "export": {
+                "media_key": {"required": True, "type": str},
+                "registry_key": {"required": False, "type": str, "default": "FILE_1"},
             },
             "reverse": {
                 "input_key": {"required": True, "type": str},
@@ -681,6 +687,7 @@ class MediaProcessor:
             "chromakey": self._chromakey,
             "dobetween": self._dobetween_media,
             "setframecount": self._setframecount,
+            "export": self._export_media,
         }
 
     async def _handle_error(
@@ -731,14 +738,7 @@ class MediaProcessor:
                 pass
 
         try:
-            for item in self.temp_dir.glob("*"):
-                try:
-                    if item.is_file():
-                        item.unlink()
-                    elif item.is_dir():
-                        shutil.rmtree(item)
-                except Exception:
-                    pass
+            shutil.rmtree(self.temp_dir, ignore_errors=True)
         except Exception:
             pass
 
@@ -1339,13 +1339,14 @@ class MediaProcessor:
         except Exception:
             return (1, 1, 0.0, False)
 
-    async def execute_media_script(self, script):
+    async def execute_media_script(self, script, exec_registry: dict = None):
         try:
             lines = [line.strip() for line in script.splitlines() if line.strip()]
             output_files = []
             errors = []
             last_output_key = None
             produced_outputs = set()
+            exported_keys = set()
             final_output_key = None
             i = 0
 
@@ -1411,16 +1412,23 @@ class MediaProcessor:
                                 raise ValueError(f"Unknown command: '{cmd}'")
 
                             parsed = await self._parse_command_args(cmd, args)
+                            if exec_registry is not None:
+                                parsed["_exec_registry"] = exec_registry
                             func = self.gscript_commands[cmd]
 
                             result = await func(**parsed)
 
-                            if "output_key" in parsed:
+                            if cmd == "export":
+                                exported_keys.add(parsed.get("media_key"))
+                            elif "output_key" in parsed:
                                 last_output_key = parsed["output_key"]
                                 produced_outputs.add(last_output_key)
                                 final_output_key = last_output_key
+
                             if result.startswith("media://"):
-                                output_files.append(result[8:])
+                                path = result[8:]
+                                if parsed.get("output_key") not in exported_keys:
+                                    output_files.append(path)
                             if result.startswith("Error"):
                                 raise RuntimeError(result)
 
@@ -1440,7 +1448,16 @@ class MediaProcessor:
                     )
                     i += 1
                     continue
-            if final_output_key and not errors:
+            exported_paths = {
+                self.media_cache[k] for k in exported_keys if k in self.media_cache
+            }
+            output_files = [p for p in output_files if p not in exported_paths]
+
+            if (
+                final_output_key
+                and final_output_key not in exported_keys
+                and not errors
+            ):
                 final_path = self.media_cache.get(final_output_key)
                 if final_path and os.path.exists(final_path):
                     return [final_path]
@@ -1464,6 +1481,23 @@ class MediaProcessor:
     async def _load_media_impl(self, **kwargs) -> str:
         url = kwargs["url"]
         media_key = kwargs["media_key"]
+        exec_registry: dict = kwargs.get("_exec_registry", {})
+        if url.upper().startswith("FILE_"):
+            reg_key = url.upper()
+            entry = exec_registry.get(reg_key)
+            if not entry:
+                return (
+                    f"Error: '{url}' not found in exec file registry. "
+                    "Run a {code:...} block first or use 'export' in a prior gscript block."
+                )
+            reg_bytes, reg_filename = entry
+            ext = Path(reg_filename).suffix.lstrip(".") or "bin"
+            temp_file = self._get_temp_path(ext)
+            with temp_file.open("wb") as f:
+                f.write(reg_bytes)
+            self.media_cache[media_key] = str(temp_file)
+            return f"Loaded {media_key} from {reg_key} ({reg_filename})"
+
         try:
             temp_file = self._get_temp_path()
             ydl_opts = {
@@ -1514,6 +1548,29 @@ class MediaProcessor:
 
             except Exception as http_error:
                 return f"Download error: {str(http_error)}"
+
+    async def _export_media(self, **kwargs) -> str:
+        try:
+            media_key = kwargs.get("media_key")
+            if not media_key:
+                return "Error: export requires media_key"
+            if media_key not in self.media_cache:
+                return f"Error: '{media_key}' not found in media cache"
+
+            registry_key = kwargs.get("registry_key", "FILE_1").upper()
+            exec_registry: dict = kwargs.get("_exec_registry")
+
+            path = Path(self.media_cache[media_key])
+            if not path.exists():
+                return f"Error: file for '{media_key}' no longer exists on disk"
+
+            with path.open("rb") as f:
+                file_bytes = f.read()
+
+            exec_registry[registry_key] = (file_bytes, path.name)
+            return f"Exported {media_key} → registry as {registry_key} ({path.name})"
+        except Exception as e:
+            return await self._handle_error("export", e)
 
     async def _reverse_media(self, **kwargs) -> str:
         try:
@@ -4390,6 +4447,7 @@ class Tags(commands.Cog):
         self._variables = {}
         self.formatter = TagFormatter()
         self.processor = MediaProcessor()
+        self._exec_file_registry: dict[str, tuple[bytes, str]] = {}
         self.setup_formatters()
         self.setup_media_formatters()
         self.active_processes = set()
@@ -4397,6 +4455,7 @@ class Tags(commands.Cog):
     async def execute_language(self, ctx, language: str, code: str, **kwargs):
         await self.processor.ensure_session()
         url = f"http://localhost:8000/{language}/execute"
+        suppress_files: bool = kwargs.get("suppress_files", False)
         data = aiohttp.FormData()
         data.add_field("code", code)
 
@@ -4415,6 +4474,15 @@ class Tags(commands.Cog):
                 except Exception as e:
                     return f"[{language} error: Failed to process attachment {attachment.filename}: {str(e)}]"
 
+        for reg_key in sorted(self._exec_file_registry):
+            reg_bytes, reg_filename = self._exec_file_registry[reg_key]
+            data.add_field(
+                "files",
+                BytesIO(reg_bytes),
+                filename=reg_filename,
+                content_type="application/octet-stream",
+            )
+
         try:
             async with self.processor.session.post(url, data=data) as response:
                 if response.status != 200:
@@ -4427,7 +4495,7 @@ class Tags(commands.Cog):
 
                 if result.get("files"):
                     file_objs = []
-                    for filename in result["files"][:10]:
+                    for idx, filename in enumerate(result["files"][:10], start=1):
                         file_url = f"http://localhost:8000/files/{filename}"
                         try:
                             async with self.processor.session.get(
@@ -4435,11 +4503,16 @@ class Tags(commands.Cog):
                             ) as file_resp:
                                 if file_resp.status == 200:
                                     file_data = await file_resp.read()
-                                    file_objs.append(
-                                        discord.File(
-                                            BytesIO(file_data), filename=filename
-                                        )
+                                    self._exec_file_registry[f"FILE_{idx}"] = (
+                                        file_data,
+                                        filename,
                                     )
+                                    if not suppress_files:
+                                        file_objs.append(
+                                            discord.File(
+                                                BytesIO(file_data), filename=filename
+                                            )
+                                        )
                         except Exception as e:
                             return f"[{language} error: Failed to fetch file {filename}: {str(e)}]"
 
@@ -4462,7 +4535,8 @@ class Tags(commands.Cog):
                 * Another example to do effects between timestamps: `{gscript:load url=https://example.com/video.mp4 media_key=video{newline}dobetween video 5 10 segment_key=segment output_key=proc{newline}caption segment text="testing"{newline}end{newline}render proc dobetween.mp4}`
                 * Yet another example that trims media: `{gscript:load url=https://example.com/video.mp4 media_key=video{newline}trim input_key=video start_time=0 end_time=10 output_key=trimmed{newline}render trimmed}`
                 * Available GScript commands:
-                    - load [url] [media_key]
+                    - load [url] [media_key] - url can be FILE_N to load from the code execution server.
+                    - export [media_key] [registry_key]
                     - reverse [input_key] [output_key]
                     - concat [output_key] [input_keys...]
                     - convert [input_key] [format] [output_key]
@@ -4500,7 +4574,11 @@ class Tags(commands.Cog):
                     - setframecount [input_key] [frame_count] [output_key]
             """
             try:
-                results = await self.processor.execute_media_script(script)
+                processor = MediaProcessor()
+                await processor.ensure_session()
+                results = await processor.execute_media_script(
+                    script, exec_registry=self._exec_file_registry
+                )
 
                 if isinstance(results, list):
                     ffmpeg_errors = [
@@ -4541,7 +4619,7 @@ class Tags(commands.Cog):
                         return ("\n".join(other_results[:5]), [], None, [])
 
                     return (
-                        "GScript executed but produced no output or files.",
+                        "",
                         [],
                         None,
                         [],
@@ -4558,10 +4636,10 @@ class Tags(commands.Cog):
                     )
 
             except Exception as e:
-                await self.processor.cleanup()
+                await processor.cleanup()
                 return (f"[gmanscript error: {str(e)}]", [], None, [])
             finally:
-                await self.processor.cleanup()
+                await processor.cleanup()
 
     def setup_formatters(self):
         @self.formatter.register("eval")
@@ -6223,6 +6301,19 @@ class Tags(commands.Cog):
             """
             return await self.execute_language(ctx, "python", code, **kwargs)
 
+        @self.formatter.register("python_")
+        @self.formatter.register("py_")
+        async def _python_suppress(ctx, code, **kwargs):
+            """
+            ### {python_:code}
+                * Execute Python code. Output files go into the cross-block registry
+                  (available as FILE_N in subsequent blocks) but are NOT sent to Discord.
+                * Use this when the block is an intermediate step feeding a gscript block.
+            """
+            return await self.execute_language(
+                ctx, "python", code, suppress_files=True, **kwargs
+            )
+
         @self.formatter.register("bash")
         @self.formatter.register("sh")
         async def _bash(ctx, code, **kwargs):
@@ -6233,6 +6324,17 @@ class Tags(commands.Cog):
             """
             return await self.execute_language(ctx, "bash", code, **kwargs)
 
+        @self.formatter.register("bash_")
+        @self.formatter.register("sh_")
+        async def _bash_suppress(ctx, code, **kwargs):
+            """
+            ### {bash_:code}
+                * Execute Bash code. Output files go into the registry but are NOT sent to Discord.
+            """
+            return await self.execute_language(
+                ctx, "bash", code, suppress_files=True, **kwargs
+            )
+
         @self.formatter.register("fish")
         async def _fish(ctx, code, **kwargs):
             """
@@ -6241,6 +6343,16 @@ class Tags(commands.Cog):
                 * Example: `{fish:echo hi}` -> "hi"
             """
             return await self.execute_language(ctx, "fish", code, **kwargs)
+
+        @self.formatter.register("fish_")
+        async def _fish_suppress(ctx, code, **kwargs):
+            """
+            ### {fish_:code}
+                * Execute Fish code. Output files go into the registry but are NOT sent to Discord.
+            """
+            return await self.execute_language(
+                ctx, "fish", code, suppress_files=True, **kwargs
+            )
 
         @self.formatter.register("nu")
         @self.formatter.register("nushell")
@@ -6251,6 +6363,17 @@ class Tags(commands.Cog):
                 * Example: `{nu:"hi"}` -> "hi"
             """
             return await self.execute_language(ctx, "nu", code, **kwargs)
+
+        @self.formatter.register("nu_")
+        @self.formatter.register("nushell_")
+        async def _nu_suppress(ctx, code, **kwargs):
+            """
+            ### {nu_:code}
+                * Execute Nu code. Output files go into the registry but are NOT sent to Discord.
+            """
+            return await self.execute_language(
+                ctx, "nu", code, suppress_files=True, **kwargs
+            )
 
         @self.formatter.register("javascript")
         @self.formatter.register("js")
@@ -6263,6 +6386,18 @@ class Tags(commands.Cog):
             """
             return await self.execute_language(ctx, "javascript", code, **kwargs)
 
+        @self.formatter.register("javascript_")
+        @self.formatter.register("js_")
+        @self.formatter.register("node_")
+        async def _javascript_suppress(ctx, code, **kwargs):
+            """
+            ### {javascript_:code}
+                * Execute JavaScript code. Output files go into the registry but are NOT sent to Discord.
+            """
+            return await self.execute_language(
+                ctx, "javascript", code, suppress_files=True, **kwargs
+            )
+
         @self.formatter.register("typescript")
         @self.formatter.register("ts")
         async def _typescript(ctx, code, **kwargs):
@@ -6273,6 +6408,17 @@ class Tags(commands.Cog):
             """
             return await self.execute_language(ctx, "typescript", code, **kwargs)
 
+        @self.formatter.register("typescript_")
+        @self.formatter.register("ts_")
+        async def _typescript_suppress(ctx, code, **kwargs):
+            """
+            ### {typescript_:code}
+                * Execute TypeScript code. Output files go into the registry but are NOT sent to Discord.
+            """
+            return await self.execute_language(
+                ctx, "typescript", code, suppress_files=True, **kwargs
+            )
+
         @self.formatter.register("php")
         async def _php(ctx, code, **kwargs):
             """
@@ -6280,6 +6426,16 @@ class Tags(commands.Cog):
                 * Execute PHP code.
             """
             return await self.execute_language(ctx, "php", code, **kwargs)
+
+        @self.formatter.register("php_")
+        async def _php_suppress(ctx, code, **kwargs):
+            """
+            ### {php_:code}
+                * Execute PHP code. Output files go into the registry but are NOT sent to Discord.
+            """
+            return await self.execute_language(
+                ctx, "php", code, suppress_files=True, **kwargs
+            )
 
         @self.formatter.register("ruby")
         @self.formatter.register("rb")
@@ -6291,6 +6447,17 @@ class Tags(commands.Cog):
             """
             return await self.execute_language(ctx, "ruby", code, **kwargs)
 
+        @self.formatter.register("ruby_")
+        @self.formatter.register("rb_")
+        async def _ruby_suppress(ctx, code, **kwargs):
+            """
+            ### {ruby_:code}
+                * Execute Ruby code. Output files go into the registry but are NOT sent to Discord.
+            """
+            return await self.execute_language(
+                ctx, "ruby", code, suppress_files=True, **kwargs
+            )
+
         @self.formatter.register("lua")
         async def _lua(ctx, code, **kwargs):
             """
@@ -6300,6 +6467,16 @@ class Tags(commands.Cog):
             """
             return await self.execute_language(ctx, "lua", code, **kwargs)
 
+        @self.formatter.register("lua_")
+        async def _lua_suppress(ctx, code, **kwargs):
+            """
+            ### {lua_:code}
+                * Execute Lua code. Output files go into the registry but are NOT sent to Discord.
+            """
+            return await self.execute_language(
+                ctx, "lua", code, suppress_files=True, **kwargs
+            )
+
         @self.formatter.register("go")
         async def _go(ctx, code, **kwargs):
             """
@@ -6307,6 +6484,16 @@ class Tags(commands.Cog):
                 * Execute Go code.
             """
             return await self.execute_language(ctx, "go", code, **kwargs)
+
+        @self.formatter.register("go_")
+        async def _go_suppress(ctx, code, **kwargs):
+            """
+            ### {go_:code}
+                * Execute Go code. Output files go into the registry but are NOT sent to Discord.
+            """
+            return await self.execute_language(
+                ctx, "go", code, suppress_files=True, **kwargs
+            )
 
         @self.formatter.register("rust")
         @self.formatter.register("rs")
@@ -6317,6 +6504,17 @@ class Tags(commands.Cog):
             """
             return await self.execute_language(ctx, "rust", code, **kwargs)
 
+        @self.formatter.register("rust_")
+        @self.formatter.register("rs_")
+        async def _rust_suppress(ctx, code, **kwargs):
+            """
+            ### {rust_:code}
+                * Execute Rust code. Output files go into the registry but are NOT sent to Discord.
+            """
+            return await self.execute_language(
+                ctx, "rust", code, suppress_files=True, **kwargs
+            )
+
         @self.formatter.register("c")
         async def _c(ctx, code, **kwargs):
             """
@@ -6324,6 +6522,16 @@ class Tags(commands.Cog):
                 * Execute C code.
             """
             return await self.execute_language(ctx, "c", code, **kwargs)
+
+        @self.formatter.register("c_")
+        async def _c_suppress(ctx, code, **kwargs):
+            """
+            ### {c_:code}
+                * Execute C code. Output files go into the registry but are NOT sent to Discord.
+            """
+            return await self.execute_language(
+                ctx, "c", code, suppress_files=True, **kwargs
+            )
 
         @self.formatter.register("cpp")
         @self.formatter.register("c++")
@@ -6333,6 +6541,17 @@ class Tags(commands.Cog):
                 * Execute C++ code.
             """
             return await self.execute_language(ctx, "cpp", code, **kwargs)
+
+        @self.formatter.register("cpp_")
+        @self.formatter.register("c++_")
+        async def _cpp_suppress(ctx, code, **kwargs):
+            """
+            ### {cpp_:code}
+                * Execute C++ code. Output files go into the registry but are NOT sent to Discord.
+            """
+            return await self.execute_language(
+                ctx, "cpp", code, suppress_files=True, **kwargs
+            )
 
         @self.formatter.register("csharp")
         @self.formatter.register("cs")
@@ -6344,6 +6563,18 @@ class Tags(commands.Cog):
             """
             return await self.execute_language(ctx, "csharp", code, **kwargs)
 
+        @self.formatter.register("csharp_")
+        @self.formatter.register("cs_")
+        @self.formatter.register("c#_")
+        async def _csharp_suppress(ctx, code, **kwargs):
+            """
+            ### {csharp_:code}
+                * Execute C# code. Output files go into the registry but are NOT sent to Discord.
+            """
+            return await self.execute_language(
+                ctx, "csharp", code, suppress_files=True, **kwargs
+            )
+
         @self.formatter.register("zig")
         async def _zig(ctx, code, **kwargs):
             """
@@ -6352,6 +6583,16 @@ class Tags(commands.Cog):
             """
             return await self.execute_language(ctx, "zig", code, **kwargs)
 
+        @self.formatter.register("zig_")
+        async def _zig_suppress(ctx, code, **kwargs):
+            """
+            ### {zig_:code}
+                * Execute Zig code. Output files go into the registry but are NOT sent to Discord.
+            """
+            return await self.execute_language(
+                ctx, "zig", code, suppress_files=True, **kwargs
+            )
+
         @self.formatter.register("java")
         async def _java(ctx, code, **kwargs):
             """
@@ -6359,6 +6600,16 @@ class Tags(commands.Cog):
                 * Execute Java code.
             """
             return await self.execute_language(ctx, "java", code, **kwargs)
+
+        @self.formatter.register("java_")
+        async def _java_suppress(ctx, code, **kwargs):
+            """
+            ### {java_:code}
+                * Execute Java code. Output files go into the registry but are NOT sent to Discord.
+            """
+            return await self.execute_language(
+                ctx, "java", code, suppress_files=True, **kwargs
+            )
 
         @self.formatter.register("kotlin")
         @self.formatter.register("kt")
@@ -6369,6 +6620,17 @@ class Tags(commands.Cog):
             """
             return await self.execute_language(ctx, "kotlin", code, **kwargs)
 
+        @self.formatter.register("kotlin_")
+        @self.formatter.register("kt_")
+        async def _kotlin_suppress(ctx, code, **kwargs):
+            """
+            ### {kotlin_:code}
+                * Execute Kotlin code. Output files go into the registry but are NOT sent to Discord.
+            """
+            return await self.execute_language(
+                ctx, "kotlin", code, suppress_files=True, **kwargs
+            )
+
         @self.formatter.register("nim")
         async def _nim(ctx, code, **kwargs):
             """
@@ -6376,6 +6638,16 @@ class Tags(commands.Cog):
                 * Execute Nim code.
             """
             return await self.execute_language(ctx, "nim", code, **kwargs)
+
+        @self.formatter.register("nim_")
+        async def _nim_suppress(ctx, code, **kwargs):
+            """
+            ### {nim_:code}
+                * Execute Nim code. Output files go into the registry but are NOT sent to Discord.
+            """
+            return await self.execute_language(
+                ctx, "nim", code, suppress_files=True, **kwargs
+            )
 
         @self.formatter.register("user")
         async def _user(ctx, i, **kwargs):
@@ -8181,6 +8453,7 @@ class Tags(commands.Cog):
     async def process_tags(
         self, ctx: commands.Context, content: str, args: str = ""
     ) -> tuple[str, list, discord.ui.View]:
+        self._exec_file_registry.clear()
         return await self.formatter.format(content, ctx, args=args)
 
     @commands.Cog.listener()
