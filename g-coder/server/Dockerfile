@@ -12,9 +12,11 @@ RUN echo 'dev-python/sqlmodel' >> /etc/portage/package.accept_keywords/keywords
 RUN echo 'app-shells/nushell' >> /etc/portage/package.accept_keywords/keywords
 RUN echo 'app-shells/fish' >> /etc/portage/package.accept_keywords/keywords
 RUN echo 'dev-dotnet/libgdiplus cairo' >> /etc/portage/package.use/use
+RUN echo 'media-video/ffmpeg lame qrcode opus vpx vorbis truetype rubberband quirc fribidi flite x264 x265 dav1d fdk' >> /etc/portage/package.use/use
+RUN echo 'ACCEPT_LICENSE="*"' >> /etc/portage/make.conf
 RUN getuto
 RUN emerge --sync
-RUN emerge app-eselect/eselect-repository
+RUN emerge --getbinpkg app-eselect/eselect-repository
 RUN eselect repository enable guru
 RUN emerge --sync guru
 RUN emerge --getbinpkg --update --deep --newuse @world
