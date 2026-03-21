@@ -376,7 +376,7 @@ class Media(commands.Cog):
         input_url = parsed[0][8:]
 
         await processor._load_media(url=input_url, media_key=input_key)
-        await self.run_gscript_command(ctx, "reverse", input_key)
+        await self.run_gscript_command(ctx, "reverse", input_key, processor)
 
     @image.command(name="text", description="Add text to an image.")
     @app_commands.describe(
@@ -705,7 +705,7 @@ class Media(commands.Cog):
         input_url = parsed[0][8:]
 
         await processor._load_media(url=input_url, media_key=input_key)
-        await self.run_gscript_command(ctx, "grayscale", input_key)
+        await self.run_gscript_command(ctx, "grayscale", input_key, processor)
 
     @iv.command(name="sepia", description="Convert an image or video to sepia.")
     @app_commands.describe(url="URL/Emoji/User.", attachment="Image/Video file.")
@@ -724,7 +724,7 @@ class Media(commands.Cog):
         input_url = parsed[0][8:]
 
         await processor._load_media(url=input_url, media_key=input_key)
-        await self.run_gscript_command(ctx, "sepia", input_key)
+        await self.run_gscript_command(ctx, "sepia", input_key, processor)
 
     @iv.command(name="resize", description="Resize an image or video.")
     @app_commands.describe(
@@ -827,7 +827,7 @@ class Media(commands.Cog):
         input_url = parsed[0][8:]
 
         await processor._load_media(url=input_url, media_key=input_key)
-        await self.run_gscript_command(ctx, "invert", input_key)
+        await self.run_gscript_command(ctx, "invert", input_key, processor)
 
     @iv.command(name="fadein", description="Apply fade-in effect to a video or image.")
     @app_commands.describe(
