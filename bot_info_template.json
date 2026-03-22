@@ -2,7 +2,6 @@
   "owners": ["Your Discord user ID"],
   "login": "Your Discord app token",
   "prefix": "Your bot prefix",
-  "openweather_api_key": "Your OpenWeather API key",
   "database": "Your PostgreSQL database URL",
   "ollama_model": "Your Ollama AI model",
   "ollama_api_key": "Your Ollama API key"

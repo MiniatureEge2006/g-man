@@ -1,5 +1,6 @@
 import asyncio
 import io
+import math
 import random
 import re
 from datetime import datetime
@@ -11,8 +12,6 @@ from discord import app_commands
 from discord.ext import commands
 from PIL import Image, ImageDraw
 from webcolors import hex_to_name, name_to_hex
-
-import bot_info
 
 
 class Info(commands.Cog):
@@ -1073,6 +1072,141 @@ class Info(commands.Cog):
         )
         await ctx.send(embed=embed)
 
+    @staticmethod
+    async def _generate_map_image(
+        lat: float,
+        lon: float,
+        zoom: int = 11,
+        width: int = 600,
+        height: int = 400,
+    ) -> io.BytesIO:
+
+        TILE_SIZE = 256
+
+        def _deg_to_tile(lat_deg, lon_deg, z):
+            lat_r = math.radians(lat_deg)
+            n = 2**z
+            x = (lon_deg + 180) / 360 * n
+            y = (1 - math.log(math.tan(lat_r) + 1 / math.cos(lat_r)) / math.pi) / 2 * n
+            return x, y
+
+        tx_f, ty_f = _deg_to_tile(lat, lon, zoom)
+
+        cols = math.ceil(width / TILE_SIZE) + 2
+        rows = math.ceil(height / TILE_SIZE) + 2
+        tx0 = int(tx_f) - cols // 2
+        ty0 = int(ty_f) - rows // 2
+
+        cx_px = (tx_f - tx0) * TILE_SIZE
+        cy_px = (ty_f - ty0) * TILE_SIZE
+
+        left = int(cx_px - width / 2)
+        top = int(cy_px - height / 2)
+
+        canvas = await asyncio.to_thread(
+            Image.new, "RGB", (cols * TILE_SIZE, rows * TILE_SIZE)
+        )
+
+        headers = {
+            "User-Agent": "DiscordBot/1.0 (g-man; https://codeberg.org/MiniatureEge2006/g-man)"
+        }
+        n_tiles = 2**zoom
+
+        async with aiohttp.ClientSession() as session:
+            for row in range(rows):
+                for col in range(cols):
+                    tx = (tx0 + col) % n_tiles
+                    ty = ty0 + row
+                    if ty < 0 or ty >= n_tiles:
+                        continue
+                    tile_url = f"https://tile.openstreetmap.org/{zoom}/{tx}/{ty}.png"
+                    async with session.get(tile_url, headers=headers) as resp:
+                        if resp.status == 200:
+                            tile_bytes = await resp.read()
+                            tile_img = await asyncio.to_thread(
+                                Image.open, io.BytesIO(tile_bytes)
+                            )
+                            canvas.paste(tile_img, (col * TILE_SIZE, row * TILE_SIZE))
+
+        map_img = canvas.crop((left, top, left + width, top + height))
+
+        draw = await asyncio.to_thread(ImageDraw.Draw, map_img)
+        cx, cy = width // 2, height // 2
+        r = 8
+        draw.ellipse(
+            [cx - r + 2, cy - r + 2, cx + r + 2, cy + r + 2], fill=(0, 0, 0, 120)
+        )
+        draw.ellipse(
+            [cx - r, cy - r, cx + r, cy + r],
+            fill=(220, 30, 30),
+            outline=(255, 255, 255),
+            width=2,
+        )
+        draw.line([(cx, cy - r - 6), (cx, cy + r + 6)], fill=(220, 30, 30), width=2)
+        draw.line([(cx - r - 6, cy), (cx + r + 6, cy)], fill=(220, 30, 30), width=2)
+
+        buf = io.BytesIO()
+        await asyncio.to_thread(map_img.save, buf, "PNG")
+        buf.seek(0)
+        return buf
+
+    @staticmethod
+    def _wind_direction_label(deg: float) -> str:
+        directions = [
+            "N",
+            "NNE",
+            "NE",
+            "ENE",
+            "E",
+            "ESE",
+            "SE",
+            "SSE",
+            "S",
+            "SSW",
+            "SW",
+            "WSW",
+            "W",
+            "WNW",
+            "NW",
+            "NNW",
+        ]
+        idx = round(deg / 22.5) % 16
+        return directions[idx]
+
+    @staticmethod
+    def _wmo_description(code: int) -> tuple[str, str]:
+        wmo_map = {
+            0: ("Clear sky", "☀️"),
+            1: ("Mainly clear", "🌤️"),
+            2: ("Partly cloudy", "⛅"),
+            3: ("Overcast", "☁️"),
+            45: ("Fog", "🌫️"),
+            48: ("Depositing rime fog", "🌫️"),
+            51: ("Light drizzle", "🌦️"),
+            53: ("Moderate drizzle", "🌦️"),
+            55: ("Dense drizzle", "🌧️"),
+            56: ("Light freezing drizzle", "🌨️"),
+            57: ("Heavy freezing drizzle", "🌨️"),
+            61: ("Slight rain", "🌧️"),
+            63: ("Moderate rain", "🌧️"),
+            65: ("Heavy rain", "🌧️"),
+            66: ("Light freezing rain", "🌨️"),
+            67: ("Heavy freezing rain", "🌨️"),
+            71: ("Slight snowfall", "❄️"),
+            73: ("Moderate snowfall", "❄️"),
+            75: ("Heavy snowfall", "❄️"),
+            77: ("Snow grains", "🌨️"),
+            80: ("Slight rain showers", "🌦️"),
+            81: ("Moderate rain showers", "🌧️"),
+            82: ("Violent rain showers", "⛈️"),
+            85: ("Slight snow showers", "🌨️"),
+            86: ("Heavy snow showers", "🌨️"),
+            95: ("Thunderstorm", "⛈️"),
+            96: ("Thunderstorm with slight hail", "⛈️"),
+            99: ("Thunderstorm with heavy hail", "⛈️"),
+        }
+        return wmo_map.get(code, ("Unknown conditions", "🌡️"))
+
     @commands.hybrid_command(
         name="weatherinfo",
         description="Displays information about the weather in a location.",
@@ -1085,76 +1219,254 @@ class Info(commands.Cog):
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def weatherinfo(self, ctx: commands.Context, *, location: str):
         await ctx.typing()
-        api_key = bot_info.data["openweather_api_key"]
-        base_url = "https://api.openweathermap.org/data/2.5/weather"
-        geocode_url = "https://api.openweathermap.org/geo/1.0/direct"
-        params = {"q": location, "appid": api_key, "units": "metric"}
-        geo_params = {"q": location, "appid": api_key, "limit": 1}
+
+        geocode_url = "https://geocoding-api.open-meteo.com/v1/search"
+        geo_params = {"name": location, "count": 1, "language": "en", "format": "json"}
 
         async with aiohttp.ClientSession() as session:
             async with session.get(geocode_url, params=geo_params) as geo_response:
-                geo_data = await geo_response.json()
-                if geo_response.status == 200 and geo_data:
-                    coordinates_lat = geo_data[0]["lat"]
-                    coordinates_lon = geo_data[0]["lon"]
-                    formatted_location = geo_data[0]["name"]
-
-                    async with session.get(base_url, params=params) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            city = data["name"]
-                            country = data["sys"]["country"]
-                            description = data["weather"][0]["description"].capitalize()
-                            temperature = data["main"]["temp"]
-                            pressure = data["main"]["pressure"]
-                            feels_like = data["main"]["feels_like"]
-                            humidity = data["main"]["humidity"]
-                            visibility = data["visibility"]
-                            wind_speed = data["wind"]["speed"]
-                            wind_direction = data["wind"]["deg"]
-                            clouds = data["clouds"]["all"]
-                            timestamp = datetime.fromtimestamp(data["dt"]).strftime(
-                                "%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)"
-                            )
-                            icon = data["weather"][0]["icon"]
-                            icon_url = f"http://openweathermap.org/img/wn/{icon}.png"
-                            sunrise = datetime.fromtimestamp(
-                                data["sys"]["sunrise"]
-                            ).strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)")
-                            sunset = datetime.fromtimestamp(
-                                data["sys"]["sunset"]
-                            ).strftime("%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)")
-                            map_image_url = f"https://static-maps.yandex.ru/1.x/?ll={coordinates_lon},{coordinates_lat}&spn=0.1,0.1&l=map&size=600,430&pt={coordinates_lat},{coordinates_lon},pm2rdm"
-                            maps_link = f"https://google.com/maps/search/?api=1&query={coordinates_lat},{coordinates_lon}"
-
-                            embed = discord.Embed(
-                                title=f"Weather Info - {city}, {country}",
-                                url=f"https://openweathermap.org/city/{data['id']}",
-                                description=f"Currently {temperature}°C with {description}. (feels like {feels_like}°C)\n\nSunrise: {sunrise}\nSunset: {sunset}\n\n**Pressure:** {pressure} hPa\n**Humidity:** {humidity}%\n**Visibility:** {visibility} m\n**Wind:** {wind_speed} m/s from {wind_direction}°\n**Clouds:** {clouds}%\n**Coordinates:** [{coordinates_lat}, {coordinates_lon}]({maps_link})\n**Location:** {formatted_location}\n**Timestamp:** {timestamp}",
-                                color=discord.Color.blue(),
-                                timestamp=discord.utils.utcnow(),
-                            )
-                            embed.set_author(
-                                name=f"{ctx.author.name}#{ctx.author.discriminator}",
-                                icon_url=ctx.author.display_avatar.url,
-                                url=f"https://discord.com/users/{ctx.author.id}",
-                            )
-                            embed.set_thumbnail(url=icon_url)
-                            embed.set_image(url=map_image_url)
-                            embed.set_footer(
-                                text="OpenWeatherMap API",
-                                icon_url="https://openweathermap.org/themes/openweathermap/assets/img/mobile_app/android-app-top-banner.png",
-                            )
-
-                            await ctx.send(embed=embed)
-                        else:
-                            await ctx.send(
-                                f"Error: Could not fetch weather data for {location}: Weather status: {response.status} - {response.reason} - Location status: {geo_response.status} - {geo_response.reason}"
-                            )
-                else:
+                if geo_response.status != 200:
                     await ctx.send(
-                        f"Error: Could not find location: {location} - Location status: {geo_response.status} - {geo_response.reason}"
+                        f"Error: Geocoding service returned status {geo_response.status}."
                     )
+                    return
+                geo_data = await geo_response.json()
+
+            results = geo_data.get("results")
+            if not results:
+                await ctx.send(
+                    f"Error: Could not find any location matching **{location}**."
+                )
+                return
+
+            place = results[0]
+            lat = place["latitude"]
+            lon = place["longitude"]
+            city_name = place.get("name", location)
+            country_name = place.get("country", "")
+            country_code = place.get("country_code", "").upper()
+            admin1 = place.get("admin1", "")
+            timezone = place.get("timezone", "UTC")
+            elevation_m = place.get("elevation", None)
+            population = place.get("population", None)
+
+            weather_url = "https://api.open-meteo.com/v1/forecast"
+            weather_params = {
+                "latitude": lat,
+                "longitude": lon,
+                "current": (
+                    "temperature_2m,"
+                    "relative_humidity_2m,"
+                    "apparent_temperature,"
+                    "is_day,"
+                    "precipitation,"
+                    "rain,"
+                    "showers,"
+                    "snowfall,"
+                    "weather_code,"
+                    "cloud_cover,"
+                    "pressure_msl,"
+                    "surface_pressure,"
+                    "wind_speed_10m,"
+                    "wind_direction_10m,"
+                    "wind_gusts_10m,"
+                    "visibility"
+                ),
+                "daily": (
+                    "temperature_2m_max,"
+                    "temperature_2m_min,"
+                    "sunrise,"
+                    "sunset,"
+                    "uv_index_max,"
+                    "precipitation_probability_max,"
+                    "precipitation_sum,"
+                    "wind_speed_10m_max"
+                ),
+                "timezone": timezone,
+                "forecast_days": 1,
+                "wind_speed_unit": "ms",
+            }
+
+            async with session.get(weather_url, params=weather_params) as w_response:
+                if w_response.status != 200:
+                    await ctx.send(
+                        f"Error: Weather service returned status {w_response.status}."
+                    )
+                    return
+                w_data = await w_response.json()
+
+        cur = w_data.get("current", {})
+        daily = w_data.get("daily", {})
+
+        temp_c = cur.get("temperature_2m")
+        temp_f = round(temp_c * 9 / 5 + 32, 1) if temp_c is not None else None
+        feels_c = cur.get("apparent_temperature")
+        feels_f = round(feels_c * 9 / 5 + 32, 1) if feels_c is not None else None
+        humidity = cur.get("relative_humidity_2m")
+        cloud_cover = cur.get("cloud_cover")
+        pressure_msl = cur.get("pressure_msl")
+        surface_pressure = cur.get("surface_pressure")
+        wind_speed = cur.get("wind_speed_10m")
+        wind_dir_deg = cur.get("wind_direction_10m")
+        wind_gusts = cur.get("wind_gusts_10m")
+        precipitation = cur.get("precipitation")
+        rain = cur.get("rain")
+        snowfall = cur.get("snowfall")
+        visibility_m = cur.get("visibility")
+        wmo_code = cur.get("weather_code", 0)
+        is_day = cur.get("is_day", 1)
+        current_time = cur.get("time", "")
+
+        description, condition_emoji = self._wmo_description(wmo_code)
+        wind_label = (
+            self._wind_direction_label(wind_dir_deg)
+            if wind_dir_deg is not None
+            else "?"
+        )
+        visibility_km = (
+            round(visibility_m / 1000, 1) if visibility_m is not None else None
+        )
+
+        def _first(lst):
+            return lst[0] if lst else None
+
+        temp_max_c = _first(daily.get("temperature_2m_max", []))
+        temp_min_c = _first(daily.get("temperature_2m_min", []))
+        temp_max_f = (
+            round(temp_max_c * 9 / 5 + 32, 1) if temp_max_c is not None else None
+        )
+        temp_min_f = (
+            round(temp_min_c * 9 / 5 + 32, 1) if temp_min_c is not None else None
+        )
+        sunrise_str = _first(daily.get("sunrise", []))
+        sunset_str = _first(daily.get("sunset", []))
+        uv_index_max = _first(daily.get("uv_index_max", []))
+        precip_prob = _first(daily.get("precipitation_probability_max", []))
+        precip_sum = _first(daily.get("precipitation_sum", []))
+        wind_max_daily = _first(daily.get("wind_speed_10m_max", []))
+
+        def uv_risk(uv):
+            if uv is None:
+                return "N/A"
+            if uv < 3:
+                return f"{uv} (Low)"
+            if uv < 6:
+                return f"{uv} (Moderate)"
+            if uv < 8:
+                return f"{uv} (High)"
+            if uv < 11:
+                return f"{uv} (Very High)"
+            return f"{uv} (Extreme)"
+
+        location_parts = [p for p in [city_name, admin1, country_name] if p]
+        location_title = ", ".join(location_parts)
+
+        maps_link = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
+
+        embed_color = discord.Color.blue() if is_day else discord.Color.dark_blue()
+
+        embed = discord.Embed(
+            title=f"{condition_emoji} Weather in {location_title}",
+            url=maps_link,
+            description=(
+                f"**{description}**\n"
+                f"**{temp_c}°C / {temp_f}°F** - feels like **{feels_c}°C / {feels_f}°F**\n"
+                f"Updated: `{current_time}`"
+            ),
+            color=embed_color,
+            timestamp=discord.utils.utcnow(),
+        )
+
+        embed.add_field(
+            name="Temperature",
+            value=(
+                f"Current: **{temp_c}°C / {temp_f}°F**\n"
+                f"Feels like: **{feels_c}°C / {feels_f}°F**\n"
+                f"Today high: **{temp_max_c}°C / {temp_max_f}°F**\n"
+                f"Today low: **{temp_min_c}°C / {temp_min_f}°F**"
+            ),
+            inline=True,
+        )
+
+        embed.add_field(
+            name="Wind",
+            value=(
+                f"Speed: **{wind_speed} m/s**\n"
+                f"Direction: **{wind_dir_deg}° ({wind_label})**\n"
+                f"Gusts: **{wind_gusts} m/s**\n"
+                f"Daily max: **{wind_max_daily} m/s**"
+            ),
+            inline=True,
+        )
+
+        embed.add_field(
+            name="Atmosphere",
+            value=(
+                f"Humidity: **{humidity}%**\n"
+                f"Cloud cover: **{cloud_cover}%**\n"
+                f"Visibility: **{visibility_km} km**\n"
+                f"Pressure (MSL): **{pressure_msl} hPa**\n"
+                f"Surface pressure: **{surface_pressure} hPa**"
+            ),
+            inline=True,
+        )
+
+        embed.add_field(
+            name="Precipitation",
+            value=(
+                f"Current: **{precipitation} mm**\n"
+                f"Rain: **{rain} mm** | Snow: **{snowfall} cm**\n"
+                f"Today total: **{precip_sum} mm**\n"
+                f"Chance today: **{precip_prob}%**"
+            ),
+            inline=True,
+        )
+
+        embed.add_field(
+            name="Sun & UV",
+            value=(
+                f"Sunrise: **{sunrise_str}**\n"
+                f"Sunset: **{sunset_str}**\n"
+                f"UV Index (max): **{uv_risk(uv_index_max)}**\n"
+                f"Daylight: **{'Yes' if is_day else 'No'}**"
+            ),
+            inline=True,
+        )
+
+        pop_str = f"{population:,}" if population else "N/A"
+        elev_str = f"{elevation_m} m" if elevation_m is not None else "N/A"
+        embed.add_field(
+            name="Location",
+            value=(
+                f"City: **{city_name}**\n"
+                f"Region: **{admin1 or 'N/A'}**\n"
+                f"Country: **{country_name} ({country_code})**\n"
+                f"Coordinates: **[{lat}, {lon}]({maps_link})**\n"
+                f"Elevation: **{elev_str}**\n"
+                f"Population: **{pop_str}**\n"
+                f"Timezone: **{timezone}**"
+            ),
+            inline=False,
+        )
+
+        embed.set_author(
+            name=f"{ctx.author.name}#{ctx.author.discriminator}",
+            icon_url=ctx.author.display_avatar.url,
+            url=f"https://discord.com/users/{ctx.author.id}",
+        )
+        embed.set_footer(
+            text="Open-Meteo API",
+        )
+
+        try:
+            map_buf = await self._generate_map_image(
+                lat, lon, zoom=11, width=600, height=400
+            )
+            map_file = discord.File(map_buf, filename="map.png")
+            embed.set_image(url="attachment://map.png")
+            await ctx.send(embed=embed, file=map_file)
+        except Exception:
+            await ctx.send(embed=embed)
 
     @commands.hybrid_command(
         name="colorinfo",

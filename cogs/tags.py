@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import uuid
 from datetime import datetime, timedelta
+from datetime import timezone as timez
 from io import BytesIO
 from pathlib import Path
 from typing import Callable, Dict, List, Set, Union
@@ -8242,6 +8243,178 @@ class Tags(commands.Cog):
                 return "[JSON Attachment Error: Attachment not found]"
             except Exception as e:
                 return f"[JSON Attachment Error: {str(e)}]"
+
+        @self.formatter.register("json.weather")
+        @self.formatter.register("weatherjson")
+        @self.formatter.register("weather")
+        async def _json_weather(ctx, location, **kwargs):
+            """
+            ### {json.weather:location}
+                * Returns a complete JSON object of all available weather data for a location
+                  via the Open-Meteo API.
+                * Includes geocoding metadata, current conditions, today's daily summary,
+                  and a 7-day forecast.
+                * Example: `{json.weather:London}`
+                * Top-level keys: location, current, daily, units, fetched_at
+            """
+            try:
+                location = location.strip()
+                if not location:
+                    return "[JSON Weather Error: location is required]"
+
+                geocode_url = "https://geocoding-api.open-meteo.com/v1/search"
+                geo_params = {
+                    "name": location,
+                    "count": 1,
+                    "language": "en",
+                    "format": "json",
+                }
+
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(geocode_url, params=geo_params) as geo_resp:
+                        if geo_resp.status != 200:
+                            return f"[JSON Weather Error: Geocoding API returned {geo_resp.status}]"
+                        geo_data = await geo_resp.json()
+
+                    results = geo_data.get("results")
+                    if not results:
+                        return f"[JSON Weather Error: Location not found: {location}]"
+
+                    place = results[0]
+                    lat = place["latitude"]
+                    lon = place["longitude"]
+                    timezone = place.get("timezone", "UTC")
+
+                    weather_url = "https://api.open-meteo.com/v1/forecast"
+                    weather_params = {
+                        "latitude": lat,
+                        "longitude": lon,
+                        "current": (
+                            "temperature_2m,"
+                            "relative_humidity_2m,"
+                            "apparent_temperature,"
+                            "is_day,"
+                            "precipitation,"
+                            "rain,"
+                            "showers,"
+                            "snowfall,"
+                            "snow_depth,"
+                            "weather_code,"
+                            "cloud_cover,"
+                            "pressure_msl,"
+                            "surface_pressure,"
+                            "wind_speed_10m,"
+                            "wind_direction_10m,"
+                            "wind_gusts_10m,"
+                            "visibility,"
+                            "evapotranspiration,"
+                            "vapour_pressure_deficit,"
+                            "et0_fao_evapotranspiration"
+                        ),
+                        "hourly": (
+                            "temperature_2m,"
+                            "relative_humidity_2m,"
+                            "apparent_temperature,"
+                            "precipitation_probability,"
+                            "precipitation,"
+                            "rain,"
+                            "showers,"
+                            "snowfall,"
+                            "snow_depth,"
+                            "weather_code,"
+                            "pressure_msl,"
+                            "surface_pressure,"
+                            "cloud_cover,"
+                            "cloud_cover_low,"
+                            "cloud_cover_mid,"
+                            "cloud_cover_high,"
+                            "visibility,"
+                            "wind_speed_10m,"
+                            "wind_speed_80m,"
+                            "wind_speed_120m,"
+                            "wind_direction_10m,"
+                            "wind_direction_80m,"
+                            "wind_direction_120m,"
+                            "wind_gusts_10m,"
+                            "uv_index,"
+                            "uv_index_clear_sky,"
+                            "is_day,"
+                            "sunshine_duration,"
+                            "freezing_level_height,"
+                            "soil_temperature_0cm,"
+                            "soil_temperature_6cm,"
+                            "soil_moisture_0_to_1cm,"
+                            "soil_moisture_1_to_3cm"
+                        ),
+                        "daily": (
+                            "weather_code,"
+                            "temperature_2m_max,"
+                            "temperature_2m_min,"
+                            "apparent_temperature_max,"
+                            "apparent_temperature_min,"
+                            "sunrise,"
+                            "sunset,"
+                            "daylight_duration,"
+                            "sunshine_duration,"
+                            "uv_index_max,"
+                            "uv_index_clear_sky_max,"
+                            "precipitation_sum,"
+                            "rain_sum,"
+                            "showers_sum,"
+                            "snowfall_sum,"
+                            "precipitation_hours,"
+                            "precipitation_probability_max,"
+                            "precipitation_probability_min,"
+                            "precipitation_probability_mean,"
+                            "wind_speed_10m_max,"
+                            "wind_gusts_10m_max,"
+                            "wind_direction_10m_dominant,"
+                            "shortwave_radiation_sum,"
+                            "et0_fao_evapotranspiration"
+                        ),
+                        "timezone": timezone,
+                        "forecast_days": 7,
+                        "wind_speed_unit": "ms",
+                    }
+
+                    async with session.get(
+                        weather_url, params=weather_params
+                    ) as w_resp:
+                        if w_resp.status != 200:
+                            return f"[JSON Weather Error: Weather API returned {w_resp.status}]"
+                        w_data = await w_resp.json()
+
+                output = {
+                    "location": {
+                        "name": place.get("name"),
+                        "admin1": place.get("admin1"),
+                        "admin2": place.get("admin2"),
+                        "admin3": place.get("admin3"),
+                        "country": place.get("country"),
+                        "country_code": place.get("country_code", "").upper(),
+                        "latitude": lat,
+                        "longitude": lon,
+                        "elevation": place.get("elevation"),
+                        "population": place.get("population"),
+                        "timezone": timezone,
+                        "timezone_abbreviation": w_data.get("timezone_abbreviation"),
+                        "utc_offset_seconds": w_data.get("utc_offset_seconds"),
+                        "maps_url": f"https://www.google.com/maps/search/?api=1&query={lat},{lon}",
+                    },
+                    "current": w_data.get("current", {}),
+                    "hourly": w_data.get("hourly", {}),
+                    "daily": w_data.get("daily", {}),
+                    "units": {
+                        "current": w_data.get("current_units", {}),
+                        "hourly": w_data.get("hourly_units", {}),
+                        "daily": w_data.get("daily_units", {}),
+                    },
+                    "fetched_at": datetime.now(timez.utc).isoformat() + "Z",
+                }
+
+                return json.dumps(output)
+            except Exception as e:
+                return f"[JSON Weather Error: {str(e)}]"
 
         @self.formatter.register("attach")
         async def _attach(ctx, args_str, **kwargs):
