@@ -413,9 +413,8 @@ class MediaProcessor:
         self.media_cache: Dict[str, str] = {}
         self.active_processes: Set[asyncio.subprocess.Process] = set()
         base = Path(os.getenv("TEMP", "/tmp")) / "gscript"
-        base.mkdir(exist_ok=True)
         self.temp_dir = base / uuid.uuid4().hex
-        self.temp_dir.mkdir(exist_ok=True)
+        self._temp_dir_created = False
         self.temp_files = set()
         self.session = None
         self.command_specs = {
@@ -738,16 +737,33 @@ class MediaProcessor:
             except Exception:
                 pass
 
+        self.active_processes.clear()
+
         try:
-            shutil.rmtree(self.temp_dir, ignore_errors=True)
+            self._maybe_cleanup_temp_dir()
         except Exception:
             pass
 
         self.media_cache.clear()
-        self.active_processes.clear()
         self.temp_files.clear()
 
+    def _ensure_temp_dir(self) -> None:
+        if not self._temp_dir_created:
+            self.temp_dir.parent.mkdir(exist_ok=True)
+            self.temp_dir.mkdir(exist_ok=True)
+            self._temp_dir_created = True
+
+    def _maybe_cleanup_temp_dir(self) -> None:
+        if self._temp_dir_created and not self.active_processes:
+            shutil.rmtree(self.temp_dir, ignore_errors=True)
+            self._temp_dir_created = False
+            try:
+                self.temp_dir.parent.rmdir()
+            except OSError:
+                pass
+
     def _get_temp_path(self, extension: str = "") -> Path:
+        self._ensure_temp_dir()
         path = self.temp_dir / f"{uuid.uuid4()}{f'.{extension}' if extension else ''}"
         self.temp_files.add(str(path))
         path.touch(exist_ok=True)
