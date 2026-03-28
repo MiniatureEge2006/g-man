@@ -1555,6 +1555,7 @@ class MediaProcessor:
                             start = parts[2]
                             end = parts[3]
                             output_key = parts[4]
+                            segment_key = parts[5] if len(parts) > 5 else "segment"
                             sub_script = []
                             i += 1
                             while i < len(lines) and lines[i].lower() != "end":
@@ -1568,6 +1569,7 @@ class MediaProcessor:
                                 start_time=start,
                                 end_time=end,
                                 output_key=output_key,
+                                segment_key=segment_key,
                                 sub_script="\n".join(sub_script),
                                 _exec_registry=exec_registry,
                                 _user_vars=_user_vars,
@@ -1577,7 +1579,7 @@ class MediaProcessor:
                             ):
                                 produced_outputs.add(output_key)
                                 output_files.append(result[8:])
-                            if isinstance(result, str) and result.startswith("Error"):
+                            elif isinstance(result, str):
                                 raise RuntimeError(result)
                             last_output_key = output_key
                             i += 1
@@ -1727,6 +1729,8 @@ class MediaProcessor:
 
                             if cmd == "export":
                                 exported_keys.add(parsed.get("media_key"))
+                            elif cmd == "render":
+                                final_output_key = parsed.get("media_key")
                             elif "output_key" in parsed:
                                 last_output_key = parsed["output_key"]
                                 produced_outputs.add(last_output_key)
@@ -1961,7 +1965,7 @@ class MediaProcessor:
 
         missing = [k for k in input_keys if k not in self.media_cache]
         if missing:
-            return f"Missing input keys: {', '.join(missing)}"
+            return f"Error: Missing input keys: {', '.join(missing)}"
 
         input_paths = [Path(self.media_cache[k]) for k in input_keys]
 
@@ -4382,9 +4386,9 @@ class MediaProcessor:
         )
 
         before_key = f"{segment_key}_before"
-        segment_key = f"{segment_key}_main"
         after_key = f"{segment_key}_after"
         edited_key = f"{segment_key}_edited"
+        segment_key = f"{segment_key}_main"
 
         trim_tasks = [
             self._trim_media(
@@ -4420,15 +4424,32 @@ class MediaProcessor:
 
                 parts = shlex.split(line)
                 cmd = parts[0]
-                pos_args = [p for p in parts[1:] if "=" not in p]
-                kw_args = dict(p.split("=", 1) for p in parts[1:] if "=" in p)
+                raw_args = parts[1:]
+
+                spec = self.command_specs.get(cmd.lower(), {})
+                spec_params = [p for p in spec if p not in ("input_keys", "extra_args")]
+                kw_args = {}
+                pos_idx = 0
+                for arg in raw_args:
+                    if "=" in arg and not arg.startswith(("http://", "https://")):
+                        k, v = arg.split("=", 1)
+                        kw_args[k.strip().lower()] = v
+                    else:
+                        while (
+                            pos_idx < len(spec_params)
+                            and spec_params[pos_idx] in kw_args
+                        ):
+                            pos_idx += 1
+                        if pos_idx < len(spec_params):
+                            kw_args[spec_params[pos_idx]] = arg
+                            pos_idx += 1
 
                 if "input_key" not in kw_args:
                     kw_args["input_key"] = segment_key
                 if "output_key" not in kw_args:
                     kw_args["output_key"] = edited_key
 
-                new_parts = [cmd] + pos_args + [f"{k}={v}" for k, v in kw_args.items()]
+                new_parts = [cmd] + [f"{k}={v}" for k, v in kw_args.items()]
                 patched_lines.append(shlex.join(new_parts))
 
             patched_script = "\n".join(patched_lines)
@@ -4437,6 +4458,8 @@ class MediaProcessor:
             )
             if any(r.startswith("Error") for r in script_result):
                 return f"Sub-script error: {script_result}"
+            if edited_key not in self.media_cache:
+                return f"Error: dobetween sub-script did not produce output key '{edited_key}'"
 
             segment_to_use = edited_key
         else:
