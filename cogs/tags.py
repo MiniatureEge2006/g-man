@@ -649,6 +649,19 @@ class MediaProcessor:
                 "frame_count": {"required": True, "type": int},
                 "output_key": {"required": True, "type": str},
             },
+            "set": {
+                "var_name": {"required": True, "type": str},
+                "expression": {"required": True, "type": str},
+            },
+            "foreachframe": {
+                "input_key": {"required": True, "type": str},
+                "output_key": {"required": True, "type": str},
+                "frame_dir_key": {
+                    "required": False,
+                    "type": str,
+                    "default": "__frames",
+                },
+            },
         }
         self.gscript_commands = {
             "load": self._load_media,
@@ -687,6 +700,8 @@ class MediaProcessor:
             "chromakey": self._chromakey,
             "dobetween": self._dobetween_media,
             "setframecount": self._setframecount,
+            "set": self._set_variable,
+            "foreachframe": self._foreachframe,
             "export": self._export_media,
         }
 
@@ -772,158 +787,214 @@ class MediaProcessor:
     async def _get_media_dimensions(self, media_key: str) -> tuple[int, int]:
         if media_key not in self.media_cache:
             return (0, 0)
+        info = await self._get_full_media_info(media_key)
+        return (info["width"], info["height"])
 
-        file_path = self.media_cache[media_key]
+    async def _build_expr_vars(
+        self,
+        context_key: str = None,
+        overlay_key: str = None,
+        user_vars: dict = None,
+    ) -> dict:
+        vars: dict = {}
 
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=width,height",
-            "-of",
-            "json",
-            file_path,
-        ]
+        if context_key and context_key in self.media_cache:
+            info = await self._get_full_media_info(context_key)
+            vars.update(
+                {
+                    "iw": info["width"],
+                    "ih": info["height"],
+                    "W": info["width"],
+                    "H": info["height"],
+                    "width": info["width"],
+                    "height": info["height"],
+                    "main_w": info["width"],
+                    "main_h": info["height"],
+                    "duration": info["duration"],
+                    "fps": info["fps"],
+                    "frame_count": info["frame_count"],
+                    "file_size": info["file_size"],
+                    "bit_rate": info["bit_rate"],
+                    "sample_rate": info["sample_rate"],
+                    "channels": info["channels"],
+                    "aspect_ratio": info["aspect_ratio"],
+                    "codec": info["codec"],
+                    "audio_codec": info["audio_codec"],
+                    "has_audio": int(info["has_audio"]),
+                }
+            )
+        else:
+            vars.update(
+                {
+                    "iw": 0,
+                    "ih": 0,
+                    "W": 0,
+                    "H": 0,
+                    "width": 0,
+                    "height": 0,
+                    "main_w": 0,
+                    "main_h": 0,
+                    "duration": 0.0,
+                    "fps": 0.0,
+                    "frame_count": 0,
+                    "file_size": 0,
+                    "bit_rate": 0,
+                    "sample_rate": 0,
+                    "channels": 0,
+                    "has_audio": 0,
+                }
+            )
 
-        success, output = await self._run_ffprobe(cmd)
-        if success and output:
-            try:
-                data = json.loads(output)
-                stream = data["streams"][0]
-                return (int(stream["width"]), int(stream["height"]))
-            except Exception:
-                return (0, 0)
-        return (0, 0)
+        if overlay_key and overlay_key in self.media_cache:
+            oi = await self._get_full_media_info(overlay_key)
+            vars.update(
+                {
+                    "ow": oi["width"],
+                    "oh": oi["height"],
+                    "w": oi["width"],
+                    "h": oi["height"],
+                    "overlay_w": oi["width"],
+                    "overlay_h": oi["height"],
+                    "overlay_duration": oi["duration"],
+                    "overlay_fps": oi["fps"],
+                }
+            )
+        else:
+            vars.update({"ow": 0, "oh": 0, "w": 0, "h": 0})
 
-    async def _resolve_dimension(
-        self, dim_str: str, context_key: str = None, overlay_key: str = None
-    ) -> int:
+        for mk in list(self.media_cache.keys()):
+            if mk in (context_key, overlay_key):
+                continue
+            info = await self._get_full_media_info(mk)
+            safe = mk.replace("-", "_")
+            vars[f"{safe}_w"] = info["width"]
+            vars[f"{safe}_h"] = info["height"]
+            vars[f"{safe}_duration"] = info["duration"]
+            vars[f"{safe}_fps"] = info["fps"]
+            vars[f"{safe}_frame_count"] = info["frame_count"]
+
+        if user_vars:
+            vars.update(user_vars)
+
+        return vars
+
+    async def _resolve_expr(
+        self,
+        expr: str,
+        context_key: str = None,
+        overlay_key: str = None,
+        user_vars: dict = None,
+        as_float: bool = False,
+    ):
+
+        expr = str(expr).strip()
+
         try:
-            try:
-                return int(float(dim_str))
-            except ValueError:
-                pass
+            val = float(expr)
+            return val if as_float else int(val)
+        except ValueError:
+            pass
 
-            ctx_w, ctx_h = (0, 0)
-            if context_key and context_key in self.media_cache:
-                dims = await self._get_media_dimensions(context_key) or (0, 0)
-                ctx_w, ctx_h = dims
+        vars = await self._build_expr_vars(context_key, overlay_key, user_vars)
 
-            var_map = {
-                "iw": ctx_w,
-                "W": ctx_w,
-                "width": ctx_w,
-                "main_w": ctx_w,
-                "ih": ctx_h,
-                "H": ctx_h,
-                "height": ctx_h,
-                "main_h": ctx_h,
-                "ow": 0,
-                "oh": 0,
-                "w": 0,
-                "h": 0,
-            }
+        safe_builtins = {
+            "abs": abs,
+            "round": round,
+            "min": min,
+            "max": max,
+            "int": int,
+            "float": float,
+            "ceil": math.ceil,
+            "floor": math.floor,
+            "sqrt": math.sqrt,
+            "pi": math.pi,
+            "e": math.e,
+        }
 
-            if "_" in dim_str or any(
-                c.isalpha() and c.islower() for c in dim_str if c not in ["w", "h"]
-            ):
-                parts = (
-                    dim_str.split("_")
-                    if "_" in dim_str
-                    else [dim_str[:-1], dim_str[-1]]
-                )
-                if len(parts) >= 2 and parts[-1] in ["w", "h"]:
-                    media_key = "_".join(parts[:-1]) if "_" in dim_str else dim_str[:-1]
-                    dimension = parts[-1]
+        def _eval(e: str):
+            return eval(e, {"__builtins__": None, **safe_builtins}, vars)
 
-                    if media_key in self.media_cache:
-                        media_w, media_h = await self._get_media_dimensions(
-                            media_key
-                        ) or (0, 0)
-                        if dimension == "w":
-                            dim_str = str(media_w)
-                        elif dimension == "h":
-                            dim_str = str(media_h)
-
-            if overlay_key and overlay_key in self.media_cache:
-                overlay_dims = await self._get_media_dimensions(overlay_key) or (0, 0)
-                var_map.update(
-                    {
-                        "ow": overlay_dims[0],
-                        "w": overlay_dims[0],
-                        "oh": overlay_dims[1],
-                        "h": overlay_dims[1],
-                    }
-                )
-
-            for var, val in var_map.items():
-                dim_str = dim_str.replace(var, str(val))
-
-            if "(" in dim_str:
-                mode, args_str = (
-                    dim_str.split("(")[0].lower(),
-                    dim_str.split(")")[0].split("(")[1],
-                )
-                args = [
-                    await self._resolve_dimension(arg.strip(), context_key, overlay_key)
-                    for arg in args_str.split(",")
-                ]
-
+        if "(" in expr:
+            m = re.match(r"(\w+)\((.+)\)$", expr.strip())
+            if m:
+                mode = m.group(1).lower()
+                raw_args = m.group(2)
+                arg_strs = [a.strip() for a in raw_args.split(",")]
+                args = [_eval(a) for a in arg_strs]
+                ctx_w = vars.get("iw", 0)
+                ctx_h = vars.get("ih", 0)
                 if mode == "fill":
-                    return max(args)
-                if mode == "contain":
-                    return min(args)
-                if mode == "cover":
+                    val = max(args)
+                elif mode == "contain":
+                    val = min(args)
+                elif mode == "cover":
                     scale = (
                         max(args[0] / ctx_w, args[1] / ctx_h) if ctx_w and ctx_h else 1
                     )
-                    return int(scale * ctx_w)
-                if mode == "stretch":
-                    return args[0]
-                if mode == "center":
-                    return (
-                        (ctx_w - args[0]) // 2
-                        if any(c in dim_str.lower() for c in ["w", "width"])
-                        else (ctx_h - args[0]) // 2
+                    val = scale * ctx_w
+                elif mode == "stretch":
+                    val = args[0]
+                elif mode == "center":
+                    val = (
+                        ((ctx_w - args[0]) // 2)
+                        if "w" in expr.lower()
+                        else ((ctx_h - args[0]) // 2)
                     )
+                else:
+                    val = _eval(expr)
+                return float(val) if as_float else int(val)
 
-            if "%" in dim_str:
-                base = (
-                    ctx_w
-                    if any(c in dim_str.lower() for c in ["w", "width", "x"])
-                    else ctx_h
-                )
-                return int(base * float(dim_str.replace("%", ""))) / 100
-
-            return (
-                int(float(eval(dim_str, {"__builtins__": None}, {})))
-                if any(op in dim_str for op in "+-*/")
-                else int(float(dim_str))
-            )
-
-        except Exception:
-            return 0
-
-    async def _resolve_timestamp(
-        self, input_key: str, time_val: Union[str, float]
-    ) -> str:
-        if not isinstance(time_val, str) or not time_val.endswith("%"):
-            return str(time_val)
-
-        if input_key not in self.media_cache:
-            return "0"
-
-        path = Path(self.media_cache[input_key])
-        _, _, duration, _ = await self._probe_media_info(path)
+        if expr.endswith("%"):
+            try:
+                pct = float(expr[:-1])
+                base = vars.get("iw", 0) or vars.get("ih", 0)
+                val = base * pct / 100.0
+                return val if as_float else int(val)
+            except Exception:
+                pass
 
         try:
-            pct = float(time_val.strip("%"))
-            return str(duration * (pct / 100.0))
+            val = _eval(expr)
+            return float(val) if as_float else int(float(val))
         except Exception:
+            return 0.0 if as_float else 0
+
+    async def _resolve_dimension(
+        self,
+        dim_str: str,
+        context_key: str = None,
+        overlay_key: str = None,
+        user_vars: dict = None,
+    ) -> int:
+        return await self._resolve_expr(
+            dim_str,
+            context_key=context_key,
+            overlay_key=overlay_key,
+            user_vars=user_vars,
+        )
+
+    async def _resolve_timestamp(
+        self,
+        input_key: str,
+        time_val,
+        user_vars: dict = None,
+    ) -> str:
+        if time_val is None:
             return "0"
+        s = str(time_val).strip()
+        if re.match(r"^\d+:\d{2}:\d{2}(\.\d+)?$", s):
+            return s
+        if s.endswith("%"):
+            info = await self._get_full_media_info(input_key)
+            try:
+                pct = float(s[:-1])
+                return str(info["duration"] * pct / 100.0)
+            except Exception:
+                return "0"
+        val = await self._resolve_expr(
+            s, context_key=input_key, user_vars=user_vars, as_float=True
+        )
+        return str(val)
 
     def _parse_color(
         self, color_str: str, size: tuple = None
@@ -1206,10 +1277,10 @@ class MediaProcessor:
                     if typ is bool:
                         return str2bool(val)
                     return typ(val)
-                except ValueError as e:
-                    raise ValueError(
-                        f"Invalid {typ.__name__} value: '{val}' ({str(e)})"
-                    )
+                except (ValueError, TypeError):
+                    if typ in (int, float) and isinstance(val, str):
+                        return val
+                    raise ValueError(f"Invalid {typ.__name__} value: '{val}'")
 
             for param, param_spec in spec.items():
                 if param in ("input_keys", "extra_args"):
@@ -1318,45 +1389,145 @@ class MediaProcessor:
             return False, f"Error: {str(e)}"
 
     async def _probe_media_info(self, path: Path) -> tuple:
+        info = await self._get_full_media_info(str(path))
+        return (info["width"], info["height"], info["duration"], info["has_audio"])
+
+    async def _get_full_media_info(self, path_or_key: str) -> dict:
+        if path_or_key in self.media_cache:
+            file_path = self.media_cache[path_or_key]
+        else:
+            file_path = path_or_key
+
+        if not hasattr(self, "_meta_cache"):
+            self._meta_cache: dict = {}
+        if file_path in self._meta_cache:
+            return self._meta_cache[file_path]
+
+        default = {
+            "width": 1,
+            "height": 1,
+            "duration": 0.0,
+            "has_audio": False,
+            "fps": 0.0,
+            "frame_count": 0,
+            "codec": "",
+            "audio_codec": "",
+            "file_size": 0,
+            "aspect_ratio": "",
+            "bit_rate": 0,
+            "sample_rate": 0,
+            "channels": 0,
+        }
+
         cmd = [
             "ffprobe",
             "-v",
             "error",
             "-show_entries",
-            "stream=codec_type,width,height,duration",
+            "stream=codec_type,codec_name,width,height,duration,r_frame_rate,"
+            "nb_frames,sample_rate,channels",
             "-show_entries",
-            "format=duration",
+            "format=duration,size,bit_rate",
             "-of",
             "json",
-            str(path),
+            file_path,
         ]
-
         success, output = await self._run_ffprobe(cmd)
         if not success:
-            return (1, 1, 0.0, False)
+            self._meta_cache[file_path] = default
+            return default
 
         try:
             data = json.loads(output)
             streams = data.get("streams", [])
-            format_info = data.get("format", {})
+            fmt = data.get("format", {})
 
-            width, height = 1, 1
+            result = dict(default)
+
+            try:
+                result["file_size"] = int(fmt.get("size", 0))
+            except (ValueError, TypeError):
+                pass
+            try:
+                result["bit_rate"] = int(fmt.get("bit_rate", 0))
+            except (ValueError, TypeError):
+                pass
+
+            try:
+                result["duration"] = max(float(fmt.get("duration", 0)), 0.0)
+            except (ValueError, TypeError):
+                pass
+
             for stream in streams:
-                if stream.get("codec_type") == "video":
-                    width = max(int(stream.get("width", 1)), 1)
-                    height = max(int(stream.get("height", 1)), 1)
-                    break
+                codec_type = stream.get("codec_type", "")
+                if codec_type == "video" and result["width"] == 1:
+                    result["width"] = max(int(stream.get("width", 1)), 1)
+                    result["height"] = max(int(stream.get("height", 1)), 1)
+                    result["codec"] = stream.get("codec_name", "")
 
-            duration = max(float(format_info.get("duration", 0)), 0.0)
+                    rfr = stream.get("r_frame_rate", "0/1")
+                    try:
+                        num, den = rfr.split("/")
+                        fps = float(num) / float(den) if float(den) else 0.0
+                        result["fps"] = round(fps, 3)
+                    except Exception:
+                        pass
 
-            has_audio = any(s.get("codec_type") == "audio" for s in streams)
+                    nb = stream.get("nb_frames")
+                    if nb and nb != "N/A":
+                        try:
+                            result["frame_count"] = int(nb)
+                        except (ValueError, TypeError):
+                            pass
+                    if (
+                        result["frame_count"] == 0
+                        and result["fps"]
+                        and result["duration"]
+                    ):
+                        result["frame_count"] = int(result["fps"] * result["duration"])
 
-            return (width, height, duration, has_audio)
+                    if result["duration"] == 0.0:
+                        try:
+                            result["duration"] = max(
+                                float(stream.get("duration", 0)), 0.0
+                            )
+                        except (ValueError, TypeError):
+                            pass
+
+                    w, h = result["width"], result["height"]
+                    if h:
+                        g = math.gcd(w, h)
+                        result["aspect_ratio"] = f"{w // g}:{h // g}"
+
+                elif codec_type == "audio":
+                    result["has_audio"] = True
+                    result["audio_codec"] = stream.get("codec_name", "")
+                    try:
+                        result["sample_rate"] = int(stream.get("sample_rate", 0))
+                    except (ValueError, TypeError):
+                        pass
+                    try:
+                        result["channels"] = int(stream.get("channels", 0))
+                    except (ValueError, TypeError):
+                        pass
+
+            self._meta_cache[file_path] = result
+            return result
 
         except Exception:
-            return (1, 1, 0.0, False)
+            self._meta_cache[file_path] = default
+            return default
 
-    async def execute_media_script(self, script, exec_registry: dict = None):
+    def _invalidate_meta_cache(self, media_key: str) -> None:
+        if not hasattr(self, "_meta_cache"):
+            return
+        path = self.media_cache.get(media_key)
+        if path and path in self._meta_cache:
+            del self._meta_cache[path]
+
+    async def execute_media_script(
+        self, script, exec_registry: dict = None, user_vars: dict = None
+    ):
         try:
             lines = [line.strip() for line in script.splitlines() if line.strip()]
             output_files = []
@@ -1365,30 +1536,30 @@ class MediaProcessor:
             produced_outputs = set()
             exported_keys = set()
             final_output_key = None
+            _user_vars: dict = dict(user_vars) if user_vars else {}
             i = 0
 
             while i < len(lines):
                 line = lines[i]
                 try:
-                    if line.lower().startswith("dobetween"):
+                    cmd_head = line.split()[0].lower() if line.split() else ""
+
+                    if cmd_head == "dobetween":
                         try:
                             parts = line.split()
                             if len(parts) < 5:
                                 raise ValueError(
                                     "dobetween requires input_key, start_time, end_time, output_key"
                                 )
-
                             input_key = parts[1]
                             start = parts[2]
                             end = parts[3]
                             output_key = parts[4]
                             sub_script = []
                             i += 1
-
-                            while i < len(lines) and not lines[i].lower() == "end":
+                            while i < len(lines) and lines[i].lower() != "end":
                                 sub_script.append(lines[i])
                                 i += 1
-
                             if i >= len(lines):
                                 raise ValueError("Missing 'end' for dobetween")
 
@@ -1398,13 +1569,16 @@ class MediaProcessor:
                                 end_time=end,
                                 output_key=output_key,
                                 sub_script="\n".join(sub_script),
+                                _exec_registry=exec_registry,
+                                _user_vars=_user_vars,
                             )
-                            if result.startswith("media://"):
+                            if isinstance(result, str) and result.startswith(
+                                "media://"
+                            ):
                                 produced_outputs.add(output_key)
                                 output_files.append(result[8:])
-                            if result.startswith("Error"):
+                            if isinstance(result, str) and result.startswith("Error"):
                                 raise RuntimeError(result)
-
                             last_output_key = output_key
                             i += 1
                         except Exception as e:
@@ -1415,6 +1589,77 @@ class MediaProcessor:
                             )
                             i += 1
                             continue
+
+                    elif cmd_head == "foreachframe":
+                        try:
+                            parts = shlex.split(line)
+                            if len(parts) < 3:
+                                raise ValueError(
+                                    "foreachframe requires input_key and output_key"
+                                )
+                            input_key = parts[1]
+                            output_key = parts[2]
+                            frame_dir_key = parts[3] if len(parts) > 3 else "__frames"
+                            sub_script = []
+                            i += 1
+                            while i < len(lines) and lines[i].lower() != "end":
+                                sub_script.append(lines[i])
+                                i += 1
+                            if i >= len(lines):
+                                raise ValueError("Missing 'end' for foreachframe")
+
+                            result = await self._foreachframe(
+                                input_key=input_key,
+                                output_key=output_key,
+                                frame_dir_key=frame_dir_key,
+                                sub_script="\n".join(sub_script),
+                                _exec_registry=exec_registry,
+                                _user_vars=_user_vars,
+                            )
+                            if isinstance(result, str) and result.startswith(
+                                "media://"
+                            ):
+                                produced_outputs.add(output_key)
+                                output_files.append(result[8:])
+                                final_output_key = output_key
+                            if isinstance(result, str) and result.startswith("Error"):
+                                raise RuntimeError(result)
+                            last_output_key = output_key
+                            i += 1
+                        except Exception as e:
+                            errors.append(
+                                await self._handle_error(
+                                    "foreachframe", e, f"in line: {line}"
+                                )
+                            )
+                            i += 1
+                            continue
+
+                    elif cmd_head == "set":
+                        try:
+                            parts = shlex.split(line)
+                            if len(parts) < 3:
+                                raise ValueError(
+                                    "set requires a variable name and expression"
+                                )
+                            var_name = parts[1]
+                            expression = " ".join(parts[2:])
+                            context_key = last_output_key
+                            val = await self._resolve_expr(
+                                expression,
+                                context_key=context_key,
+                                user_vars=_user_vars,
+                                as_float=True,
+                            )
+                            _user_vars[var_name] = val
+                            i += 1
+                        except Exception as e:
+                            errors.append(
+                                await self._handle_error("set", e, f"in line: {line}")
+                            )
+                            i += 1
+                            continue
+
                     else:
                         try:
                             parts = shlex.split(line)
@@ -1429,10 +1674,55 @@ class MediaProcessor:
                                 raise ValueError(f"Unknown command: '{cmd}'")
 
                             parsed = await self._parse_command_args(cmd, args)
+
+                            context_key = (
+                                parsed.get("input_key")
+                                or parsed.get("base_key")
+                                or parsed.get("media_key")
+                                or last_output_key
+                            )
+                            overlay_key = parsed.get("overlay_key")
+                            _skip_resolve = {
+                                "input_key",
+                                "output_key",
+                                "base_key",
+                                "media_key",
+                                "audio_key",
+                                "overlay_key",
+                                "segment_key",
+                                "registry_key",
+                                "url",
+                                "format",
+                                "text",
+                                "font",
+                                "color",
+                                "background_color",
+                                "outline_color",
+                                "shadow_color",
+                                "codec",
+                            }
+                            for k, v in list(parsed.items()):
+                                if not isinstance(v, str) or k in _skip_resolve:
+                                    continue
+                                try:
+                                    float(v)
+                                    continue
+                                except ValueError:
+                                    pass
+                                resolved = await self._resolve_expr(
+                                    v,
+                                    context_key=context_key,
+                                    overlay_key=overlay_key,
+                                    user_vars=_user_vars,
+                                    as_float=True,
+                                )
+                                parsed[k] = str(resolved)
+
                             if exec_registry is not None:
                                 parsed["_exec_registry"] = exec_registry
-                            func = self.gscript_commands[cmd]
+                            parsed["_user_vars"] = _user_vars
 
+                            func = self.gscript_commands[cmd]
                             result = await func(**parsed)
 
                             if cmd == "export":
@@ -1442,11 +1732,13 @@ class MediaProcessor:
                                 produced_outputs.add(last_output_key)
                                 final_output_key = last_output_key
 
-                            if result.startswith("media://"):
+                            if isinstance(result, str) and result.startswith(
+                                "media://"
+                            ):
                                 path = result[8:]
                                 if parsed.get("output_key") not in exported_keys:
                                     output_files.append(path)
-                            if result.startswith("Error"):
+                            if isinstance(result, str) and result.startswith("Error"):
                                 raise RuntimeError(result)
 
                             i += 1
@@ -1465,6 +1757,7 @@ class MediaProcessor:
                     )
                     i += 1
                     continue
+
             exported_paths = {
                 self.media_cache[k] for k in exported_keys if k in self.media_cache
             }
@@ -4075,12 +4368,18 @@ class MediaProcessor:
         output_key = kwargs["output_key"]
         segment_key = kwargs.get("segment_key", "segment")
         sub_script = kwargs.get("sub_script", "")
+        user_vars: dict = kwargs.get("_user_vars", {})
+        exec_registry = kwargs.get("_exec_registry")
 
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
 
-        resolved_start = await self._resolve_timestamp(input_key, start_time)
-        resolved_end = await self._resolve_timestamp(input_key, end_time)
+        resolved_start = await self._resolve_timestamp(
+            input_key, start_time, user_vars=user_vars
+        )
+        resolved_end = await self._resolve_timestamp(
+            input_key, end_time, user_vars=user_vars
+        )
 
         before_key = f"{segment_key}_before"
         segment_key = f"{segment_key}_main"
@@ -4133,7 +4432,9 @@ class MediaProcessor:
                 patched_lines.append(shlex.join(new_parts))
 
             patched_script = "\n".join(patched_lines)
-            script_result = await self.execute_media_script(patched_script)
+            script_result = await self.execute_media_script(
+                patched_script, exec_registry=exec_registry, user_vars=user_vars
+            )
             if any(r.startswith("Error") for r in script_result):
                 return f"Sub-script error: {script_result}"
 
@@ -4146,6 +4447,222 @@ class MediaProcessor:
         )
 
         return concat_result
+
+    async def _set_variable(self, **kwargs) -> str:
+        var_name = kwargs.get("var_name", "")
+        expression = kwargs.get("expression", "0")
+        context_key = kwargs.get("context_key")
+        user_vars: dict = kwargs.get("_user_vars", {})
+
+        if not var_name or not var_name.isidentifier():
+            return f"Error: '{var_name}' is not a valid variable name"
+
+        val = await self._resolve_expr(
+            expression,
+            context_key=context_key,
+            user_vars=user_vars,
+            as_float=True,
+        )
+        user_vars[var_name] = val
+        return f"set {var_name} = {val}"
+
+    async def _foreachframe(self, **kwargs) -> str:
+        try:
+            input_key = kwargs.get("input_key")
+            output_key = kwargs.get("output_key")
+            sub_script = kwargs.get("sub_script", "")
+            user_vars: dict = kwargs.get("_user_vars", {})
+            exec_registry = kwargs.get("_exec_registry")
+            frame_dir_key = kwargs.get("frame_dir_key", "__frames")
+
+            if not input_key or input_key not in self.media_cache:
+                return f"Error: foreachframe - '{input_key}' not in media cache"
+            if not output_key:
+                return "Error: foreachframe - output_key is required"
+            if not sub_script:
+                return "Error: foreachframe - no sub-script (missing 'end'?)"
+
+            input_path = Path(self.media_cache[input_key])
+            info = await self._get_full_media_info(input_key)
+            fps = info["fps"] or 25.0
+            has_audio = info["has_audio"]
+
+            frames_dir = self._get_temp_path("")
+            frames_dir.unlink(missing_ok=True)
+            frames_dir.mkdir(parents=True, exist_ok=True)
+            self.temp_files.add(str(frames_dir))
+
+            extract_cmd = [
+                "ffmpeg",
+                "-hide_banner",
+                "-y",
+                "-i",
+                input_path.as_posix(),
+                "-vsync",
+                "0",
+                str(frames_dir / "frame_%08d.png"),
+            ]
+            ok, err = await self._run_ffmpeg(extract_cmd)
+            if not ok:
+                return f"Error: foreachframe frame extraction failed: {err}"
+
+            frame_files = sorted(frames_dir.glob("frame_*.png"))
+            if not frame_files:
+                return "Error: foreachframe - no frames extracted"
+
+            actual_total = len(frame_files)
+            processed_dir = self._get_temp_path("")
+            processed_dir.unlink(missing_ok=True)
+            processed_dir.mkdir(parents=True, exist_ok=True)
+            self.temp_files.add(str(processed_dir))
+
+            for idx, frame_file in enumerate(frame_files):
+                frame_key = f"{frame_dir_key}_frame_{idx}"
+                self.media_cache[frame_key] = str(frame_file)
+
+                frame_user_vars = dict(user_vars)
+                frame_user_vars["frame_index"] = float(idx)
+                frame_user_vars["frame_count"] = float(actual_total)
+                frame_user_vars["frame_time"] = round(idx / fps, 6)
+
+                current_key = frame_key
+                step = 0
+                patched_lines = []
+                for line in sub_script.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parts = shlex.split(line)
+                    cmd_name = parts[0]
+                    pos_args = [p for p in parts[1:] if "=" not in p]
+                    kw_args = dict(p.split("=", 1) for p in parts[1:] if "=" in p)
+
+                    if cmd_name not in ("create", "load", "set", "export"):
+                        if "input_key" not in kw_args:
+                            kw_args["input_key"] = current_key
+                        step_out_key = f"{frame_dir_key}_out_{idx}_step{step}"
+                        if "output_key" not in kw_args:
+                            kw_args["output_key"] = step_out_key
+                        current_key = kw_args["output_key"]
+                        step += 1
+
+                    new_parts = (
+                        [cmd_name] + pos_args + [f"{k}={v}" for k, v in kw_args.items()]
+                    )
+                    patched_lines.append(shlex.join(new_parts))
+
+                processed_frame_key = current_key
+
+                patched_script = "\n".join(patched_lines)
+                await self.execute_media_script(
+                    patched_script,
+                    exec_registry=exec_registry,
+                    user_vars=frame_user_vars,
+                )
+
+                if processed_frame_key in self.media_cache:
+                    out_frame_path = processed_dir / f"frame_{idx:08d}.png"
+                    src = Path(self.media_cache[processed_frame_key])
+                    if src.suffix.lower() != ".png":
+                        conv_out = self._get_temp_path("png")
+                        conv_cmd = [
+                            "ffmpeg",
+                            "-hide_banner",
+                            "-y",
+                            "-i",
+                            src.as_posix(),
+                            conv_out.as_posix(),
+                        ]
+                        await self._run_ffmpeg(conv_cmd)
+                        shutil.copy(str(conv_out), str(out_frame_path))
+                    else:
+                        shutil.copy(str(src), str(out_frame_path))
+                else:
+                    shutil.copy(
+                        str(frame_file), str(processed_dir / f"frame_{idx:08d}.png")
+                    )
+
+            suffix = input_path.suffix.lower()
+            out_ext = (
+                suffix[1:]
+                if suffix in (".mp4", ".mov", ".webm", ".mkv", ".avi", ".wmv", ".gif")
+                else "mp4"
+            )
+            output_file = self._get_temp_path(out_ext)
+
+            if has_audio:
+                audio_path = self._get_temp_path("aac")
+                audio_cmd = [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-y",
+                    "-i",
+                    input_path.as_posix(),
+                    "-vn",
+                    "-acodec",
+                    "aac",
+                    str(audio_path),
+                ]
+                await self._run_ffmpeg(audio_cmd)
+
+                encode_cmd = [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-y",
+                    "-framerate",
+                    str(fps),
+                    "-i",
+                    str(processed_dir / "frame_%08d.png"),
+                    "-i",
+                    str(audio_path),
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-preset",
+                    "fast",
+                    "-crf",
+                    "23",
+                    "-movflags",
+                    "+faststart",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "192k",
+                    "-shortest",
+                    output_file.as_posix(),
+                ]
+            else:
+                encode_cmd = [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-y",
+                    "-framerate",
+                    str(fps),
+                    "-i",
+                    str(processed_dir / "frame_%08d.png"),
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-preset",
+                    "fast",
+                    "-crf",
+                    "23",
+                    "-movflags",
+                    "+faststart",
+                    output_file.as_posix(),
+                ]
+
+            ok, err = await self._run_ffmpeg(encode_cmd)
+            if not ok:
+                return f"Error: foreachframe re-encode failed: {err}"
+
+            self.media_cache[output_key] = str(output_file)
+            return f"media://{output_file.as_posix()}"
+
+        except Exception as e:
+            return await self._handle_error("foreachframe", e)
 
     async def _setframecount(self, **kwargs) -> str:
         try:
@@ -4588,8 +5105,24 @@ class Tags(commands.Cog):
                     - fadeout [input_key] [start_time] [duration] [color] [audio] [output_key]
                     - colorkey [input_key] [color] [similarity] [blend] [output_key]
                     - chromakey [input_key] [color] [similarity] [blend] [output_key]
-                    - dobetween [input_key] [start_time] [end_time] [segment_key] [gmanscript]
+                    - dobetween [input_key] [start_time] [end_time] [segment_key] [output_key] ... end
                     - setframecount [input_key] [frame_count] [output_key]
+                    - set [var_name] [expression]
+                    - foreachframe [input_key] [output_key] [frame_dir_key] ... end
+                * Variable declarations via set:
+                    - set myvar 42                   <- literal
+                    - set half_w iw/2                <- input width divided by 2
+                    - set pad ih*0.1+20              <- 10% of height plus 20
+                    - set dur duration               <- media duration in seconds
+                    - set fc frame_count             <- total frame count
+                    - set fps_val fps                <- frames per second
+                    - set area mywidth*myheight      <- combining user vars
+                    - set other_h video2_h           <- another media key's height
+                * Math expressions work everywhere a numeric argument is accepted:
+                    - resize video iw/2 ih/2 out     <- half size
+                    - crop video iw/4 ih/4 iw/2 ih/2 out  <- center quarter
+                    - trim video 0 duration/2 out    <- first half
+                    - text img "hi" iw/2 ih/2 white out   <- centered text pos
             """
             try:
                 processor = MediaProcessor()
