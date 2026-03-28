@@ -2,9 +2,11 @@ import asyncio
 import json
 import os
 import shutil
+import signal
 import tempfile
 import time
 import traceback
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List
@@ -14,7 +16,7 @@ from fastapi.responses import FileResponse
 
 APP_USER = "gcoder"
 EXECUTION_BASE = Path("/home/gcoder")
-STAGING_DIR = EXECUTION_BASE / "staging"
+STAGING_BASE = EXECUTION_BASE / "staging"
 ALLOWED_LANGUAGES = [
     "bash",
     "fish",
@@ -37,13 +39,17 @@ ALLOWED_LANGUAGES = [
 ]
 
 
+_stage_refcounts: dict[str, int] = defaultdict(int)
+_stage_refcounts_lock = asyncio.Lock()
+
+
 def ensure_dirs():
     EXECUTION_BASE.mkdir(mode=0o700, exist_ok=True)
-    STAGING_DIR.mkdir(mode=0o700, exist_ok=True)
+    STAGING_BASE.mkdir(mode=0o700, exist_ok=True)
 
     if os.getuid() == 0:
         os.chown(EXECUTION_BASE, 1000, 1000)
-        os.chown(STAGING_DIR, 1000, 1000)
+        os.chown(STAGING_BASE, 1000, 1000)
 
 
 @asynccontextmanager
@@ -56,7 +62,7 @@ app = FastAPI(lifespan=lifespan)
 
 
 def safe_delete(path: Path):
-    if path in [STAGING_DIR, EXECUTION_BASE]:
+    if path in [STAGING_BASE, EXECUTION_BASE]:
         return False
     for _ in range(3):
         try:
@@ -81,6 +87,7 @@ async def validate_file(file: UploadFile):
 async def execute_code(language: str, code: str, files: List[UploadFile]):
     ensure_dirs()
     work_dir = Path(tempfile.mkdtemp(dir=EXECUTION_BASE, prefix="run_"))
+    stage_dir = STAGING_BASE / work_dir.name
     work_dir.chmod(0o700)
     input_dir = work_dir / "input"
     input_dir.mkdir(mode=0o700)
@@ -111,6 +118,7 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
             stdin=asyncio.subprocess.PIPE if input_data else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
         try:
             stdout, stderr = await asyncio.wait_for(
@@ -120,8 +128,10 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
                 "utf-8", errors="replace"
             ), proc.returncode
         except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
             return "Code execution took longer than 60 seconds", 1
 
     try:
@@ -332,13 +342,16 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
         ensure_dirs()
         produced = [f for f in output_dir.iterdir() if f.is_file()]
         final_files = []
-        for f in produced:
-            dest = STAGING_DIR / f.name
-            shutil.copy2(f, dest)
-            final_files.append(f.name)
+        if produced:
+            stage_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+            for f in produced:
+                dest = stage_dir / f.name
+                shutil.copy2(f, dest)
+                final_files.append(f.name)
 
         return {
             "output": output.strip(),
+            "run_id": work_dir.name,
             "files": final_files,
             "error": return_code != 0,
         }
@@ -348,8 +361,9 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
         print(f"Code execution Error: {traceback.format_exc()}")
         raise HTTPException(500, detail=f"Code execution failed: {str(e)}")
     finally:
-        shutil.rmtree(work_dir, ignore_errors=True)
-        ensure_dirs()
+        safe_delete(work_dir)
+        if stage_dir.exists() and not any(stage_dir.iterdir()):
+            safe_delete(stage_dir)
 
 
 @app.post("/{language}/execute")
@@ -361,16 +375,21 @@ async def execute_endpoint(
     return await execute_code(language, code, files)
 
 
-@app.get("/files/{filename}")
-async def get_file(filename: str, background_tasks: BackgroundTasks):
+@app.get("/files/{run_id}/{filename}")
+async def get_file(run_id: str, filename: str, background_tasks: BackgroundTasks):
     ensure_dirs()
-    file_path = STAGING_DIR / filename
+    stage_dir = STAGING_BASE / run_id
+    file_path = stage_dir / filename
     if not file_path.exists():
         raise HTTPException(404, detail="File not found.")
 
     async def cleanup():
         await asyncio.sleep(10)
-        safe_delete(file_path)
+        async with _stage_refcounts_lock:
+            _stage_refcounts[run_id] -= 1
+            if _stage_refcounts[run_id] <= 0:
+                del _stage_refcounts[run_id]
+                safe_delete(stage_dir)
 
     background_tasks.add_task(cleanup)
     return FileResponse(file_path)
@@ -384,5 +403,5 @@ async def health_check():
         "user": APP_USER,
         "uid": os.getuid(),
         "execution_base": str(EXECUTION_BASE),
-        "staging_dir_exists": STAGING_DIR.exists(),
+        "staging_dir_exists": STAGING_BASE.exists(),
     }

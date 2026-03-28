@@ -56,13 +56,14 @@ RUN emerge --getbinpkg --noreplace \
 
 
 RUN groupadd -g 1000 gcoder && useradd -r -u 1000 -g gcoder -m -d /home/gcoder gcoder
+RUN pip install --break-system-packages pyvips
 RUN npm install -g ts-node mathjs imagescript
 ENV NODE_PATH=/usr/local/lib/node_modules
 RUN mkdir -p /app && \
     chown -R root:root /app && \
     chmod -R 555 /app
 COPY --chown=gcoder:gcoder . /app
-
+RUN rm /latest-stage3-amd64-openrc.txt && rm /latest.txt
 USER gcoder
 EXPOSE 8000
 

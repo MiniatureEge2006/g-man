@@ -288,9 +288,10 @@ class Code(commands.Cog):
             view.language = language
 
             if result.get("files"):
+                run_id = result.get("run_id", "")
                 file_objs = []
                 for filename in result["files"][:10]:
-                    file_url = f"http://localhost:8000/files/{filename}"
+                    file_url = f"http://localhost:8000/files/{run_id}/{filename}"
                     try:
                         async with self.session.get(file_url) as resp:
                             if resp.status == 200:

@@ -4511,9 +4511,10 @@ class Tags(commands.Cog):
                     return f"[{language} error: {output or 'Code execution failed with no output'}]"
 
                 if result.get("files"):
+                    run_id = result.get("run_id", "")
                     file_objs = []
                     for idx, filename in enumerate(result["files"][:10], start=1):
-                        file_url = f"http://localhost:8000/files/{filename}"
+                        file_url = f"http://localhost:8000/files/{run_id}/{filename}"
                         try:
                             async with self.processor.session.get(
                                 file_url
@@ -4552,7 +4553,7 @@ class Tags(commands.Cog):
                 * Another example to do effects between timestamps: `{gscript:load url=https://example.com/video.mp4 media_key=video{newline}dobetween video 5 10 segment_key=segment output_key=proc{newline}caption segment text="testing"{newline}end{newline}render proc dobetween.mp4}`
                 * Yet another example that trims media: `{gscript:load url=https://example.com/video.mp4 media_key=video{newline}trim input_key=video start_time=0 end_time=10 output_key=trimmed{newline}render trimmed}`
                 * Available GScript commands:
-                    - load [url] [media_key] - url can be FILE_N to load from the code execution server.
+                    - load [url] [media_key] - url can be FILE_N (starting from 1, not 0) to load from the code execution server.
                     - export [media_key] [registry_key]
                     - reverse [input_key] [output_key]
                     - concat [output_key] [input_keys...]
