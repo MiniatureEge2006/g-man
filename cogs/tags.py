@@ -1800,12 +1800,9 @@ class MediaProcessor:
             reg_key = url.upper()
             entry = exec_registry.get(reg_key)
             if not entry:
-                return (
-                    f"Error: '{url}' not found in exec file registry. "
-                    "Run a {code:...} block first or use 'export' in a prior gscript block."
-                )
+                return f"Error: '{url}' not found in exec file registry. "
             reg_bytes, reg_filename = entry
-            ext = Path(reg_filename).suffix.lstrip(".") or "bin"
+            ext = Path(reg_filename).suffix.lstrip(".")
             temp_file = self._get_temp_path(ext)
             with temp_file.open("wb") as f:
                 f.write(reg_bytes)
@@ -1850,7 +1847,7 @@ class MediaProcessor:
                     if resp.status != 200:
                         return f"HTTP Error {resp.status}"
 
-                    ext = Path(url.split("?")[0]).suffix[1:] or "tmp"
+                    ext = Path(url.split("?")[0]).suffix[1:]
                     temp_file = self._get_temp_path(ext)
 
                     with temp_file.open("wb") as f:
@@ -1882,7 +1879,7 @@ class MediaProcessor:
                 file_bytes = f.read()
 
             exec_registry[registry_key] = (file_bytes, path.name)
-            return f"Exported {media_key} → registry as {registry_key} ({path.name})"
+            return f"Exported {media_key} -> registry as {registry_key} ({path.name})"
         except Exception as e:
             return await self._handle_error("export", e)
 
