@@ -205,7 +205,6 @@ class Paginator(discord.ui.View):
     async def first_page(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
-        await self.show_page(0)
         content, embeds, files = await self.show_page(0)
         await interaction.response.edit_message(
             content=content, embeds=embeds, view=self, attachments=files
@@ -4850,6 +4849,8 @@ class TagFormatter:
         discord.ui.View | discord.ui.LayoutView | None,
         list[discord.File],
     ]:
+        if "_tag_settings" not in kwargs:
+            kwargs["_tag_settings"] = {}
         text_parts = []
         embeds = []
         view = None
@@ -5241,6 +5242,33 @@ class Tags(commands.Cog):
             """
             return ""
 
+        @self.formatter.register("settings")
+        async def _settings(ctx, content, **kwargs):
+            """
+            ### {settings:SETTING_KEY|value}
+                * Define a global setting that affects other tag functions anywhere in the tagscript.
+                * Multiple {settings} blocks are additive.
+                * To find out more about these settings, check the corresponding tag function's docstring.
+                * Example:
+                   {settings:G_AI_SYSTEM_PROMPT|You are an assistant to {user}.} {ai:hi}
+            """
+            try:
+                parts = content.split("|", 1)
+                if len(parts) != 2:
+                    return ""
+
+                key = parts[0].strip()
+                value = parts[1].strip()
+
+                tag_settings = kwargs.get("_tag_settings")
+                if tag_settings is None:
+                    return ""
+
+                tag_settings[key] = value
+                return ""
+            except Exception:
+                return ""
+
         @self.formatter.register("text")
         async def _fetch_text(ctx, url, **kwargs):
             """
@@ -5297,6 +5325,13 @@ class Tags(commands.Cog):
             """
             ### {ai:prompt}
                 * G-AI but as a tag function. (functions similarly to the AI command.)
+                * Supported settings:
+                    - G_AI_SYSTEM_PROMPT
+                    - G_AI_MODEL
+                    - G_AI_THINKING
+                    - G_AI_SHOW_THINKING
+                    - G_AI_WEB_SEARCH
+                    - G_AI_DEBUG
                 * Example: `{ai:hello}`
             """
             try:
@@ -5304,24 +5339,33 @@ class Tags(commands.Cog):
                 if not ai:
                     return "[AI error: AI cog not loaded]"
 
-                think_mode = re.search(r"(^|\s)--think($|\s)", prompt) is not None
-                if think_mode:
-                    prompt = re.sub(r"(^|\s)--think($|\s)", " ", prompt).strip()
-                show_thinking = (
-                    re.search(r"(^|\s)--show-thinking($|\s)", prompt) is not None
+                tag_settings = kwargs.get("_tag_settings", {})
+                system_prompt_override = tag_settings.get("G_AI_SYSTEM_PROMPT")
+                model_name = tag_settings.get("G_AI_MODEL")
+                think_mode = tag_settings.get("G_AI_THINKING") in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
                 )
-                if show_thinking:
-                    prompt = re.sub(r"(^|\s)--show-thinking($|\s)", " ", prompt).strip()
-                web_mode = re.search(r"(^|\s)--web($|\s)", prompt) is not None
-                if web_mode:
-                    prompt = re.sub(r"(^|\s)--web($|\s)", " ", prompt).strip()
-                use_match = re.search(r"(^|\s)--use\s+(\S+)", prompt)
-                model_name = use_match.group(2) if use_match else None
-                if use_match:
-                    prompt = re.sub(r"(^|\s)--use\s+\S+", " ", prompt).strip()
-                debug_mode = re.search(r"(^|\s)--debug($|\s)", prompt) is not None
-                if debug_mode:
-                    prompt = re.sub(r"(^|\s)--debug($|\s)", " ", prompt).strip()
+                show_thinking = tag_settings.get("G_AI_SHOW_THINKING") in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
+                web_mode = tag_settings.get("G_AI_WEB_SEARCH") in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
+                debug_mode = tag_settings.get("G_AI_DEBUG") in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
 
                 class AIContext:
                     __slots__ = (
@@ -5355,7 +5399,9 @@ class Tags(commands.Cog):
                 messages = [
                     {
                         "role": "system",
-                        "content": await ai.create_system_prompt(fake_ctx, prompt),
+                        "content": system_prompt_override
+                        if system_prompt_override
+                        else await ai.create_system_prompt(fake_ctx, prompt),
                     }
                 ]
 
