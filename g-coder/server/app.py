@@ -39,6 +39,8 @@ ALLOWED_LANGUAGES = [
 ]
 
 
+_active_work_dirs: set[Path] = set()
+_active_work_dirs_lock = asyncio.Lock()
 _stage_refcounts: dict[str, int] = defaultdict(int)
 _stage_refcounts_lock = asyncio.Lock()
 
@@ -52,9 +54,30 @@ def ensure_dirs():
         os.chown(STAGING_BASE, 1000, 1000)
 
 
+async def cleanup_execution_base():
+    if not EXECUTION_BASE.exists():
+        return
+    async with _active_work_dirs_lock:
+        active = set(_active_work_dirs)
+    for entry in EXECUTION_BASE.iterdir():
+        if entry == STAGING_BASE:
+            continue
+        if entry in active:
+            continue
+        safe_delete(entry)
+
+
+async def periodic_cleanup(interval: int = 300):
+    while True:
+        await asyncio.sleep(interval)
+        cleanup_execution_base()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     ensure_dirs()
+    cleanup_execution_base()
+    asyncio.create_task(periodic_cleanup())
     yield
 
 
@@ -86,7 +109,7 @@ async def validate_file(file: UploadFile):
 
 async def execute_code(language: str, code: str, files: List[UploadFile]):
     ensure_dirs()
-    work_dir = Path(tempfile.mkdtemp(dir=EXECUTION_BASE, prefix="run_"))
+    work_dir = Path(tempfile.mkdtemp(dir=EXECUTION_BASE, prefix="job__"))
     stage_dir = STAGING_BASE / work_dir.name
     work_dir.chmod(0o700)
     input_dir = work_dir / "input"
@@ -133,6 +156,9 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
             except ProcessLookupError:
                 pass
             return "Code execution took longer than 60 seconds", 1
+
+    async with _active_work_dirs_lock:
+        _active_work_dirs.add(work_dir)
 
     try:
         output = ""
@@ -351,7 +377,7 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
 
         return {
             "output": output.strip(),
-            "run_id": work_dir.name,
+            "job_id": work_dir.name,
             "files": final_files,
             "error": return_code != 0,
         }
@@ -361,9 +387,19 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
         print(f"Code execution Error: {traceback.format_exc()}")
         raise HTTPException(500, detail=f"Code execution failed: {str(e)}")
     finally:
+        async with _active_work_dirs_lock:
+            _active_work_dirs.discard(work_dir)
         safe_delete(work_dir)
         if stage_dir.exists() and not any(stage_dir.iterdir()):
             safe_delete(stage_dir)
+        async with _active_work_dirs_lock:
+            active = set(_active_work_dirs)
+        for entry in EXECUTION_BASE.iterdir():
+            if entry == STAGING_BASE:
+                continue
+            if entry in active:
+                continue
+            safe_delete(entry)
 
 
 @app.post("/{language}/execute")
@@ -375,10 +411,10 @@ async def execute_endpoint(
     return await execute_code(language, code, files)
 
 
-@app.get("/files/{run_id}/{filename}")
-async def get_file(run_id: str, filename: str, background_tasks: BackgroundTasks):
+@app.get("/files/{job_id}/{filename}")
+async def get_file(job_id: str, filename: str, background_tasks: BackgroundTasks):
     ensure_dirs()
-    stage_dir = STAGING_BASE / run_id
+    stage_dir = STAGING_BASE / job_id
     file_path = stage_dir / filename
     if not file_path.exists():
         raise HTTPException(404, detail="File not found.")
@@ -386,9 +422,9 @@ async def get_file(run_id: str, filename: str, background_tasks: BackgroundTasks
     async def cleanup():
         await asyncio.sleep(10)
         async with _stage_refcounts_lock:
-            _stage_refcounts[run_id] -= 1
-            if _stage_refcounts[run_id] <= 0:
-                del _stage_refcounts[run_id]
+            _stage_refcounts[job_id] -= 1
+            if _stage_refcounts[job_id] <= 0:
+                del _stage_refcounts[job_id]
                 safe_delete(stage_dir)
 
     background_tasks.add_task(cleanup)

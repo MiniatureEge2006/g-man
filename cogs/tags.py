@@ -5049,10 +5049,10 @@ class Tags(commands.Cog):
                     return f"[{language} error: {output or 'Code execution failed with no output'}]"
 
                 if result.get("files"):
-                    run_id = result.get("run_id", "")
+                    job_id = result.get("job_id", "")
                     file_objs = []
                     for idx, filename in enumerate(result["files"][:10], start=1):
-                        file_url = f"http://localhost:8000/files/{run_id}/{filename}"
+                        file_url = f"http://localhost:8000/files/{job_id}/{filename}"
                         try:
                             async with self.processor.session.get(
                                 file_url
