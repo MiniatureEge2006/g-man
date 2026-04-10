@@ -225,7 +225,7 @@ CREATE TABLE IF NOT EXISTS logging_rules (
     id SERIAL PRIMARY KEY,
     guild_id BIGINT NOT NULL,
     log_channel_id BIGINT NOT NULL,
-    event_category TEXT NOT NULL CHECK (event_category IN ('message', 'user', 'member', 'role', 'channel', 'guild', 'voice', 'moderation', 'all_events')),
+    event_category TEXT NOT NULL CHECK (event_category IN ('message', 'user', 'member', 'role', 'channel', 'guild', 'voice', 'moderation')),
     include_channel_ids BIGINT[],
     exclude_channel_ids BIGINT[],
     added_by BIGINT NOT NULL,

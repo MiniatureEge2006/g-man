@@ -11,6 +11,14 @@ from discord.ext import commands
 import bot_info
 
 
+class LogView(discord.ui.LayoutView):
+    def __init__(
+        self, container: discord.ui.Container, timeout: Optional[float] = None
+    ):
+        super().__init__(timeout=timeout)
+        self.add_item(container)
+
+
 class Moderation(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -78,46 +86,91 @@ class Moderation(commands.Cog):
         self.slowmode_cache[cache_key] = slowmode
         return slowmode
 
-    async def send_log(
+    ALL_EVENT_CATEGORIES = frozenset(
+        {"message", "user", "member", "role", "channel", "guild", "voice", "moderation"}
+    )
+
+    _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif"})
+    _VIDEO_EXTS = frozenset({".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v"})
+    _AUDIO_EXTS = frozenset({".mp3", ".ogg", ".wav", ".flac", ".aac", ".m4a", ".opus"})
+
+    @staticmethod
+    def _attachment_label(attachment: discord.Attachment) -> str:
+        ext = (
+            "." + attachment.filename.rsplit(".", 1)[-1].lower()
+            if "." in attachment.filename
+            else ""
+        )
+        if ext in Moderation._IMAGE_EXTS:
+            return "Image"
+        if ext in Moderation._VIDEO_EXTS:
+            return "Video"
+        if ext in Moderation._AUDIO_EXTS:
+            return "Audio"
+        return "File"
+
+    def _attachment_components(
         self,
-        guild_id: int,
-        event_category: str,
-        embed: discord.Embed,
-        channel_id: int = None,
-    ):
-        try:
-            rules = await self.db.fetch(
-                "SELECT * FROM logging_rules WHERE guild_id = $1", guild_id
+        attachments: list[discord.Attachment],
+        label_prefix: str = "",
+    ) -> list:
+        components = []
+
+        images = []
+        videos = []
+        files = []
+
+        for a in attachments:
+            ext = (
+                ("." + a.filename.rsplit(".", 1)[-1].lower())
+                if "." in a.filename
+                else ""
+            )
+            if ext in self._IMAGE_EXTS:
+                images.append(a)
+            elif ext in self._VIDEO_EXTS:
+                videos.append(a)
+            else:
+                files.append(a)
+
+        media_items = []
+
+        for a in images[:10]:
+            media_items.append(
+                discord.MediaGalleryItem(
+                    media=discord.UnfurledMediaItem(url=a.proxy_url or a.url)
+                )
             )
 
-            for rule in rules:
-                if (
-                    rule["event_category"] != event_category
-                    and rule["event_category"] != "all_events"
-                ):
-                    continue
+        remaining_slots = 10 - len(media_items)
+        for a in videos[:remaining_slots]:
+            media_items.append(
+                discord.MediaGalleryItem(
+                    media=discord.UnfurledMediaItem(url=a.proxy_url or a.url)
+                )
+            )
 
-                if channel_id:
-                    if (
-                        rule["exclude_channel_ids"]
-                        and channel_id in rule["exclude_channel_ids"]
-                    ):
-                        continue
-                    if (
-                        rule["include_channel_ids"]
-                        and channel_id not in rule["include_channel_ids"]
-                    ):
-                        continue
+        if media_items:
+            if label_prefix:
+                components.append(discord.ui.TextDisplay(content=f"**{label_prefix}**"))
+            components.append(discord.ui.MediaGallery(*media_items))
 
-                log_channel = self.bot.get_channel(rule["log_channel_id"])
-                if log_channel and isinstance(log_channel, discord.TextChannel):
-                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
-                        try:
-                            await log_channel.send(embed=embed)
-                        except discord.HTTPException:
-                            pass
-        except Exception:
-            pass
+        remaining_videos = (
+            videos[remaining_slots:] if len(videos) > remaining_slots else []
+        )
+        for a in remaining_videos + files:
+            size_kb = a.size / 1024
+            size_str = (
+                f"{size_kb:.1f} KB" if size_kb < 1024 else f"{size_kb / 1024:.1f} MB"
+            )
+            prefix = f"{label_prefix} - " if label_prefix else ""
+            components.append(
+                discord.ui.TextDisplay(
+                    content=f"{self._attachment_label(a)} {prefix}[{a.filename}]({a.url}) - {size_str}"
+                )
+            )
+
+        return components
 
     @commands.hybrid_group(
         name="logger", description="Manage event logging for different channels."
@@ -162,9 +215,9 @@ class Moderation(commands.Cog):
             )
             return
 
-        event_category = event_type
-        if event_type == "all":
-            event_category = "all_events"
+        categories_to_add = (
+            list(self.ALL_EVENT_CATEGORIES) if event_type == "all" else [event_type]
+        )
 
         include_channels_ids = []
         exclude_channels_ids = []
@@ -196,24 +249,26 @@ class Moderation(commands.Cog):
                     return
 
         try:
-            existing_rule = await self.db.fetchrow(
+            existing_rows = await self.db.fetch(
                 """
-                SELECT * FROM logging_rules
-                WHERE guild_id = $1 AND log_channel_id = $2 AND event_category = $3
+                SELECT event_category FROM logging_rules
+                WHERE guild_id = $1 AND log_channel_id = $2 AND event_category = ANY($3::text[])
                 """,
                 ctx.guild.id,
                 log_channel.id,
-                event_category,
+                categories_to_add,
             )
+            already_existing = {r["event_category"] for r in existing_rows}
+            to_insert = [c for c in categories_to_add if c not in already_existing]
 
-            if existing_rule:
+            if not to_insert:
                 await ctx.send(
-                    f"A logging rule for {event_type} events already exists in {log_channel.mention}.",
+                    f"All requested logging rules already exist in {log_channel.mention}.",
                     ephemeral=True,
                 )
                 return
 
-            await self.db.execute(
+            await self.db.executemany(
                 """
                 INSERT INTO logging_rules (
                     guild_id, log_channel_id, event_category,
@@ -221,15 +276,24 @@ class Moderation(commands.Cog):
                 )
                 VALUES ($1, $2, $3, $4, $5, $6, NOW())
                 """,
-                ctx.guild.id,
-                log_channel.id,
-                event_category,
-                include_channels_ids if include_channels_ids else None,
-                exclude_channels_ids if exclude_channels_ids else None,
-                ctx.author.id,
+                [
+                    (
+                        ctx.guild.id,
+                        log_channel.id,
+                        category,
+                        include_channels_ids if include_channels_ids else None,
+                        exclude_channels_ids if exclude_channels_ids else None,
+                        ctx.author.id,
+                    )
+                    for category in to_insert
+                ],
             )
 
-            response = f"Added logging for {event_type} events to {log_channel.mention}"
+            added_list = ", ".join(f"`{c}`" for c in sorted(to_insert))
+            response = f"Added logging for {added_list} events to {log_channel.mention}"
+            if already_existing:
+                skipped_list = ", ".join(f"`{c}`" for c in sorted(already_existing))
+                response += f"\n**Already existed (skipped):** {skipped_list}"
             if include_channels_ids:
                 response += f"\n**Included channels:** {', '.join([f'<#{id}>' for id in include_channels_ids])}"
             if exclude_channels_ids:
@@ -239,7 +303,7 @@ class Moderation(commands.Cog):
         except Exception as e:
             await ctx.send(f"Failed to add logging rule: {str(e)}", ephemeral=True)
 
-    @logger.command(name="remove", description="Remove a logging rule.")
+    @logger.command(name="remove", description="Remove a logging rule.", aliases=["rm"])
     @app_commands.describe(
         log_channel="The log channel to remove rules from.",
         event_type="The type of events to remove. (optional)",
@@ -265,12 +329,19 @@ class Moderation(commands.Cog):
     ):
         await ctx.typing()
 
-        event_category = event_type
-        if event_type == "all":
-            event_category = "all_events"
-
         try:
-            if event_category:
+            if event_type == "all":
+                result = await self.db.execute(
+                    """
+                    DELETE FROM logging_rules
+                    WHERE guild_id = $1 AND log_channel_id = $2
+                      AND event_category = ANY($3::text[])
+                    """,
+                    ctx.guild.id,
+                    log_channel.id,
+                    list(self.ALL_EVENT_CATEGORIES),
+                )
+            elif event_type:
                 result = await self.db.execute(
                     """
                     DELETE FROM logging_rules
@@ -278,7 +349,7 @@ class Moderation(commands.Cog):
                     """,
                     ctx.guild.id,
                     log_channel.id,
-                    event_category,
+                    event_type,
                 )
             else:
                 result = await self.db.execute(
@@ -349,8 +420,6 @@ class Moderation(commands.Cog):
                 rule_descriptions = []
                 for rule in channel_rules:
                     event_type = rule["event_category"]
-                    if event_type == "all_events":
-                        event_type = "all"
 
                     settings = []
                     if rule["include_channel_ids"]:
@@ -485,75 +554,105 @@ class Moderation(commands.Cog):
         moderator, reason = await self.get_moderator_from_audit_log(
             message.guild, message, discord.AuditLogAction.message_delete
         )
-        embed = discord.Embed(
-            title="Message Deleted",
-            color=discord.Color.red(),
-            timestamp=discord.utils.utcnow(),
-        )
 
-        embed.add_field(name="Channel", value=message.channel.mention, inline=True)
-        embed.add_field(name="Message ID", value=message.id, inline=True)
+        author = message.author
+        ts = discord.utils.utcnow()
+
+        meta = (
+            f"**Author:** {author.mention} (`{author}` - ID: `{author.id}`)\n"
+            f"**Channel:** {message.channel.mention} - **Message ID:** `{message.id}`"
+        )
+        if moderator and moderator.id != author.id:
+            meta += f"\n**Deleted by:** {moderator.mention} (`{moderator}`)"
+            if reason:
+                meta += f"\n**Reason:** {reason[:500]}"
+
+        components = [
+            discord.ui.TextDisplay(content="## Message Deleted"),
+            discord.ui.Section(
+                discord.ui.TextDisplay(content=meta),
+                accessory=discord.ui.Thumbnail(
+                    media=discord.UnfurledMediaItem(url=author.display_avatar.url)
+                ),
+            ),
+            discord.ui.Separator(),
+        ]
 
         if message.content:
-            content = (
-                message.content[:1020] + "..."
-                if len(message.content) > 1020
-                else message.content
+            content = message.content[:1900] + (
+                "..." if len(message.content) > 1900 else ""
             )
-            embed.add_field(name="Content", value=content, inline=False)
-        image_attachments = []
-        other_attachments = []
+            components.append(
+                discord.ui.TextDisplay(content=f"**Content**\n>>> {content}")
+            )
+
         if message.attachments:
-            for attachment in message.attachments:
-                if any(
-                    attachment.filename.lower().endswith(ext)
-                    for ext in [".png", ".jpg", ".jpeg", ".gif", ".webp"]
-                ):
-                    image_attachments.append(attachment)
-                else:
-                    other_attachments.append(attachment)
-            if image_attachments:
-                embed.set_image(url=image_attachments[0].url)
-            if other_attachments:
-                attachments = "\n".join(
-                    [f"[{a.filename}]({a.url})" for a in other_attachments]
+            components.extend(
+                self._attachment_components(
+                    message.attachments, label_prefix="Attachment"
                 )
-                embed.add_field(name="Attachments", value=attachments, inline=False)
+            )
 
         if message.embeds:
-            embed_count = len(message.embeds)
-            embed_types = ", ".join([e.type for e in message.embeds])
-            embed_info = f"**Count:** {embed_count}\n**Types:** {embed_types}"
+            rich = [e for e in message.embeds if e.type == "rich"]
+            if rich:
+                e0 = rich[0]
+                parts = [f"**Embed(s):** {len(message.embeds)} total"]
+                if e0.title:
+                    parts.append(f"**Title:** {e0.title[:100]}")
+                if e0.description:
+                    parts.append(
+                        f"**Description:** {e0.description[:100]}{'...' if len(e0.description) > 100 else ''}"
+                    )
+                if e0.url:
+                    parts.append(f"**URL:** [Link]({e0.url})")
+                components.append(discord.ui.TextDisplay(content="\n".join(parts)))
 
-            if message.embeds[0].type == "rich":
-                rich_embed = message.embeds[0]
-                if rich_embed.title:
-                    embed_info += f"\n**Title:** {rich_embed.title[:50]}{'...' if len(rich_embed.title) > 50 else ''}"
-                if rich_embed.description:
-                    embed_info += f"\n**Description:** {rich_embed.description[:50]}{'...' if len(rich_embed.description) > 50 else ''}"
-                if rich_embed.url:
-                    embed_info += f"\n**URL:** [Link]({rich_embed.url})"
-            embed.add_field(name="Embeds", value=embed_info, inline=False)
-
-        if moderator and moderator.id != message.author.id:
-            embed.add_field(
-                name="Action By",
-                value=f"{moderator.mention} ({moderator})",
-                inline=True,
-            )
-            if reason:
-                embed.add_field(
-                    name="Reason",
-                    value=reason[:1020] + "..." if len(reason) > 1020 else reason,
-                    inline=True,
-                )
-
-        embed.set_author(
-            name=f"{message.author} (ID: {message.author.id})",
-            icon_url=message.author.display_avatar.url,
+        components.append(
+            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>")
         )
 
-        await self.send_log(message.guild.id, "message", embed, message.channel.id)
+        container = discord.ui.Container(
+            *components,
+            accent_color=discord.Color.red(),
+        )
+        view = LogView(container)
+
+        try:
+            rules = await self.db.fetch(
+                "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                message.guild.id,
+                "message",
+            )
+
+            already_sent: set[int] = set()
+
+            for rule in rules:
+                if (
+                    rule["exclude_channel_ids"]
+                    and message.channel.id in rule["exclude_channel_ids"]
+                ):
+                    continue
+                if (
+                    rule["include_channel_ids"]
+                    and message.channel.id not in rule["include_channel_ids"]
+                ):
+                    continue
+
+                log_channel_id = rule["log_channel_id"]
+                if log_channel_id in already_sent:
+                    continue
+
+                log_channel = self.bot.get_channel(log_channel_id)
+                if log_channel and isinstance(log_channel, discord.TextChannel):
+                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
+                        try:
+                            await log_channel.send(view=view)
+                            already_sent.add(log_channel_id)
+                        except discord.HTTPException:
+                            pass
+        except Exception:
+            pass
 
     @commands.Cog.listener()
     async def on_message_edit(self, before: discord.Message, after: discord.Message):
@@ -568,141 +667,179 @@ class Moderation(commands.Cog):
         ):
             return
 
-        embed = discord.Embed(
-            title="Message Edited",
-            color=discord.Color.orange(),
-            timestamp=discord.utils.utcnow(),
+        author = before.author
+        ts = discord.utils.utcnow()
+
+        meta = (
+            f"**Author:** {author.mention} (`{author}` - ID: `{author.id}`)\n"
+            f"**Channel:** {before.channel.mention} - **Message ID:** `{before.id}` - [Jump]({after.jump_url})"
         )
 
-        embed.add_field(name="Channel", value=before.channel.mention, inline=True)
-        embed.add_field(name="Message ID", value=before.id, inline=True)
-        embed.add_field(
-            name="Jump To Message", value=f"[Jump]({after.jump_url})", inline=True
-        )
+        components = [
+            discord.ui.TextDisplay(content="## Message Edited"),
+            discord.ui.Section(
+                discord.ui.TextDisplay(content=meta),
+                accessory=discord.ui.Thumbnail(
+                    media=discord.UnfurledMediaItem(url=author.display_avatar.url)
+                ),
+            ),
+            discord.ui.Separator(),
+        ]
 
         if before.content != after.content:
-            before_content = (
-                before.content[:500] + "..."
-                if len(before.content) > 500
-                else before.content
+            before_content = before.content[:900] + (
+                "..." if len(before.content) > 900 else ""
             )
-            after_content = (
-                after.content[:500] + "..."
-                if len(after.content) > 500
-                else after.content
+            after_content = after.content[:900] + (
+                "..." if len(after.content) > 900 else ""
             )
-
-            embed.add_field(
-                name="Before", value=before_content or "No content", inline=False
+            components.append(
+                discord.ui.TextDisplay(
+                    content=f"**Before**\n>>> {before_content or '*No content*'}"
+                )
             )
-            embed.add_field(
-                name="After", value=after_content or "No content", inline=False
+            components.append(
+                discord.ui.TextDisplay(
+                    content=f"**After**\n>>> {after_content or '*No content*'}"
+                )
             )
 
         if before.attachments != after.attachments:
-            added_attachments = [
-                a for a in after.attachments if a not in before.attachments
-            ]
-            removed_attachments = [
-                a for a in before.attachments if a not in after.attachments
-            ]
-
-            if added_attachments:
-                added_str = "\n".join(
-                    [f"[{a.filename}]({a.url})" for a in added_attachments]
+            added = [a for a in after.attachments if a not in before.attachments]
+            removed = [a for a in before.attachments if a not in after.attachments]
+            if removed:
+                components.append(
+                    discord.ui.TextDisplay(
+                        content=f"**Attachments Removed** ({len(removed)})"
+                    )
                 )
-                embed.add_field(name="Attachments Added", value=added_str, inline=False)
-
-            if removed_attachments:
-                removed_str = "\n".join([a.filename for a in removed_attachments])
-                embed.add_field(
-                    name="Removed Attachments", value=removed_str, inline=False
+                components.extend(self._attachment_components(removed))
+            if added:
+                components.append(
+                    discord.ui.TextDisplay(
+                        content=f"**Attachments Added** ({len(added)})"
+                    )
                 )
+                components.extend(self._attachment_components(added))
 
         if before.embeds != after.embeds:
             added_embeds = [e for e in after.embeds if e not in before.embeds]
             removed_embeds = [e for e in before.embeds if e not in after.embeds]
-
-            if added_embeds:
-                embed_info = f"**Added:** {len(added_embeds)} embed(s)\n"
-                for i, e in enumerate(added_embeds[:5]):
+            for label, embed_list in (
+                ("Embeds Added", added_embeds),
+                ("Embeds Removed", removed_embeds),
+            ):
+                if not embed_list:
+                    continue
+                parts = [f"**{label}:** {len(embed_list)} embed(s)"]
+                for i, e in enumerate(embed_list[:3]):
                     if e.type == "rich":
-                        embed_info += f"\n**Embed {i + 1}:** "
+                        line = f"Embed {i + 1}:"
                         if e.title:
-                            embed_info += f"Title: {e.title[:30]}{'...' if len(e.title) > 30 else ''} "
-                        if e.description:
-                            embed_info += f"Description: {e.description[:30]}{'...' if len(e.description) > 30 else ''} "
+                            line += f" {e.title[:60]}"
                         if e.url:
-                            embed_info += f"URL: [Link]({e.url})"
-                        elif e.type:
-                            embed_info += f"Type: {e.type}"
-                    elif e.type == "gifv":
-                        continue
-                    elif e.type == "link":
-                        continue
-                    elif e.type == "image":
-                        continue
-                    elif e.type == "video":
-                        continue
-                    elif e.type == "article":
-                        continue
-                    else:
-                        embed_info += f"\n**Embed {i + 1}:** Type: {e.type}"
-                if len(added_embeds) > 5:
-                    embed_info += f"\n...and {len(added_embeds) - 2} more"
+                            line += f" - [Link]({e.url})"
+                        parts.append(line)
+                if len(embed_list) > 3:
+                    parts.append(f"...and {len(embed_list) - 3} more")
+                components.append(discord.ui.TextDisplay(content="\n".join(parts)))
 
-                embed.add_field(name="Embeds Added", value=embed_info, inline=False)
-
-            if removed_embeds:
-                embed_info = f"**Removed:** {len(removed_embeds)} embed(s)\n"
-                for i, e in enumerate(removed_embeds[:5]):
-                    if e.type == "rich":
-                        embed_info += f"\n**Embed {i + 1}:** "
-                        if e.title:
-                            embed_info += f"Title: {e.title[:30]}{'...' if len(e.title) > 30 else ''} "
-                        if e.description:
-                            embed_info += f"Description: {e.description[:30]}{'...' if len(e.description) > 30 else ''} "
-                        if e.url:
-                            embed_info += f"URL: [Link]({e.url})"
-                        elif e.type:
-                            embed_info += f"Type: {e.type}"
-                    else:
-                        embed_info += f"\n**Embed {i + 1}:** Type: {e.type}"
-                if len(removed_embeds) > 5:
-                    embed_info += f"\n...and {len(removed_embeds) - 2} more"
-
-                embed.add_field(name="Embeds Removed", value=embed_info, inline=False)
-
-        embed.set_author(
-            name=f"{before.author} (ID: {before.author.id})",
-            icon_url=before.author.display_avatar.url,
+        components.append(
+            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>")
         )
 
-        await self.send_log(before.guild.id, "message", embed, before.channel.id)
+        container = discord.ui.Container(
+            *components,
+            accent_color=discord.Color.orange(),
+        )
+        view = LogView(container)
+
+        try:
+            rules = await self.db.fetch(
+                "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                before.guild.id,
+                "message",
+            )
+
+            already_sent: set[int] = set()
+
+            for rule in rules:
+                if (
+                    rule["exclude_channel_ids"]
+                    and before.channel.id in rule["exclude_channel_ids"]
+                ):
+                    continue
+                if (
+                    rule["include_channel_ids"]
+                    and before.channel.id not in rule["include_channel_ids"]
+                ):
+                    continue
+
+                log_channel_id = rule["log_channel_id"]
+                if log_channel_id in already_sent:
+                    continue
+
+                log_channel = self.bot.get_channel(log_channel_id)
+                if log_channel and isinstance(log_channel, discord.TextChannel):
+                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
+                        try:
+                            await log_channel.send(view=view)
+                            already_sent.add(log_channel_id)
+                        except discord.HTTPException:
+                            pass
+        except Exception:
+            pass
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
-        embed = discord.Embed(
-            title="Member Joined",
-            color=discord.Color.green(),
-            timestamp=discord.utils.utcnow(),
-        )
+        ts = discord.utils.utcnow()
 
-        embed.add_field(
-            name="Member", value=f"{member.mention} ({member})", inline=True
-        )
-        embed.add_field(
-            name="Account Created",
-            value=f"<t:{int(member.created_at.timestamp())}:R>",
-            inline=True,
-        )
+        components = [
+            discord.ui.TextDisplay(content="## Member Joined"),
+            discord.ui.Section(
+                discord.ui.TextDisplay(
+                    content=(
+                        f"**Member:** {member.mention} (`{member}` - ID: `{member.id}`)\n"
+                        f"**Account Created:** <t:{int(member.created_at.timestamp())}:R>"
+                    )
+                ),
+                accessory=discord.ui.Thumbnail(
+                    media=discord.UnfurledMediaItem(url=member.display_avatar.url)
+                ),
+            ),
+            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+        ]
 
-        embed.set_author(
-            name=f"{member} (ID: {member.id})", icon_url=member.display_avatar.url
+        container = discord.ui.Container(
+            *components,
+            accent_color=discord.Color.green(),
         )
-        embed.set_thumbnail(url=member.display_avatar.url)
+        view = LogView(container)
 
-        await self.send_log(member.guild.id, "member", embed)
+        try:
+            rules = await self.db.fetch(
+                "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                member.guild.id,
+                "member",
+            )
+
+            already_sent: set[int] = set()
+
+            for rule in rules:
+                log_channel_id = rule["log_channel_id"]
+                if log_channel_id in already_sent:
+                    continue
+
+                log_channel = self.bot.get_channel(log_channel_id)
+                if log_channel and isinstance(log_channel, discord.TextChannel):
+                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
+                        try:
+                            await log_channel.send(view=view)
+                            already_sent.add(log_channel_id)
+                        except discord.HTTPException:
+                            pass
+        except Exception:
+            pass
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
@@ -710,232 +847,422 @@ class Moderation(commands.Cog):
             member.guild, member, discord.AuditLogAction.kick
         )
         was_kicked = moderator is not None
-
-        if was_kicked:
-            embed = discord.Embed(
-                title="Member Kicked",
-                color=discord.Color.red(),
-                timestamp=discord.utils.utcnow(),
-            )
-        else:
-            embed = discord.Embed(
-                title="Member Left",
-                color=discord.Color.red(),
-                timestamp=discord.utils.utcnow(),
-            )
+        ts = discord.utils.utcnow()
 
         roles = [
             role.mention for role in member.roles if role != member.guild.default_role
         ]
         roles_str = ", ".join(roles) if roles else "No roles"
 
-        embed.add_field(name="Member", value=f"{member} ({member.id})", inline=True)
-        embed.add_field(
-            name="Joined",
-            value=f"<t:{int(member.joined_at.timestamp())}:R>"
-            if member.joined_at
-            else "Unknown",
-            inline=True,
+        detail = (
+            f"**Member:** {member.mention} (`{member}` - ID: `{member.id}`)\n"
+            f"**Joined:** {f'<t:{int(member.joined_at.timestamp())}:R>' if member.joined_at else 'Unknown'}\n"
+            f"**Account Created:** <t:{int(member.created_at.timestamp())}:R>"
         )
-        embed.add_field(
-            name="Account Created",
-            value=f"<t:{int(member.created_at.timestamp())}:R>"
-            if member.created_at
-            else "Unknown",
-            inline=True,
-        )
-
         if was_kicked:
-            embed.add_field(
-                name="Action By",
-                value=f"{moderator.mention} ({moderator})",
-                inline=True,
+            detail += f"\n**Kicked by:** {moderator.mention} (`{moderator}`)"
+            if reason:
+                detail += f"\n**Reason:** {reason[:400]}"
+
+        title = "Member Kicked" if was_kicked else "Member Left"
+        color = discord.Color.red()
+
+        components = [
+            discord.ui.TextDisplay(content=f"## {title}"),
+            discord.ui.Section(
+                discord.ui.TextDisplay(content=detail),
+                accessory=discord.ui.Thumbnail(
+                    media=discord.UnfurledMediaItem(url=member.display_avatar.url)
+                ),
+            ),
+            discord.ui.Separator(),
+            discord.ui.TextDisplay(
+                content=f"**Roles:** {roles_str[:800]}{'...' if len(roles_str) > 800 else ''}"
+            ),
+            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+        ]
+
+        container = discord.ui.Container(
+            *components,
+            accent_color=color,
+        )
+        view = LogView(container)
+
+        try:
+            rules = await self.db.fetch(
+                "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                member.guild.id,
+                "member",
             )
 
-            if reason:
-                embed.add_field(
-                    name="Reason",
-                    value=reason[:1020] + "..." if len(reason) > 1020 else reason,
-                    inline=True,
-                )
+            already_sent: set[int] = set()
 
-        embed.add_field(
-            name="Roles",
-            value=roles_str[:1020] + "..." if len(roles_str) > 1020 else roles_str,
-            inline=False,
-        )
-        embed.set_author(
-            name=f"{member} (ID: {member.id})", icon_url=member.display_avatar.url
-        )
-        embed.set_thumbnail(url=member.display_avatar.url)
+            for rule in rules:
+                log_channel_id = rule["log_channel_id"]
+                if log_channel_id in already_sent:
+                    continue
 
-        await self.send_log(member.guild.id, "member", embed)
+                log_channel = self.bot.get_channel(log_channel_id)
+                if log_channel and isinstance(log_channel, discord.TextChannel):
+                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
+                        try:
+                            await log_channel.send(view=view)
+                            already_sent.add(log_channel_id)
+                        except discord.HTTPException:
+                            pass
+        except Exception:
+            pass
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
+        ts = discord.utils.utcnow()
+
         if before.nick != after.nick:
             moderator, reason = await self.get_moderator_from_audit_log(
                 after.guild, after, discord.AuditLogAction.member_update
             )
-            embed = discord.Embed(
-                title="Member Nickname Changed",
-                color=discord.Color.blue(),
-                timestamp=discord.utils.utcnow(),
-            )
-
-            embed.add_field(
-                name="Member", value=f"{after.mention} ({after})", inline=True
-            )
-            embed.add_field(
-                name="Before", value=before.nick or "No nickname", inline=True
-            )
-            embed.add_field(
-                name="After", value=after.nick or "No nickname", inline=True
+            detail = (
+                f"**Member:** {after.mention} (`{after}` - ID: `{after.id}`)\n"
+                f"**Before:** {before.nick or '*No nickname*'}\n"
+                f"**After:** {after.nick or '*No nickname*'}"
             )
             if moderator:
-                embed.add_field(
-                    name="Action By",
-                    value=f"{moderator.mention} ({moderator})",
-                    inline=True,
-                )
-            if reason:
-                embed.add_field(
-                    name="Reason",
-                    value=reason[:1020] + "..." if len(reason) > 1020 else reason,
-                    inline=True,
-                )
-            embed.set_author(
-                name=f"{after} (ID: {after.id})", icon_url=after.display_avatar.url
+                detail += f"\n**Changed by:** {moderator.mention} (`{moderator}`)"
+                if reason:
+                    detail += f"\n**Reason:** {reason[:400]}"
+
+            components = [
+                discord.ui.TextDisplay(content="## Member Nickname Changed"),
+                discord.ui.Section(
+                    discord.ui.TextDisplay(content=detail),
+                    accessory=discord.ui.Thumbnail(
+                        media=discord.UnfurledMediaItem(url=after.display_avatar.url)
+                    ),
+                ),
+                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+            ]
+
+            container = discord.ui.Container(
+                *components,
+                accent_color=discord.Color.blue(),
             )
-            await self.send_log(after.guild.id, "member", embed)
+            view = LogView(container)
+
+            try:
+                rules = await self.db.fetch(
+                    "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                    after.guild.id,
+                    "member",
+                )
+
+                already_sent: set[int] = set()
+
+                for rule in rules:
+                    log_channel_id = rule["log_channel_id"]
+                    if log_channel_id in already_sent:
+                        continue
+
+                    log_channel = self.bot.get_channel(log_channel_id)
+                    if log_channel and isinstance(log_channel, discord.TextChannel):
+                        if log_channel.permissions_for(
+                            log_channel.guild.me
+                        ).send_messages:
+                            try:
+                                await log_channel.send(view=view)
+                                already_sent.add(log_channel_id)
+                            except discord.HTTPException:
+                                pass
+            except Exception:
+                pass
 
         if before.roles != after.roles:
             added_roles = [role for role in after.roles if role not in before.roles]
             removed_roles = [role for role in before.roles if role not in after.roles]
             if added_roles or removed_roles:
-                embed = discord.Embed(
-                    title="Member Roles Updated",
-                    color=discord.Color.blue(),
-                    timestamp=discord.utils.utcnow(),
-                )
-                embed.add_field(
-                    name="Member", value=f"{after.mention} ({after})", inline=True
-                )
+                lines = [f"**Member:** {after.mention} (`{after}` - ID: `{after.id}`)"]
                 if added_roles:
-                    roles_str = ", ".join([role.mention for role in added_roles])
-                    embed.add_field(name="Roles Added", value=roles_str, inline=False)
+                    lines.append(
+                        f"**Added:** {', '.join(r.mention for r in added_roles)}"
+                    )
                 if removed_roles:
-                    roles_str = ", ".join([role.mention for role in removed_roles])
-                    embed.add_field(name="Roles Removed", value=roles_str, inline=False)
-                embed.set_author(
-                    name=f"{after} (ID: {after.id})", icon_url=after.display_avatar.url
-                )
-                await self.send_log(after.guild.id, "member", embed)
+                    lines.append(
+                        f"**Removed:** {', '.join(r.mention for r in removed_roles)}"
+                    )
 
-        if before.guild_avatar or before.guild_avatar is None and after.guild_avatar:
-            if before.guild_avatar != after.guild_avatar:
-                embed = discord.Embed(
-                    title="Member Server Avatar Changed",
-                    color=discord.Color.purple(),
-                    timestamp=discord.utils.utcnow(),
+                components = [
+                    discord.ui.TextDisplay(content="## Member Roles Updated"),
+                    discord.ui.Section(
+                        discord.ui.TextDisplay(content="\n".join(lines)),
+                        accessory=discord.ui.Thumbnail(
+                            media=discord.UnfurledMediaItem(
+                                url=after.display_avatar.url
+                            )
+                        ),
+                    ),
+                    discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+                ]
+
+                container = discord.ui.Container(
+                    *components,
+                    accent_color=discord.Color.blue(),
                 )
-                embed.add_field(
-                    name="Member", value=f"{after.mention} ({after})", inline=True
-                )
-                if before.guild_avatar:
-                    embed.add_field(
-                        name="Before",
-                        value=f"[Link]({before.guild_avatar.url})",
-                        inline=True,
+                view = LogView(container)
+
+                try:
+                    rules = await self.db.fetch(
+                        "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                        after.guild.id,
+                        "member",
                     )
-                if after.guild_avatar:
-                    embed.add_field(
-                        name="After",
-                        value=f"[Link]({after.guild_avatar.url})",
-                        inline=True,
-                    )
-                    embed.set_thumbnail(url=after.guild_avatar.url)
-                embed.set_author(
-                    name=f"{after} (ID: {after.id})", icon_url=after.display_avatar.url
+
+                    already_sent: set[int] = set()
+
+                    for rule in rules:
+                        log_channel_id = rule["log_channel_id"]
+                        if log_channel_id in already_sent:
+                            continue
+
+                        log_channel = self.bot.get_channel(log_channel_id)
+                        if log_channel and isinstance(log_channel, discord.TextChannel):
+                            if log_channel.permissions_for(
+                                log_channel.guild.me
+                            ).send_messages:
+                                try:
+                                    await log_channel.send(view=view)
+                                    already_sent.add(log_channel_id)
+                                except discord.HTTPException:
+                                    pass
+                except Exception:
+                    pass
+
+        if before.guild_avatar != after.guild_avatar:
+            inner = [
+                discord.ui.TextDisplay(
+                    content=f"**Member:** {after.mention} (`{after}` - ID: `{after.id}`)"
                 )
-                await self.send_log(after.guild.id, "member", embed)
+            ]
+            if before.guild_avatar:
+                inner.append(
+                    discord.ui.TextDisplay(
+                        content=f"**Before:** [Link]({before.guild_avatar.url})"
+                    )
+                )
+            if after.guild_avatar:
+                inner.append(
+                    discord.ui.TextDisplay(
+                        content=f"**After:** [Link]({after.guild_avatar.url})"
+                    )
+                )
+
+            components = [
+                discord.ui.TextDisplay(content="## Member Server Avatar Changed"),
+                discord.ui.Section(
+                    *inner,
+                    accessory=discord.ui.Thumbnail(
+                        media=discord.UnfurledMediaItem(
+                            url=after.guild_avatar.url
+                            if after.guild_avatar
+                            else after.display_avatar.url
+                        )
+                    ),
+                ),
+                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+            ]
+
+            container = discord.ui.Container(
+                *components,
+                accent_color=discord.Color.purple(),
+            )
+            view = LogView(container)
+
+            try:
+                rules = await self.db.fetch(
+                    "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                    after.guild.id,
+                    "member",
+                )
+
+                already_sent: set[int] = set()
+
+                for rule in rules:
+                    log_channel_id = rule["log_channel_id"]
+                    if log_channel_id in already_sent:
+                        continue
+
+                    log_channel = self.bot.get_channel(log_channel_id)
+                    if log_channel and isinstance(log_channel, discord.TextChannel):
+                        if log_channel.permissions_for(
+                            log_channel.guild.me
+                        ).send_messages:
+                            try:
+                                await log_channel.send(view=view)
+                                already_sent.add(log_channel_id)
+                            except discord.HTTPException:
+                                pass
+            except Exception:
+                pass
 
         if before.premium_since is None and after.premium_since is not None:
-            embed = discord.Embed(
-                title="Member Started Boosting",
-                color=discord.Color.gold(),
-                timestamp=discord.utils.utcnow(),
+            components = [
+                discord.ui.TextDisplay(content="## Member Started Boosting"),
+                discord.ui.Section(
+                    discord.ui.TextDisplay(
+                        content=f"**Member:** {after.mention} (`{after}` - ID: `{after.id}`)"
+                    ),
+                    accessory=discord.ui.Thumbnail(
+                        media=discord.UnfurledMediaItem(url=after.display_avatar.url)
+                    ),
+                ),
+                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+            ]
+
+            container = discord.ui.Container(
+                *components,
+                accent_color=discord.Color.gold(),
             )
-            embed.add_field(
-                name="Member", value=f"{after.mention} ({after})", inline=True
-            )
-            embed.set_thumbnail(url=after.display_avatar.url)
-            await self.send_log(after.guild.id, "member", embed)
+            view = LogView(container)
+
+            try:
+                rules = await self.db.fetch(
+                    "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                    after.guild.id,
+                    "member",
+                )
+
+                already_sent: set[int] = set()
+
+                for rule in rules:
+                    log_channel_id = rule["log_channel_id"]
+                    if log_channel_id in already_sent:
+                        continue
+
+                    log_channel = self.bot.get_channel(log_channel_id)
+                    if log_channel and isinstance(log_channel, discord.TextChannel):
+                        if log_channel.permissions_for(
+                            log_channel.guild.me
+                        ).send_messages:
+                            try:
+                                await log_channel.send(view=view)
+                                already_sent.add(log_channel_id)
+                            except discord.HTTPException:
+                                pass
+            except Exception:
+                pass
+
         elif before.premium_since is not None and after.premium_since is None:
-            embed = discord.Embed(
-                title="Member Stopped Boosting",
-                color=discord.Color.orange(),
-                timestamp=discord.utils.utcnow(),
+            components = [
+                discord.ui.TextDisplay(content="## Member Stopped Boosting"),
+                discord.ui.Section(
+                    discord.ui.TextDisplay(
+                        content=f"**Member:** {after.mention} (`{after}` - ID: `{after.id}`)"
+                    ),
+                    accessory=discord.ui.Thumbnail(
+                        media=discord.UnfurledMediaItem(url=after.display_avatar.url)
+                    ),
+                ),
+                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+            ]
+
+            container = discord.ui.Container(
+                *components,
+                accent_color=discord.Color.orange(),
             )
-            embed.add_field(
-                name="Member", value=f"{after.mention} ({after})", inline=True
-            )
-            embed.set_thumbnail(url=after.display_avatar.url)
-            await self.send_log(after.guild.id, "member", embed)
+            view = LogView(container)
+
+            try:
+                rules = await self.db.fetch(
+                    "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                    after.guild.id,
+                    "member",
+                )
+
+                already_sent: set[int] = set()
+
+                for rule in rules:
+                    log_channel_id = rule["log_channel_id"]
+                    if log_channel_id in already_sent:
+                        continue
+
+                    log_channel = self.bot.get_channel(log_channel_id)
+                    if log_channel and isinstance(log_channel, discord.TextChannel):
+                        if log_channel.permissions_for(
+                            log_channel.guild.me
+                        ).send_messages:
+                            try:
+                                await log_channel.send(view=view)
+                                already_sent.add(log_channel_id)
+                            except discord.HTTPException:
+                                pass
+            except Exception:
+                pass
 
     @commands.Cog.listener()
     async def on_user_update(self, before: discord.User, after: discord.User):
-        if (
+        if not (
             before.name != after.name
             or before.discriminator != after.discriminator
             or before.avatar != after.avatar
         ):
-            for guild in self.bot.guilds:
-                if guild.get_member(after.id):
-                    embed = discord.Embed(
-                        title="User Profile Updated",
-                        color=discord.Color.blue(),
-                        timestamp=discord.utils.utcnow(),
+            return
+        ts = discord.utils.utcnow()
+        for guild in self.bot.guilds:
+            if not guild.get_member(after.id):
+                continue
+
+            lines = [f"**User:** {after.mention} (`{after}` - ID: `{after.id}`)"]
+            if before.name != after.name or before.discriminator != after.discriminator:
+                lines.append(f"**Before:** `{before.name}#{before.discriminator}`")
+                lines.append(f"**After:** `{after.name}#{after.discriminator}`")
+            if before.avatar != after.avatar:
+                if before.avatar:
+                    lines.append(
+                        f"**Previous Avatar:** [Link]({before.display_avatar.url})"
                     )
+                lines.append(f"**New Avatar:** [Link]({after.display_avatar.url})")
 
-                    embed.add_field(
-                        name="User", value=f"{after.mention} ({after})", inline=True
-                    )
+            components = [
+                discord.ui.TextDisplay(content="## User Profile Updated"),
+                discord.ui.Section(
+                    discord.ui.TextDisplay(content="\n".join(lines)),
+                    accessory=discord.ui.Thumbnail(
+                        media=discord.UnfurledMediaItem(url=after.display_avatar.url)
+                    ),
+                ),
+                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+            ]
 
-                    if (
-                        before.name != after.name
-                        or before.discriminator != after.discriminator
-                    ):
-                        embed.add_field(
-                            name="Before",
-                            value=f"{before.name}#{before.discriminator}",
-                            inline=True,
-                        )
-                        embed.add_field(
-                            name="After",
-                            value=f"{after.name}#{after.discriminator}",
-                            inline=True,
-                        )
+            container = discord.ui.Container(
+                *components,
+                accent_color=discord.Color.blue(),
+            )
+            view = LogView(container)
 
-                    if before.avatar:
-                        embed.add_field(
-                            name="Previous Avatar",
-                            value=f"[Link]({before.display_avatar.url})",
-                            inline=True,
-                        )
-                    if after.avatar:
-                        embed.add_field(
-                            name="New Avatar",
-                            value=f"[Link]({after.display_avatar.url})",
-                            inline=True,
-                        )
-                        embed.set_thumbnail(url=after.display_avatar.url)
+            try:
+                rules = await self.db.fetch(
+                    "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                    guild.id,
+                    "user",
+                )
 
-                    embed.set_author(
-                        name=f"{after} (ID: {after.id})",
-                        icon_url=after.display_avatar.url,
-                    )
-                    await self.send_log(guild.id, "user", embed)
+                already_sent: set[int] = set()
+
+                for rule in rules:
+                    log_channel_id = rule["log_channel_id"]
+                    if log_channel_id in already_sent:
+                        continue
+
+                    log_channel = self.bot.get_channel(log_channel_id)
+                    if log_channel and isinstance(log_channel, discord.TextChannel):
+                        if log_channel.permissions_for(
+                            log_channel.guild.me
+                        ).send_messages:
+                            try:
+                                await log_channel.send(view=view)
+                                already_sent.add(log_channel_id)
+                            except discord.HTTPException:
+                                pass
+            except Exception:
+                pass
 
     @commands.Cog.listener()
     async def on_member_ban(
@@ -944,151 +1271,222 @@ class Moderation(commands.Cog):
         moderator, reason = await self.get_moderator_from_audit_log(
             guild, user, discord.AuditLogAction.ban
         )
-
-        embed = discord.Embed(
-            title="Member Banned",
-            color=discord.Color.red(),
-            timestamp=discord.utils.utcnow(),
+        ts = discord.utils.utcnow()
+        detail = (
+            f"**User:** {user.mention} (`{user}` - ID: `{user.id}`)\n"
+            f"**Account Created:** <t:{int(user.created_at.timestamp())}:R>"
         )
-
-        embed.add_field(name="User", value=f"{user} ({user.id})", inline=True)
-        embed.add_field(
-            name="Account Created",
-            value=f"<t:{int(user.created_at.timestamp())}:R>",
-            inline=True,
-        )
-        if isinstance(user, discord.Member):
-            embed.add_field(
-                name="Joined",
-                value=f"<t:{int(user.joined_at.timestamp())}:R>",
-                inline=True,
-            )
+        if isinstance(user, discord.Member) and user.joined_at:
+            detail += f"\n**Joined:** <t:{int(user.joined_at.timestamp())}:R>"
         if moderator:
-            embed.add_field(
-                name="Action By",
-                value=f"{moderator.mention} ({moderator})",
-                inline=True,
-            )
-
+            detail += f"\n**Banned by:** {moderator.mention} (`{moderator}`)"
         if reason:
-            embed.add_field(
-                name="Reason",
-                value=reason[:1020] + "..." if len(reason) > 1020 else reason,
-                inline=False,
+            detail += f"\n**Reason:** {reason[:500]}"
+
+        components = [
+            discord.ui.TextDisplay(content="## Member Banned"),
+            discord.ui.Section(
+                discord.ui.TextDisplay(content=detail),
+                accessory=discord.ui.Thumbnail(
+                    media=discord.UnfurledMediaItem(url=user.display_avatar.url)
+                ),
+            ),
+            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+        ]
+
+        container = discord.ui.Container(
+            *components,
+            accent_color=discord.Color.red(),
+        )
+        view = LogView(container)
+
+        try:
+            rules = await self.db.fetch(
+                "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                guild.id,
+                "moderation",
             )
 
-        embed.set_author(
-            name=f"{user} (ID: {user.id})", icon_url=user.display_avatar.url
-        )
-        embed.set_thumbnail(url=user.display_avatar.url)
+            already_sent: set[int] = set()
 
-        await self.send_log(guild.id, "moderation", embed)
+            for rule in rules:
+                log_channel_id = rule["log_channel_id"]
+                if log_channel_id in already_sent:
+                    continue
+
+                log_channel = self.bot.get_channel(log_channel_id)
+                if log_channel and isinstance(log_channel, discord.TextChannel):
+                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
+                        try:
+                            await log_channel.send(view=view)
+                            already_sent.add(log_channel_id)
+                        except discord.HTTPException:
+                            pass
+        except Exception:
+            pass
 
     @commands.Cog.listener()
     async def on_member_unban(self, guild: discord.Guild, user: discord.User):
         moderator, reason = await self.get_moderator_from_audit_log(
             guild, user, discord.AuditLogAction.unban
         )
-
-        embed = discord.Embed(
-            title="Member Unbanned",
-            color=discord.Color.green(),
-            timestamp=discord.utils.utcnow(),
+        ts = discord.utils.utcnow()
+        detail = (
+            f"**User:** {user.mention} (`{user}` - ID: `{user.id}`)\n"
+            f"**Account Created:** <t:{int(user.created_at.timestamp())}:R>"
         )
-
-        embed.add_field(name="User", value=f"{user} ({user.id})", inline=True)
-        embed.add_field(
-            name="Account Created",
-            value=f"<t:{int(user.created_at.timestamp())}:R>",
-            inline=True,
-        )
-
         if moderator:
-            embed.add_field(
-                name="Action By",
-                value=f"{moderator.mention} ({moderator})",
-                inline=True,
-            )
-
+            detail += f"\n**Unbanned by:** {moderator.mention} (`{moderator}`)"
         if reason:
-            embed.add_field(
-                name="Reason",
-                value=reason[:1020] + "..." if len(reason) > 1020 else reason,
-                inline=False,
+            detail += f"\n**Reason:** {reason[:500]}"
+
+        components = [
+            discord.ui.TextDisplay(content="## Member Unbanned"),
+            discord.ui.Section(
+                discord.ui.TextDisplay(content=detail),
+                accessory=discord.ui.Thumbnail(
+                    media=discord.UnfurledMediaItem(url=user.display_avatar.url)
+                ),
+            ),
+            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+        ]
+
+        container = discord.ui.Container(
+            *components,
+            accent_color=discord.Color.green(),
+        )
+        view = LogView(container)
+
+        try:
+            rules = await self.db.fetch(
+                "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                guild.id,
+                "moderation",
             )
 
-        embed.set_author(
-            name=f"{user} (ID: {user.id})", icon_url=user.display_avatar.url
-        )
-        embed.set_thumbnail(url=user.display_avatar.url)
+            already_sent: set[int] = set()
 
-        await self.send_log(guild.id, "moderation", embed)
+            for rule in rules:
+                log_channel_id = rule["log_channel_id"]
+                if log_channel_id in already_sent:
+                    continue
+
+                log_channel = self.bot.get_channel(log_channel_id)
+                if log_channel and isinstance(log_channel, discord.TextChannel):
+                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
+                        try:
+                            await log_channel.send(view=view)
+                            already_sent.add(log_channel_id)
+                        except discord.HTTPException:
+                            pass
+        except Exception:
+            pass
 
     @commands.Cog.listener()
     async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
         moderator, reason = await self.get_moderator_from_audit_log(
             channel.guild, channel, discord.AuditLogAction.channel_create
         )
-
-        embed = discord.Embed(
-            title="Channel Created",
-            color=discord.Color.green(),
-            timestamp=discord.utils.utcnow(),
+        ts = discord.utils.utcnow()
+        detail = (
+            f"**Channel:** {channel.mention}\n"
+            f"**Type:** {channel.type.name}\n"
+            f"**ID:** `{channel.id}`"
         )
-
-        embed.add_field(name="Channel", value=channel.mention, inline=True)
-        embed.add_field(name="Type", value=channel.type.name, inline=True)
-
         if moderator:
-            embed.add_field(
-                name="Created By",
-                value=f"{moderator.mention} ({moderator})",
-                inline=True,
-            )
-
+            detail += f"\n**Created by:** {moderator.mention} (`{moderator}`)"
         if reason:
-            embed.add_field(
-                name="Reason",
-                value=reason[:1020] + "..." if len(reason) > 1020 else reason,
-                inline=False,
+            detail += f"\n**Reason:** {reason[:400]}"
+
+        components = [
+            discord.ui.TextDisplay(content="## Channel Created"),
+            discord.ui.TextDisplay(content=detail),
+            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+        ]
+
+        container = discord.ui.Container(
+            *components,
+            accent_color=discord.Color.green(),
+        )
+        view = LogView(container)
+
+        try:
+            rules = await self.db.fetch(
+                "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                channel.guild.id,
+                "channel",
             )
 
-        embed.set_footer(text=f"Channel ID: {channel.id}")
+            already_sent: set[int] = set()
 
-        await self.send_log(channel.guild.id, "channel", embed)
+            for rule in rules:
+                log_channel_id = rule["log_channel_id"]
+                if log_channel_id in already_sent:
+                    continue
+
+                log_channel = self.bot.get_channel(log_channel_id)
+                if log_channel and isinstance(log_channel, discord.TextChannel):
+                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
+                        try:
+                            await log_channel.send(view=view)
+                            already_sent.add(log_channel_id)
+                        except discord.HTTPException:
+                            pass
+        except Exception:
+            pass
 
     @commands.Cog.listener()
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
         moderator, reason = await self.get_moderator_from_audit_log(
             channel.guild, channel, discord.AuditLogAction.channel_delete
         )
-
-        embed = discord.Embed(
-            title="Channel Deleted",
-            color=discord.Color.red(),
-            timestamp=discord.utils.utcnow(),
+        ts = discord.utils.utcnow()
+        detail = (
+            f"**Channel:** #{channel.name}\n"
+            f"**Type:** {channel.type.name}\n"
+            f"**ID:** `{channel.id}`"
         )
-
-        embed.add_field(name="Channel", value=f"#{channel.name}", inline=True)
-        embed.add_field(name="Type", value=channel.type.name, inline=True)
-
         if moderator:
-            embed.add_field(
-                name="Deleted By",
-                value=f"{moderator.mention} ({moderator})",
-                inline=True,
-            )
-
+            detail += f"\n**Deleted by:** {moderator.mention} (`{moderator}`)"
         if reason:
-            embed.add_field(
-                name="Reason",
-                value=reason[:1020] + "..." if len(reason) > 1020 else reason,
-                inline=False,
+            detail += f"\n**Reason:** {reason[:400]}"
+
+        components = [
+            discord.ui.TextDisplay(content="## Channel Deleted"),
+            discord.ui.TextDisplay(content=detail),
+            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+        ]
+
+        container = discord.ui.Container(
+            *components,
+            accent_color=discord.Color.red(),
+        )
+        view = LogView(container)
+
+        try:
+            rules = await self.db.fetch(
+                "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                channel.guild.id,
+                "channel",
             )
 
-        embed.set_footer(text=f"Channel ID: {channel.id}")
+            already_sent: set[int] = set()
 
-        await self.send_log(channel.guild.id, "channel", embed)
+            for rule in rules:
+                log_channel_id = rule["log_channel_id"]
+                if log_channel_id in already_sent:
+                    continue
+
+                log_channel = self.bot.get_channel(log_channel_id)
+                if log_channel and isinstance(log_channel, discord.TextChannel):
+                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
+                        try:
+                            await log_channel.send(view=view)
+                            already_sent.add(log_channel_id)
+                        except discord.HTTPException:
+                            pass
+        except Exception:
+            pass
 
     @commands.Cog.listener()
     async def on_guild_channel_update(
@@ -1098,123 +1496,167 @@ class Moderation(commands.Cog):
             moderator, reason = await self.get_moderator_from_audit_log(
                 after.guild, after, discord.AuditLogAction.channel_update
             )
-
-            embed = discord.Embed(
-                title="Channel Updated",
-                color=discord.Color.blue(),
-                timestamp=discord.utils.utcnow(),
+            ts = discord.utils.utcnow()
+            detail = (
+                f"**Channel:** {after.mention} - ID: `{after.id}`\n"
+                f"**Before:** {before.name}\n"
+                f"**After:** {after.name}"
             )
-
-            embed.add_field(name="Channel", value=after.mention, inline=True)
-            embed.add_field(name="Before", value=before.name, inline=True)
-            embed.add_field(name="After", value=after.name, inline=True)
-
             if moderator:
-                embed.add_field(
-                    name="Updated By",
-                    value=f"{moderator.mention} ({moderator})",
-                    inline=True,
-                )
-
+                detail += f"\n**Updated by:** {moderator.mention} (`{moderator}`)"
             if reason:
-                embed.add_field(
-                    name="Reason",
-                    value=reason[:1020] + "..." if len(reason) > 1020 else reason,
-                    inline=False,
+                detail += f"\n**Reason:** {reason[:400]}"
+
+            components = [
+                discord.ui.TextDisplay(content="## Channel Updated"),
+                discord.ui.TextDisplay(content=detail),
+                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+            ]
+
+            container = discord.ui.Container(
+                *components,
+                accent_color=discord.Color.blue(),
+            )
+            view = LogView(container)
+
+            try:
+                rules = await self.db.fetch(
+                    "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                    after.guild.id,
+                    "channel",
                 )
 
-            embed.set_footer(text=f"Channel ID: {after.id}")
+                already_sent: set[int] = set()
 
-            await self.send_log(after.guild.id, "channel", embed)
+                for rule in rules:
+                    log_channel_id = rule["log_channel_id"]
+                    if log_channel_id in already_sent:
+                        continue
+
+                    log_channel = self.bot.get_channel(log_channel_id)
+                    if log_channel and isinstance(log_channel, discord.TextChannel):
+                        if log_channel.permissions_for(
+                            log_channel.guild.me
+                        ).send_messages:
+                            try:
+                                await log_channel.send(view=view)
+                                already_sent.add(log_channel_id)
+                            except discord.HTTPException:
+                                pass
+            except Exception:
+                pass
 
     @commands.Cog.listener()
     async def on_guild_role_create(self, role: discord.Role):
         moderator, reason = await self.get_moderator_from_audit_log(
             role.guild, role, discord.AuditLogAction.role_create
         )
-
-        embed = discord.Embed(
-            title="Role Created",
-            color=discord.Color.green(),
-            timestamp=discord.utils.utcnow(),
-        )
-
-        embed.add_field(name="Role", value=role.mention, inline=True)
-        embed.add_field(name="Color", value=str(role.color), inline=True)
-
-        if moderator:
-            embed.add_field(
-                name="Created By",
-                value=f"{moderator.mention} ({moderator})",
-                inline=True,
-            )
-
-        if reason:
-            embed.add_field(
-                name="Reason",
-                value=reason[:1020] + "..." if len(reason) > 1020 else reason,
-                inline=False,
-            )
-
+        ts = discord.utils.utcnow()
         perms = [perm for perm, value in role.permissions if value]
+        detail = f"**Role:** {role.mention} - ID: `{role.id}`\n**Color:** {role.color}"
+        if moderator:
+            detail += f"\n**Created by:** {moderator.mention} (`{moderator}`)"
+        if reason:
+            detail += f"\n**Reason:** {reason[:400]}"
         if perms:
-            perms_str = ", ".join(
-                [perm.replace("_", " ").title() for perm in perms[:10]]
-            )
+            perms_str = ", ".join(perm.replace("_", " ").title() for perm in perms[:10])
             if len(perms) > 10:
                 perms_str += f" and {len(perms) - 10} more"
-            embed.add_field(name="Permissions", value=perms_str, inline=False)
+            detail += f"\n**Permissions:** {perms_str}"
 
-        embed.set_author(name=f"{role.name} (ID: {role.id})")
+        components = [
+            discord.ui.TextDisplay(content="## Role Created"),
+            discord.ui.TextDisplay(content=detail),
+            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+        ]
 
-        await self.send_log(role.guild.id, "role", embed)
+        container = discord.ui.Container(
+            *components,
+            accent_color=discord.Color.green(),
+        )
+        view = LogView(container)
+
+        try:
+            rules = await self.db.fetch(
+                "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                role.guild.id,
+                "role",
+            )
+
+            already_sent: set[int] = set()
+
+            for rule in rules:
+                log_channel_id = rule["log_channel_id"]
+                if log_channel_id in already_sent:
+                    continue
+
+                log_channel = self.bot.get_channel(log_channel_id)
+                if log_channel and isinstance(log_channel, discord.TextChannel):
+                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
+                        try:
+                            await log_channel.send(view=view)
+                            already_sent.add(log_channel_id)
+                        except discord.HTTPException:
+                            pass
+        except Exception:
+            pass
 
     @commands.Cog.listener()
     async def on_guild_role_delete(self, role: discord.Role):
         moderator, reason = await self.get_moderator_from_audit_log(
             role.guild, role, discord.AuditLogAction.role_delete
         )
-
-        embed = discord.Embed(
-            title="Role Deleted",
-            color=discord.Color.red(),
-            timestamp=discord.utils.utcnow(),
-        )
-
-        embed.add_field(name="Role", value=role.name, inline=True)
-        embed.add_field(name="Color", value=str(role.color), inline=True)
-
+        ts = discord.utils.utcnow()
+        detail = f"**Role:** {role.name} - ID: `{role.id}`\n**Color:** {role.color}"
         if moderator:
-            embed.add_field(
-                name="Deleted By",
-                value=f"{moderator.mention} ({moderator})",
-                inline=True,
-            )
-
+            detail += f"\n**Deleted by:** {moderator.mention} (`{moderator}`)"
         if reason:
-            embed.add_field(
-                name="Reason",
-                value=reason[:1020] + "..." if len(reason) > 1020 else reason,
-                inline=False,
+            detail += f"\n**Reason:** {reason[:400]}"
+
+        components = [
+            discord.ui.TextDisplay(content="## Role Deleted"),
+            discord.ui.TextDisplay(content=detail),
+            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+        ]
+
+        container = discord.ui.Container(
+            *components,
+            accent_color=discord.Color.red(),
+        )
+        view = LogView(container)
+
+        try:
+            rules = await self.db.fetch(
+                "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                role.guild.id,
+                "role",
             )
 
-        embed.set_author(
-            name=f"{role.name} (ID: {role.id})",
-            icon_url=role.display_icon.url if role.display_icon else None,
-        )
+            already_sent: set[int] = set()
 
-        await self.send_log(role.guild.id, "role", embed)
+            for rule in rules:
+                log_channel_id = rule["log_channel_id"]
+                if log_channel_id in already_sent:
+                    continue
+
+                log_channel = self.bot.get_channel(log_channel_id)
+                if log_channel and isinstance(log_channel, discord.TextChannel):
+                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
+                        try:
+                            await log_channel.send(view=view)
+                            already_sent.add(log_channel_id)
+                        except discord.HTTPException:
+                            pass
+        except Exception:
+            pass
 
     @commands.Cog.listener()
     async def on_guild_role_update(self, before: discord.Role, after: discord.Role):
         changes = []
-
         if before.name != after.name:
             changes.append(f"**Name:** {before.name} -> {after.name}")
-
         if before.color != after.color:
             changes.append(f"**Color:** {before.color} -> {after.color}")
-
         if before.permissions != after.permissions:
             added_perms = [
                 perm
@@ -1226,57 +1668,66 @@ class Moderation(commands.Cog):
                 for perm, value in before.permissions
                 if value and not getattr(after.permissions, perm, False)
             ]
-
             if added_perms:
-                perms_str = ", ".join(
-                    [perm.replace("_", " ").title() for perm in added_perms[:5]]
-                )
+                s = ", ".join(p.replace("_", " ").title() for p in added_perms[:5])
                 if len(added_perms) > 5:
-                    perms_str += f" and {len(added_perms) - 5} more"
-                changes.append(f"**Added Permissions:** {perms_str}")
-
+                    s += f" and {len(added_perms) - 5} more"
+                changes.append(f"**Added Permissions:** {s}")
             if removed_perms:
-                perms_str = ", ".join(
-                    [perm.replace("_", " ").title() for perm in removed_perms[:5]]
-                )
+                s = ", ".join(p.replace("_", " ").title() for p in removed_perms[:5])
                 if len(removed_perms) > 5:
-                    perms_str += f" and {len(removed_perms) - 5} more"
-                changes.append(f"**Removed Permissions:** {perms_str}")
+                    s += f" and {len(removed_perms) - 5} more"
+                changes.append(f"**Removed Permissions:** {s}")
 
-        if changes:
-            moderator, reason = await self.get_moderator_from_audit_log(
-                after.guild, after, discord.AuditLogAction.role_update
+        if not changes:
+            return
+
+        moderator, reason = await self.get_moderator_from_audit_log(
+            after.guild, after, discord.AuditLogAction.role_update
+        )
+        ts = discord.utils.utcnow()
+        detail = f"**Role:** {after.mention} - ID: `{after.id}`\n" + "\n".join(changes)
+        if moderator:
+            detail += f"\n**Updated by:** {moderator.mention} (`{moderator}`)"
+        if reason:
+            detail += f"\n**Reason:** {reason[:400]}"
+
+        components = [
+            discord.ui.TextDisplay(content="## Role Updated"),
+            discord.ui.TextDisplay(content=detail),
+            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+        ]
+
+        container = discord.ui.Container(
+            *components,
+            accent_color=discord.Color.blue(),
+        )
+        view = LogView(container)
+
+        try:
+            rules = await self.db.fetch(
+                "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                after.guild.id,
+                "role",
             )
 
-            embed = discord.Embed(
-                title="Role Updated",
-                color=discord.Color.blue(),
-                timestamp=discord.utils.utcnow(),
-            )
+            already_sent: set[int] = set()
 
-            embed.add_field(name="Role", value=after.mention, inline=True)
-            embed.add_field(name="Changes", value="\n".join(changes), inline=False)
+            for rule in rules:
+                log_channel_id = rule["log_channel_id"]
+                if log_channel_id in already_sent:
+                    continue
 
-            if moderator:
-                embed.add_field(
-                    name="Updated By",
-                    value=f"{moderator.mention} ({moderator})",
-                    inline=True,
-                )
-
-            if reason:
-                embed.add_field(
-                    name="Reason",
-                    value=reason[:1020] + "..." if len(reason) > 1020 else reason,
-                    inline=False,
-                )
-
-            embed.set_author(
-                name=f"{after.name} ({after.id})",
-                icon_url=after.display_icon.url if after.display_icon else None,
-            )
-
-            await self.send_log(after.guild.id, "role", embed)
+                log_channel = self.bot.get_channel(log_channel_id)
+                if log_channel and isinstance(log_channel, discord.TextChannel):
+                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
+                        try:
+                            await log_channel.send(view=view)
+                            already_sent.add(log_channel_id)
+                        except discord.HTTPException:
+                            pass
+        except Exception:
+            pass
 
     @commands.Cog.listener()
     async def on_voice_state_update(
@@ -1285,58 +1736,167 @@ class Moderation(commands.Cog):
         before: discord.VoiceState,
         after: discord.VoiceState,
     ):
+        ts = discord.utils.utcnow()
+        member_str = f"**Member:** {member.mention} (`{member}` - ID: `{member.id}`)"
+
+        def _make_voice_components(title: str, color: discord.Color, detail: str):
+            return [
+                discord.ui.TextDisplay(content=f"## {title}"),
+                discord.ui.Section(
+                    discord.ui.TextDisplay(content=detail),
+                    accessory=discord.ui.Thumbnail(
+                        media=discord.UnfurledMediaItem(url=member.display_avatar.url)
+                    ),
+                ),
+                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+            ]
+
         if not before.channel and after.channel:
-            embed = discord.Embed(
-                title="Voice Channel Joined",
-                color=discord.Color.green(),
-                timestamp=discord.utils.utcnow(),
+            detail = f"{member_str}\n**Channel:** {after.channel.mention}"
+            components = _make_voice_components(
+                "Voice Channel Joined", discord.Color.green(), detail
             )
-
-            embed.add_field(
-                name="Member", value=f"{member.mention} ({member})", inline=True
+            container = discord.ui.Container(
+                *components,
+                accent_color=discord.Color.green(),
             )
-            embed.add_field(name="Channel", value=after.channel.mention, inline=True)
+            view = LogView(container)
 
-            embed.set_author(
-                name=f"{member} (ID: {member.id})", icon_url=member.display_avatar.url
-            )
+            try:
+                rules = await self.db.fetch(
+                    "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                    member.guild.id,
+                    "voice",
+                )
 
-            await self.send_log(member.guild.id, "voice", embed, after.channel.id)
+                already_sent: set[int] = set()
+
+                for rule in rules:
+                    if (
+                        rule["exclude_channel_ids"]
+                        and after.channel.id in rule["exclude_channel_ids"]
+                    ):
+                        continue
+                    if (
+                        rule["include_channel_ids"]
+                        and after.channel.id not in rule["include_channel_ids"]
+                    ):
+                        continue
+
+                    log_channel_id = rule["log_channel_id"]
+                    if log_channel_id in already_sent:
+                        continue
+
+                    log_channel = self.bot.get_channel(log_channel_id)
+                    if log_channel and isinstance(log_channel, discord.TextChannel):
+                        if log_channel.permissions_for(
+                            log_channel.guild.me
+                        ).send_messages:
+                            try:
+                                await log_channel.send(view=view)
+                                already_sent.add(log_channel_id)
+                            except discord.HTTPException:
+                                pass
+            except Exception:
+                pass
 
         elif before.channel and not after.channel:
-            embed = discord.Embed(
-                title="Voice Channel Left",
-                color=discord.Color.red(),
-                timestamp=discord.utils.utcnow(),
+            detail = f"{member_str}\n**Channel:** {before.channel.mention}"
+            components = _make_voice_components(
+                "Voice Channel Left", discord.Color.red(), detail
             )
-
-            embed.add_field(
-                name="Member", value=f"{member.mention} ({member})", inline=True
+            container = discord.ui.Container(
+                *components,
+                accent_color=discord.Color.red(),
             )
-            embed.add_field(name="Channel", value=before.channel.mention, inline=True)
+            view = LogView(container)
 
-            embed.set_author(
-                name=f"{member} (ID: {member.id})", icon_url=member.display_avatar.url
-            )
+            try:
+                rules = await self.db.fetch(
+                    "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                    member.guild.id,
+                    "voice",
+                )
 
-            await self.send_log(member.guild.id, "voice", embed, before.channel.id)
+                already_sent: set[int] = set()
+
+                for rule in rules:
+                    if (
+                        rule["exclude_channel_ids"]
+                        and before.channel.id in rule["exclude_channel_ids"]
+                    ):
+                        continue
+                    if (
+                        rule["include_channel_ids"]
+                        and before.channel.id not in rule["include_channel_ids"]
+                    ):
+                        continue
+
+                    log_channel_id = rule["log_channel_id"]
+                    if log_channel_id in already_sent:
+                        continue
+
+                    log_channel = self.bot.get_channel(log_channel_id)
+                    if log_channel and isinstance(log_channel, discord.TextChannel):
+                        if log_channel.permissions_for(
+                            log_channel.guild.me
+                        ).send_messages:
+                            try:
+                                await log_channel.send(view=view)
+                                already_sent.add(log_channel_id)
+                            except discord.HTTPException:
+                                pass
+            except Exception:
+                pass
 
         elif before.channel and after.channel and before.channel != after.channel:
-            embed = discord.Embed(
-                title="Voice Channel Moved",
-                color=discord.Color.blue(),
-                timestamp=discord.utils.utcnow(),
+            detail = f"{member_str}\n**From:** {before.channel.mention} -> **To:** {after.channel.mention}"
+            components = _make_voice_components(
+                "Voice Channel Moved", discord.Color.blue(), detail
             )
-            embed.add_field(
-                name="Member", value=f"{member.mention} ({member})", inline=True
+            container = discord.ui.Container(
+                *components,
+                accent_color=discord.Color.blue(),
             )
-            embed.add_field(name="From", value=before.channel.mention, inline=True)
-            embed.add_field(name="To", value=after.channel.mention, inline=True)
+            view = LogView(container)
 
-            embed.set_author(
-                name=f"{member} (ID: {member.id})", icon_url=member.display_avatar.url
-            )
-            await self.send_log(member.guild.id, "voice", embed, after.channel.id)
+            try:
+                rules = await self.db.fetch(
+                    "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                    member.guild.id,
+                    "voice",
+                )
+
+                already_sent: set[int] = set()
+
+                for rule in rules:
+                    if (
+                        rule["exclude_channel_ids"]
+                        and after.channel.id in rule["exclude_channel_ids"]
+                    ):
+                        continue
+                    if (
+                        rule["include_channel_ids"]
+                        and after.channel.id not in rule["include_channel_ids"]
+                    ):
+                        continue
+
+                    log_channel_id = rule["log_channel_id"]
+                    if log_channel_id in already_sent:
+                        continue
+
+                    log_channel = self.bot.get_channel(log_channel_id)
+                    if log_channel and isinstance(log_channel, discord.TextChannel):
+                        if log_channel.permissions_for(
+                            log_channel.guild.me
+                        ).send_messages:
+                            try:
+                                await log_channel.send(view=view)
+                                already_sent.add(log_channel_id)
+                            except discord.HTTPException:
+                                pass
+            except Exception:
+                pass
 
         elif (
             before.mute != after.mute
@@ -1355,112 +1915,89 @@ class Moderation(commands.Cog):
                 changes.append(
                     f"**Self Deafen:** {before.self_deaf} -> {after.self_deaf}"
                 )
-
             if before.mute != after.mute:
-                if after.mute:
-                    moderator, reason = await self.get_moderator_from_audit_log(
-                        member.guild, member, discord.AuditLogAction.member_update
-                    )
-                    if moderator:
-                        changes.append(
-                            f"**Server Muted:** {before.mute} -> {after.mute}"
-                        )
-                        moderator_info["mute"] = (moderator, reason)
-                    else:
-                        changes.append(
-                            f"**Server Muted:** {before.mute} -> {after.mute}"
-                        )
-                else:
-                    moderator, reason = await self.get_moderator_from_audit_log(
-                        member.guild, member, discord.AuditLogAction.member_update
-                    )
-                    if moderator:
-                        changes.append(
-                            f"**Server Muted:** {before.mute} -> {after.mute}"
-                        )
-                        moderator_info["mute"] = (moderator, reason)
-                    else:
-                        changes.append(
-                            f"**Server Muted:** {before.mute} -> {after.mute}"
-                        )
-
+                moderator, reason = await self.get_moderator_from_audit_log(
+                    member.guild, member, discord.AuditLogAction.member_update
+                )
+                changes.append(f"**Server Muted:** {before.mute} -> {after.mute}")
+                if moderator:
+                    moderator_info["mute"] = (moderator, reason)
             if before.deaf != after.deaf:
-                if after.deaf:
-                    moderator, reason = await self.get_moderator_from_audit_log(
-                        member.guild, member, discord.AuditLogAction.member_update
-                    )
-                    if moderator:
-                        changes.append(
-                            f"**Server Deafened:** {before.deaf} -> {after.deaf}"
-                        )
-                        moderator_info["deaf"] = (moderator, reason)
-                    else:
-                        changes.append(
-                            f"**Server Deafened:** {before.deaf} -> {after.deaf}"
-                        )
-                else:
-                    moderator, reason = await self.get_moderator_from_audit_log(
-                        member.guild, member, discord.AuditLogAction.member_update
-                    )
-                    if moderator:
-                        changes.append(
-                            f"**Server Deafened:** {before.deaf} -> {after.deaf}"
-                        )
-                        moderator_info["deaf"] = (moderator, reason)
-                    else:
-                        changes.append(
-                            f"**Server Deafened:** {before.deaf} -> {after.deaf}"
-                        )
+                moderator, reason = await self.get_moderator_from_audit_log(
+                    member.guild, member, discord.AuditLogAction.member_update
+                )
+                changes.append(f"**Server Deafened:** {before.deaf} -> {after.deaf}")
+                if moderator:
+                    moderator_info["deaf"] = (moderator, reason)
 
             if not changes:
                 return
 
-            embed = discord.Embed(
-                title="Voice State Updated",
-                color=discord.Color.orange(),
-                timestamp=discord.utils.utcnow(),
+            final_moderator, final_reason = next(
+                (
+                    v
+                    for v in (moderator_info.get("mute"), moderator_info.get("deaf"))
+                    if v
+                ),
+                (None, None),
             )
-            embed.add_field(
-                name="Member", value=f"{member.mention} ({member})", inline=True
-            )
-            embed.add_field(
-                name="Channel",
-                value=after.channel.mention if after.channel else "None",
-                inline=True,
-            )
-            embed.add_field(name="Changes", value="\n".join(changes), inline=False)
-
-            final_moderator = None
-            final_reason = None
-            if "mute" in moderator_info:
-                final_moderator, final_reason = moderator_info["mute"]
-            elif "deaf" in moderator_info:
-                final_moderator, final_reason = moderator_info["deaf"]
-
+            channel_ref = after.channel.mention if after.channel else "*Unknown*"
+            detail = f"{member_str}\n**Channel:** {channel_ref}\n" + "\n".join(changes)
             if final_moderator:
-                embed.add_field(
-                    name="Action By",
-                    value=f"{final_moderator.mention} ({final_moderator})",
-                    inline=True,
+                detail += (
+                    f"\n**Action by:** {final_moderator.mention} (`{final_moderator}`)"
                 )
             if final_reason:
-                embed.add_field(
-                    name="Reason",
-                    value=final_reason[:1020] + "..."
-                    if len(final_reason) > 1020
-                    else final_reason,
-                    inline=False,
+                detail += f"\n**Reason:** {final_reason[:400]}"
+
+            components = _make_voice_components(
+                "Voice State Updated", discord.Color.orange(), detail
+            )
+            container = discord.ui.Container(
+                *components,
+                accent_color=discord.Color.orange(),
+            )
+            view = LogView(container)
+
+            try:
+                rules = await self.db.fetch(
+                    "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                    member.guild.id,
+                    "voice",
                 )
 
-            embed.set_author(
-                name=f"{member} (ID: {member.id})", icon_url=member.display_avatar.url
-            )
-            await self.send_log(
-                member.guild.id,
-                "voice",
-                embed,
-                after.channel.id if after.channel else None,
-            )
+                already_sent: set[int] = set()
+
+                for rule in rules:
+                    channel_check = after.channel.id if after.channel else None
+                    if channel_check:
+                        if (
+                            rule["exclude_channel_ids"]
+                            and channel_check in rule["exclude_channel_ids"]
+                        ):
+                            continue
+                        if (
+                            rule["include_channel_ids"]
+                            and channel_check not in rule["include_channel_ids"]
+                        ):
+                            continue
+
+                    log_channel_id = rule["log_channel_id"]
+                    if log_channel_id in already_sent:
+                        continue
+
+                    log_channel = self.bot.get_channel(log_channel_id)
+                    if log_channel and isinstance(log_channel, discord.TextChannel):
+                        if log_channel.permissions_for(
+                            log_channel.guild.me
+                        ).send_messages:
+                            try:
+                                await log_channel.send(view=view)
+                                already_sent.add(log_channel_id)
+                            except discord.HTTPException:
+                                pass
+            except Exception:
+                pass
 
     @commands.Cog.listener()
     async def on_guild_update(self, before: discord.Guild, after: discord.Guild):
@@ -1468,121 +2005,135 @@ class Moderation(commands.Cog):
 
         if before.name != after.name:
             changes.append(f"**Name:** {before.name} -> {after.name}")
-
         if before.description != after.description:
             changes.append(
                 f"**Description:** {before.description or 'None'} -> {after.description or 'None'}"
             )
-
         if before.icon != after.icon:
-            if after.icon:
-                changes.append(f"**Icon:** [Changed]({after.icon.url})")
-            else:
-                changes.append("**Icon:** Removed")
-
+            changes.append(
+                f"**Icon:** {'[Changed](' + after.icon.url + ')' if after.icon else 'Removed'}"
+            )
         if before.banner != after.banner:
-            if after.banner:
-                changes.append(f"**Banner:** [Changed]({after.banner.url})")
-            else:
-                changes.append("**Banner:** Removed")
-
+            changes.append(
+                f"**Banner:** {'[Changed](' + after.banner.url + ')' if after.banner else 'Removed'}"
+            )
         if before.splash != after.splash:
-            if after.splash:
-                changes.append(f"**Invite Splash:** [Changed]({after.splash.url})")
-            else:
-                changes.append("**Invite Splash:** Removed")
-
+            changes.append(
+                f"**Invite Splash:** {'[Changed](' + after.splash.url + ')' if after.splash else 'Removed'}"
+            )
         if before.discovery_splash != after.discovery_splash:
-            if after.discovery_splash:
-                changes.append(
-                    f"**Discovery Splash:** [Changed]({after.discovery_splash.url})"
-                )
-            else:
-                changes.append("**Discovery Splash:** Removed")
-
+            changes.append(
+                f"**Discovery Splash:** {'[Changed](' + after.discovery_splash.url + ')' if after.discovery_splash else 'Removed'}"
+            )
         if before.afk_channel != after.afk_channel:
             changes.append(
                 f"**AFK Channel:** {before.afk_channel.mention if before.afk_channel else 'None'} -> {after.afk_channel.mention if after.afk_channel else 'None'}"
             )
-
         if before.afk_timeout != after.afk_timeout:
             changes.append(
                 f"**AFK Timeout:** {before.afk_timeout}s -> {after.afk_timeout}s"
             )
-
         if before.system_channel != after.system_channel:
             changes.append(
                 f"**System Channel:** {before.system_channel.mention if before.system_channel else 'None'} -> {after.system_channel.mention if after.system_channel else 'None'}"
             )
-
         if before.rules_channel != after.rules_channel:
             changes.append(
                 f"**Rules Channel:** {before.rules_channel.mention if before.rules_channel else 'None'} -> {after.rules_channel.mention if after.rules_channel else 'None'}"
             )
-
         if before.public_updates_channel != after.public_updates_channel:
             changes.append(
                 f"**Public Updates Channel:** {before.public_updates_channel.mention if before.public_updates_channel else 'None'} -> {after.public_updates_channel.mention if after.public_updates_channel else 'None'}"
             )
-
         if before.verification_level != after.verification_level:
             changes.append(
                 f"**Verification Level:** {before.verification_level.name} -> {after.verification_level.name}"
             )
-
         if before.explicit_content_filter != after.explicit_content_filter:
             changes.append(
                 f"**Content Filter:** {before.explicit_content_filter.name} -> {after.explicit_content_filter.name}"
             )
-
         if before.default_notifications != after.default_notifications:
             changes.append(
                 f"**Default Notifications:** {before.default_notifications.name} -> {after.default_notifications.name}"
             )
-
         if before.vanity_url_code != after.vanity_url_code:
-            if after.vanity_url_code:
-                changes.append(
-                    f"**Vanity URL:** {before.vanity_url_code or 'None'} -> {after.vanity_url_code}"
-                )
-            else:
-                changes.append("**Vanity URL:** Removed")
-
+            changes.append(
+                f"**Vanity URL:** {before.vanity_url_code or 'None'} -> {after.vanity_url_code or 'Removed'}"
+            )
         if before.premium_progress_bar_enabled != after.premium_progress_bar_enabled:
             changes.append(
-                f"**Premium Progress Bar:** {'Enabled' if before.premium_progress_bar_enabled else 'Disabled'} -> {'Enabled' if after.premium_progress_bar_enabled else 'Disabled'}"
+                f"**Premium Progress Bar:** {'Enabled' if after.premium_progress_bar_enabled else 'Disabled'}"
             )
 
-        if changes:
-            moderator, reason = await self.get_moderator_from_audit_log(
-                after, after, discord.AuditLogAction.guild_update
-            )
+        if not changes:
+            return
 
-            embed = discord.Embed(
-                title="Server Updated",
-                color=discord.Color.blue(),
-                timestamp=discord.utils.utcnow(),
-            )
+        moderator, reason = await self.get_moderator_from_audit_log(
+            after, after, discord.AuditLogAction.guild_update
+        )
+        ts = discord.utils.utcnow()
 
-            embed.add_field(name="Changes", value="\n".join(changes), inline=False)
+        components = [
+            discord.ui.TextDisplay(content="## Server Updated"),
+        ]
 
-            if moderator:
-                embed.add_field(
-                    name="Updated By",
-                    value=f"{moderator.mention} ({moderator})",
-                    inline=True,
+        changes_text = "\n".join(changes)
+        if after.icon:
+            components.append(
+                discord.ui.Section(
+                    discord.ui.TextDisplay(content=changes_text),
+                    accessory=discord.ui.Thumbnail(
+                        media=discord.UnfurledMediaItem(url=after.icon.url)
+                    ),
                 )
+            )
+        else:
+            components.append(discord.ui.TextDisplay(content=changes_text))
 
-            if reason:
-                embed.add_field(
-                    name="Reason",
-                    value=reason[:1020] + "..." if len(reason) > 1020 else reason,
-                    inline=False,
-                )
+        components.append(discord.ui.Separator())
 
-            embed.set_footer(text=f"Server ID: {after.id}")
+        footer = f"Server ID: `{after.id}`"
+        if moderator:
+            footer += f" - Updated by {moderator.mention} (`{moderator}`)"
+        if reason:
+            footer += f"\n**Reason:** {reason[:300]}"
 
-            await self.send_log(after.id, "guild", embed)
+        components.append(discord.ui.TextDisplay(content=footer))
+        components.append(
+            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>")
+        )
+
+        container = discord.ui.Container(
+            *components,
+            accent_color=discord.Color.blue(),
+        )
+        view = LogView(container)
+
+        try:
+            rules = await self.db.fetch(
+                "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                after.id,
+                "guild",
+            )
+
+            already_sent: set[int] = set()
+
+            for rule in rules:
+                log_channel_id = rule["log_channel_id"]
+                if log_channel_id in already_sent:
+                    continue
+
+                log_channel = self.bot.get_channel(log_channel_id)
+                if log_channel and isinstance(log_channel, discord.TextChannel):
+                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
+                        try:
+                            await log_channel.send(view=view)
+                            already_sent.add(log_channel_id)
+                        except discord.HTTPException:
+                            pass
+        except Exception:
+            pass
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -2188,8 +2739,6 @@ class Moderation(commands.Cog):
             await ctx.send(
                 f"Banned member(s): `{', '.join(banned_users)}`\n**Reason:** `{reason}`\n(Messages will be deleted up to {delete_days} day(s) back)"
             )
-        else:
-            pass
 
         reference = ctx.message.reference
         if reference and isinstance(reference.resolved, discord.Message):
@@ -2278,8 +2827,6 @@ class Moderation(commands.Cog):
             await ctx.send(
                 f"Kicked member(s): `{', '.join(kicked_users)}`\n**Reason:** `{reason}`"
             )
-        else:
-            pass
 
         reference = ctx.message.reference
         if reference and isinstance(reference.resolved, discord.Message):
