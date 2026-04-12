@@ -13,6 +13,8 @@ RUN echo 'app-shells/nushell' >> /etc/portage/package.accept_keywords/keywords
 RUN echo 'app-shells/fish' >> /etc/portage/package.accept_keywords/keywords
 RUN echo 'dev-dotnet/libgdiplus cairo' >> /etc/portage/package.use/use
 RUN echo 'media-video/ffmpeg lame qrcode opus vpx vorbis truetype rubberband quirc fribidi flite x264 x265 dav1d fdk' >> /etc/portage/package.use/use
+RUN echo 'net-print/cups-meta postscript' >> /etc/portage/package.use/use
+RUN echo 'app-text/ghostscript-gpl cups' >> /etc/portage/package.use/use
 RUN echo 'ACCEPT_LICENSE="*"' >> /etc/portage/make.conf
 RUN getuto
 RUN emerge --sync
@@ -52,13 +54,26 @@ RUN emerge --getbinpkg --noreplace \
     media-video/ffmpeg \
     media-gfx/imagemagick \
     media-sound/sox \
-    media-libs/vips
+    media-libs/vips \
+    media-libs/mesa \
+    dev-libs/nspr \
+    dev-libs/nss \
+    dev-libs/atk \
+    x11-libs/gtk+ \
+    x11-libs/libxkbcommon \
+    net-print/cups-meta \
+    media-libs/alsa-lib
 
 
 RUN groupadd -g 1000 gcoder && useradd -r -u 1000 -g gcoder -m -d /home/gcoder gcoder
-RUN pip install --break-system-packages pyvips
+RUN pip install --break-system-packages pyvips playwright
 RUN npm install -g ts-node mathjs imagescript
 ENV NODE_PATH=/usr/local/lib/node_modules
+ENV PLAYWRIGHT_BROWSERS_PATH=/usr/lib/playwright
+RUN mkdir -p $PLAYWRIGHT_BROWSERS_PATH
+RUN playwright install && \
+    chown -R root:root $PLAYWRIGHT_BROWSERS_PATH && \
+    chmod -R 755 $PLAYWRIGHT_BROWSERS_PATH
 RUN mkdir -p /app && \
     chown -R root:root /app && \
     chmod -R 555 /app

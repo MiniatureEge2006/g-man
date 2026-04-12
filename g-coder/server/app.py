@@ -129,6 +129,7 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
     env = {
         "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
         "HOME": str(work_dir),
+        "PLAYWRIGHT_BROWSERS_PATH": "/usr/lib/playwright",
     }
     for i, filename in enumerate(saved_files, start=1):
         env[f"FILE_{i}"] = str(input_dir / filename)
