@@ -5045,8 +5045,7 @@ class Tags(commands.Cog):
                 result = await response.json()
 
                 output = result.get("output", "").replace("\r\n", "\n").strip()
-                if result.get("error") or "error" in output.lower():
-                    return f"[{language} error: {output or 'Code execution failed with no output'}]"
+                has_error = result.get("error") or "error" in output.lower()
 
                 if result.get("files"):
                     job_id = result.get("job_id", "")
@@ -5070,7 +5069,13 @@ class Tags(commands.Cog):
                                             )
                                         )
                         except Exception as e:
-                            return f"[{language} error: Failed to fetch file {filename}: {str(e)}]"
+                            output += f"\n[File fetch failure for {filename}: {str(e)}"
+
+                    if has_error:
+                        error_msg = f"[{language} error: {output or 'Code execution failed with no output'}]"
+                        if file_objs:
+                            return (error_msg, [], None, file_objs[:10])
+                        return error_msg
 
                     if file_objs:
                         return (output, [], None, file_objs[:10])

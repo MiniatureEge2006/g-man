@@ -109,7 +109,7 @@ async def validate_file(file: UploadFile):
 
 async def execute_code(language: str, code: str, files: List[UploadFile]):
     ensure_dirs()
-    work_dir = Path(tempfile.mkdtemp(dir=EXECUTION_BASE, prefix="job__"))
+    work_dir = Path(tempfile.mkdtemp(dir=EXECUTION_BASE, prefix="job_"))
     stage_dir = STAGING_BASE / work_dir.name
     work_dir.chmod(0o700)
     input_dir = work_dir / "input"
