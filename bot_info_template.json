@@ -4,5 +4,6 @@
   "prefix": "Your bot prefix",
   "database": "Your PostgreSQL database URL",
   "ollama_model": "Your Ollama AI model",
+  "ollama_system_prompt": "Your Ollama AI model's system prompt. Leave this empty to use the default.",
   "ollama_api_key": "Your Ollama API key"
 }

@@ -7923,6 +7923,8 @@ class Tags(commands.Cog):
 
                         elif component_type == 11:
                             media_data = component_data["media"]
+                            if isinstance(media_data, str):
+                                media_data = {"url": media_data}
                             url = media_data["url"]
                             processed_url = await self.formatter.format(
                                 url, ctx, **kwargs
@@ -7968,6 +7970,8 @@ class Tags(commands.Cog):
 
                         elif component_type == 13:
                             file_data = component_data["file"]
+                            if isinstance(file_data, str):
+                                file_data = {"url": file_data}
                             url = file_data["url"]
                             processed_url = await self.formatter.format(
                                 url, ctx, **kwargs

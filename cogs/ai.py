@@ -112,7 +112,10 @@ class AI(commands.Cog):
     async def create_system_prompt(
         self, ctx: commands.Context, content: str = ""
     ) -> str:
-        base_prompt = """You are G-Man from the Half-Life series. You are speaking with Dr. Gordon Freeman."""
+        base_prompt = (
+            bot_info.data["ollama_system_prompt"]
+            or "You are G-Man from the Half-Life series. You are speaking with Dr. Gordon Freeman."
+        )
         if self.db:
             if ctx.guild:
                 server_row = await self.db.fetchrow(
