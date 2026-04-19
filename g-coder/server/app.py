@@ -70,13 +70,13 @@ async def cleanup_execution_base():
 async def periodic_cleanup(interval: int = 300):
     while True:
         await asyncio.sleep(interval)
-        cleanup_execution_base()
+        await cleanup_execution_base()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     ensure_dirs()
-    cleanup_execution_base()
+    await cleanup_execution_base()
     asyncio.create_task(periodic_cleanup())
     yield
 
