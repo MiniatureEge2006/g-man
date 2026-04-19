@@ -4,8 +4,10 @@ services:
       context: ./server
       dockerfile: Dockerfile
     user: "1000:1000"
-    mem_limit: 4G
-    pids_limit: 100
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     ports:
       - "8000:8000"
     restart: unless-stopped
