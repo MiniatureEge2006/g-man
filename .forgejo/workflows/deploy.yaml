@@ -1,0 +1,32 @@
+name: Deploy Zensical
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+
+jobs:
+  build-and-deploy:
+    runs-on: codeberg-tiny
+    steps:
+      - name: Checkout Source
+        uses: https://code.forgejo.org/actions/checkout@v4
+
+      - name: Setup Python
+        uses: https://code.forgejo.org/actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install Zensical
+        run: pip install zensical
+
+      - name: Build Site
+        run: zensical build --clean
+
+      - name: Deploy to Pages
+        uses: https://codeberg.org
+        with:
+          site: "https://${{ forgejo.repository_owner }}.codeberg.page/${{ forgejo.repository_name }}/"
+          source: "site"
