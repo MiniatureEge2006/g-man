@@ -1,5 +1,10 @@
 name: Deploy Zensical
 on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Reason for running"
+        required: false
   push:
     branches:
       - master
