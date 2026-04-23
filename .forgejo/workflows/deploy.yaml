@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       reason:
-        description: "Reason for running"
+        description: Reason for running
         required: false
   push:
     branches:
