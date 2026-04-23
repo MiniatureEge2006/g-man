@@ -1,7 +1,7 @@
 # Hybrid Command: remove
 
 ## Description:
-Remove a song from the queue by index.
+Remove a track from the queue by index.
 
 ## Usage:
     g-remove <index>

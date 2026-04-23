@@ -1,10 +1,9 @@
 # Hybrid Command: stream
 
 ## Description:
-Stream an audio/song or playlist from a given URL without downloading.
+Stream a track or playlist from a given URL without downloading to disk.
 
 ## Aliases:
-    strm
     s
 
 ## Usage:

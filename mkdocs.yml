@@ -83,6 +83,17 @@ nav:
           - clear: commands/audio/clear.md
           - pause: commands/audio/pause.md
           - resume: commands/audio/resume.md
+          - musicprofile: commands/audio/musicprofile.md
+          - playlist: commands/audio/playlist.md
+          - Playlist Management:
+              - create: commands/audio/playlist/create.md
+              - add: commands/audio/playlist/add.md
+              - view: commands/audio/playlist/view.md
+              - list: commands/audio/playlist/list.md
+              - play: commands/audio/playlist/play.md
+              - stream: commands/audio/playlist/stream.md
+              - remove: commands/audio/playlist/remove.md
+              - delete: commands/audio/playlist/delete.md
       - Code:
           - Overview: commands/code.md
           - code: commands/code/code.md

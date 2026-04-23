@@ -1,7 +1,7 @@
 # Hybrid Command: seek
 
 ## Description:
-Seek to a specific position in the currently playing audio.
+Seek to a specific position in the currently playing track.
 
 ## Usage:
     g-seek <position>

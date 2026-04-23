@@ -1,7 +1,7 @@
 # Hybrid Command: goto
 
 ## Description:
-Skip to a specific song in the queue by index.
+Skip to a specific track in the queue by index.
 
 ## Usage:
     g-goto <index>

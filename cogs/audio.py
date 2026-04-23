@@ -549,13 +549,13 @@ class Audio(commands.Cog):
 
     @commands.hybrid_command(
         name="play",
-        description="Play an audio/song or playlist. Any URL that yt-dlp supports also works.",
+        description="Play a track or playlist from a given URL. Any URL that yt-dlp supports also works.",
         aliases=["p"],
     )
     @app_commands.describe(
-        url="The URL of the audio/song or playlist to play.",
+        url="The URL of the track or playlist to play.",
         attachment="The attachment media file to use for playing.",
-        filters="A comma-separated list of filters to apply to the audio.",
+        filters="A comma-separated list of filters to apply to the track.",
     )
     @app_commands.allowed_installs(guilds=True, users=False)
     async def play(
@@ -585,13 +585,13 @@ class Audio(commands.Cog):
 
     @commands.hybrid_command(
         name="stream",
-        description="Stream an audio/song or playlist from a given URL without downloading to disk.",
+        description="Stream a track or playlist from a given URL without downloading to disk.",
         aliases=["s"],
     )
     @app_commands.describe(
-        url="The URL of the audio/song or playlist to stream.",
+        url="The URL of the track or playlist to stream.",
         attachment="The attachment media file to use for streaming.",
-        filters="A comma-separated list of filters to apply to the audio.",
+        filters="A comma-separated list of filters to apply to the track.",
     )
     @app_commands.allowed_installs(guilds=True, users=False)
     async def stream(
@@ -621,7 +621,7 @@ class Audio(commands.Cog):
 
     @commands.hybrid_command(
         name="seek",
-        description="Seek to a specific position in the currently playing audio.",
+        description="Seek to a specific position in the currently playing track.",
     )
     @app_commands.describe(
         position="Position to seek to. Can be absolute (e.g. 2:30), relative (+/- 30), or percentage. (50%)"
@@ -685,10 +685,10 @@ class Audio(commands.Cog):
         await ctx.send(f"Seeked to {self.format_time(new_pos)}.")
 
     @commands.hybrid_command(
-        name="goto", description="Skip to a specific song in the queue by index."
+        name="goto", description="Skip to a specific track in the queue by index."
     )
     @app_commands.describe(
-        index="The index of the song in the queue to skip to. (starting at 1)"
+        index="The index of the track in the queue to skip to. (starting at 1)"
     )
     @app_commands.allowed_installs(guilds=True, users=False)
     async def goto(self, ctx: commands.Context, index: int):
@@ -714,11 +714,11 @@ class Audio(commands.Cog):
         await ctx.send(f"Skipped to position {index}.")
 
     @commands.hybrid_command(
-        name="move", description="Move a song to another position in the queue."
+        name="move", description="Move a track to another position in the queue."
     )
     @app_commands.describe(
-        old_index="Current position of the song. (starting at 1)",
-        new_index="New position for the song. (starting at 1)",
+        old_index="Current position of the track. (starting at 1)",
+        new_index="New position for the track. (starting at 1)",
     )
     @app_commands.allowed_installs(guilds=True, users=False)
     async def move(self, ctx: commands.Context, old_index: int, new_index: int):
@@ -732,7 +732,7 @@ class Audio(commands.Cog):
         queue = list(self.get_queue(ctx.guild.id))
         length = len(queue)
         if not (1 <= old_index <= length) or not (1 <= new_index <= length):
-            await ctx.send("Invalid indices.")
+            await ctx.send("Invalid indexes.")
             return
 
         moved_item = queue.pop(old_index - 1)
@@ -743,12 +743,12 @@ class Audio(commands.Cog):
         if state.loop_mode == "queue":
             state.original_queue = queue
 
-        await ctx.send(f"Moved item from position {old_index} to {new_index}.")
+        await ctx.send(f"Moved track from position {old_index} to {new_index}.")
 
     @commands.hybrid_command(
-        name="remove", description="Remove a song from the queue by index."
+        name="remove", description="Remove a track from the queue by index."
     )
-    @app_commands.describe(index="Index of the song to remove. (starting at 1)")
+    @app_commands.describe(index="Index of the track to remove. (starting at 1)")
     @app_commands.allowed_installs(guilds=True, users=False)
     async def remove(self, ctx: commands.Context, index: int):
         await ctx.typing()
@@ -772,7 +772,9 @@ class Audio(commands.Cog):
         await ctx.send(f"Removed {removed[3]} from the queue.")
 
     @commands.hybrid_command(
-        name="volume", description="Adjust playback volume (0-100%).", aliases=["vol"]
+        name="volume",
+        description="Adjust the playback volume (0-100%).",
+        aliases=["vol"],
     )
     @app_commands.describe(level="Volume level. (0-100)")
     @app_commands.allowed_installs(guilds=True, users=False)
@@ -793,18 +795,23 @@ class Audio(commands.Cog):
 
         if ctx.voice_client.source:
             ctx.voice_client.source.volume = volume_level
-        await ctx.send(f"Volume set to {level}%")
+        await ctx.send(f"Volume has been set to {level}%")
 
     @commands.hybrid_command(
         name="nowplaying",
-        description="Display information about the currently playing audio/song.",
+        description="Display information about the currently playing track.",
         aliases=["np"],
     )
     @app_commands.allowed_installs(guilds=True, users=False)
     async def nowplaying(self, ctx: commands.Context):
         await ctx.typing()
-        if ctx.voice_client and (
-            ctx.voice_client.is_playing() or ctx.voice_client.is_paused()
+        if (
+            ctx.voice_client
+            and ctx.author.voice
+            and ctx.author.voice.channel
+            == ctx.voice_client.channel(
+                ctx.voice_client.is_playing() or ctx.voice_client.is_paused()
+            )
         ):
             state = self.get_state(ctx.guild.id)
             current = state.currently_playing
@@ -876,6 +883,10 @@ class Audio(commands.Cog):
                     icon_url=requester.display_avatar.url,
                 )
                 await ctx.send(embed=embed)
+        elif ctx.author.voice is None:
+            await ctx.send("You are not in a voice channel.")
+        elif ctx.author.voice.channel != ctx.voice_client.channel:
+            await ctx.send("You are not in the same voice channel as me.")
         else:
             await ctx.send("Nothing is currently playing.")
 
@@ -910,7 +921,7 @@ class Audio(commands.Cog):
 
     @commands.hybrid_command(
         name="repeat",
-        description="Repeat the currently playing audio/song or playlist.",
+        description="Repeat the currently playing track or playlist.",
         aliases=["loop"],
     )
     @app_commands.describe(mode="Loop mode. (off/track/queue)")
@@ -1141,7 +1152,7 @@ class Audio(commands.Cog):
             paginator.message = await ctx.send(embed=embed, view=paginator)
 
     @commands.hybrid_command(
-        name="skip", description="Skip the currently playing audio/song."
+        name="skip", description="Skip the currently playing track."
     )
     @app_commands.allowed_installs(guilds=True, users=False)
     async def skip(self, ctx: commands.Context):
@@ -1157,15 +1168,17 @@ class Audio(commands.Cog):
                 state.loop_mode = "off"
                 await self.save_guild_settings(ctx.guild.id, loop_mode="off")
             ctx.voice_client.stop()
-            await ctx.send("Skipped playback.")
+            await ctx.send("Skipped track.")
         elif ctx.author.voice is None:
             await ctx.send("You are not in a voice channel.")
         elif ctx.author.voice.channel != ctx.voice_client.channel:
             await ctx.send("You are not in the same voice channel as me.")
         elif not ctx.voice_client.is_playing():
-            await ctx.send("Nothing is playing.")
+            await ctx.send("Nothing is currently playing.")
 
-    @commands.hybrid_command(name="stop", description="Stop and clear queue.")
+    @commands.hybrid_command(
+        name="stop", description="Stop the currently playing track and clear the queue."
+    )
     @app_commands.allowed_installs(guilds=True, users=False)
     async def stop(self, ctx: commands.Context):
         await ctx.typing()
@@ -1179,7 +1192,7 @@ class Audio(commands.Cog):
             state.queue.clear()
             state.original_queue = []
             ctx.voice_client.stop()
-            await ctx.send("Stopped playback and cleared the queue.")
+            await ctx.send("Stopped track and cleared the queue.")
         elif ctx.author.voice is None:
             await ctx.send("You are not in a voice channel.")
         elif ctx.author.voice.channel != ctx.voice_client.channel:
@@ -1217,7 +1230,7 @@ class Audio(commands.Cog):
             await ctx.send("You are not in the same voice channel as me.")
 
     @commands.hybrid_command(
-        name="pause", description="Pause the currently playing song/audio."
+        name="pause", description="Pause the currently playing track."
     )
     @app_commands.allowed_installs(guilds=True, users=False)
     async def pause(self, ctx: commands.Context):
@@ -1232,14 +1245,21 @@ class Audio(commands.Cog):
             state.paused_at = datetime.now()
             self.paused_times[ctx.guild.id] = datetime.now()
             ctx.voice_client.pause()
-            await ctx.send("Paused playback.")
+            await ctx.send("Paused track.")
+        elif (
+            ctx.voice_client
+            and ctx.voice_client.is_paused()
+            and ctx.author.voice
+            and ctx.author.voice.channel == ctx.voice_client.channel
+        ):
+            await ctx.send("Current track is already paused.")
         elif ctx.author.voice is None:
             await ctx.send("You are not in a voice channel.")
         elif ctx.author.voice.channel != ctx.voice_client.channel:
             await ctx.send("You are not in the same voice channel as me.")
 
     @commands.hybrid_command(
-        name="resume", description="Resume the currently paused song/audio."
+        name="resume", description="Resume the currently paused track."
     )
     @app_commands.allowed_installs(guilds=True, users=False)
     async def resume(self, ctx: commands.Context):
@@ -1257,7 +1277,14 @@ class Audio(commands.Cog):
             state.paused_at = None
             self.paused_times.pop(ctx.guild.id, None)
             ctx.voice_client.resume()
-            await ctx.send("Resumed playback.")
+            await ctx.send("Resumed track.")
+        elif (
+            ctx.voice_client
+            and ctx.voice_client.is_playing()
+            and ctx.author.voice
+            and ctx.author.voice.channel == ctx.voice_client.channel
+        ):
+            await ctx.send("Current track is already playing.")
         elif ctx.author.voice is None:
             await ctx.send("You are not in a voice channel.")
         elif ctx.author.voice.channel != ctx.voice_client.channel:

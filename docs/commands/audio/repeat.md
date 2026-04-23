@@ -1,7 +1,7 @@
 # Hybrid Command: repeat
 
 ## Description:
-Repeat the currently playing audio/song or playlist.
+Repeat the currently playing track or playlist.
 
 ## Aliases:
     loop

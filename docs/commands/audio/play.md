@@ -1,7 +1,7 @@
 # Hybrid Command: play
 
 ## Description:
-Play an audio/song or playlist from a given URL. Any URL that yt-dlp supports also works.
+Play a track or playlist from a given URL. Any URL that yt-dlp supports also works.
 
 ## Aliases:
     p

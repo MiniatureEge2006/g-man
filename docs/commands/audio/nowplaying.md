@@ -1,7 +1,7 @@
 # Hybrid Command: nowplaying
 
 ## Description:
-Display information about the currently playing audio/song.
+Display information about the currently playing track.
 
 ## Aliases:
     np

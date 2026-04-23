@@ -1,7 +1,7 @@
 # Hybrid Command: move
 
 ## Description:
-Move a song to another position in the queue.
+Move a track to another position in the queue.
 
 ## Usage:
     g-move <old_index> <new_index>

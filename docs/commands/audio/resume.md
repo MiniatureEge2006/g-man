@@ -1,7 +1,7 @@
 # Hybrid Command: resume
 
 ## Description:
-Resume the currently paused audio.
+Resume the currently paused track.
 
 ## Usage:
     g-resume
