@@ -4,7 +4,7 @@
 **This project is a fork of the original g_man bot. (https://github.com/nkrasn/g_man) So credits to nkrasn for making this bot.**
 
 # G-Man
-A Discord multi-purpose bot.
+No bullshit Discord multi-purpose bot.
 
 ## Features
 * Slash commands with user install support.
@@ -18,39 +18,40 @@ A Discord multi-purpose bot.
 * Music commands with FFMPEG audio filters support along with a queue system.
 * A prefix changing system.
 * An AI chatbot command via Ollama that supports executing TagScript.
-* Code execution server and command that includes custom packages like yt-dlp, ffmpeg, etc.
-* And lastly, a tag system with tagscripting support.
+* Code execution server and command that includes custom packages like yt-dlp, ffmpeg, etc. which is useful for scripting.
+* And lastly, a tag system which has its own engine for formatting text and stuff called TagScript.
 
 ## Usage/Commands
 You can now just type `g-help` in a channel to see all the commands.
 
 ## Requirements
-* The FFMPEG binary/executable, and YT-DLP package from pip (remember, not the executable for yt-dlp)
-* Ollama
-* Docker
-* LibreTranslate (use docker or another python installation for this)
-* A PostgreSQL database
-  * see the `setup.sql` file and run the query. This is required for the prefix, command/bot block/allowlisting system, reminder system, and tags.
-* All the Python packages in requirements.txt
+* [FFmpeg](https://ffmpeg.org) for basic and advanced media manipulation, music commands, and generally for a lot of things.
+* [Ollama](https://ollama.com) for G-AI related stuff. You aren't required to use models locally, as Ollama themselves have cloud models you can use.
+* [Docker](https://www.docker.com) for the code execution server. Do keep in mind you **don't** need Docker Desktop, just Docker and Docker Compose is required.
+* [LibreTranslate](https://docs.libretranslate.com/guides/installation/) for just a very specific TagScript function called `{translate}`. Completely optional.
+* [PostgreSQL](https://www.postgresql.org) for pretty much a lot of major functionality.
+  * Make sure to setup your own Postgres user and database, preferably called g-man and g-database respectively, though you can pick any name you want. **MAKE SURE TO NOT GIVE THE USER SUPERUSER PERMISSIONS. ALL IT NEEDS IS OWNERSHIP OF THE DATABASE ITSELF.**
+  * After setting up the user and database, run the query inside the setup.sql file inside psql with: `\i setup.sql`
+    * This sets up the database tables, required for the bot's major functionality.
+* All the Python packages in requirements.txt.
 
-You can install the Python packages, preferably in a virtual environment, by first running
+You can install the Python packages, preferably in a virtual environment, by first running:
 ```
 python -m venv .venv
+source .venv/bin/activate # If you are in Bash.
+source .venv/bin/activate.fish # If you are in Fish.
+.venv\Scripts\activate.bat # If you are in Windows and using Command Prompt.
+.venv\Scripts\activate.ps1 # If you are in PowerShell.
 ```
-then
+then:
 ```
 pip install -r requirements.txt
 ```
-
-*Tip:* If you're using Mac or Linux, you may have Python 2/Pip 2 preinstalled. You should run:
-```
-pip3 install -r requirements.txt
-```
 ## Installation
 * Download/install all requirements.
-* Create a copy of `bot_info_template.json` and rename it to `bot_info.json`. Fill it in with the appropriate information (keep the quotes).
+* Create a copy of `bot_info_template.json` and rename it to `bot_info.json`. Fill it in with the appropriate information. (keep the quotes)
 * Go to the g-coder directory and run `docker compose up -d --build` to set up the code execution server.
-  * Code execution server's port is 8000.
+  * Code execution server's port will be 8000, so make sure it does not conflict with any existing stuff you host locally.
 * Run `py gman.py` (or if you are on Linux/macOS, `python gman.py`)
 # Terms of Service & Privacy Policy
 **You must follow our ToS and Privacy Policy in order to use the public version of G-Man. Please keep in mind I am a normal human being and that I can make mistakes. I have a life.**
