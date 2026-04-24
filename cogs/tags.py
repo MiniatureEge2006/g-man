@@ -7993,10 +7993,10 @@ class Tags(commands.Cog):
                                     spacing = discord.SeparatorSpacing.small
                                 elif spacing == "large":
                                     spacing = discord.SeparatorSpacing.large
-                                else:
-                                    spacing = None
+                            if spacing is None:
+                                spacing = discord.SeparatorSpacing.small
                             separator = discord.ui.Separator(
-                                visible=component_data.get("visible"),
+                                visible=component_data.get("divider"),
                                 spacing=spacing,
                                 id=component_data.get("id"),
                             )
