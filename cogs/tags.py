@@ -5542,42 +5542,76 @@ class Tags(commands.Cog):
                 return f"[translate error: {str(e)}]"
 
         @self.formatter.register("args")
-        def args(ctx, _, **kwargs):
+        def _args(ctx, val, **kwargs):
             """
-            ### {args}
-                * Returns all arguments passed to the tag.
-                * Example: `{args}`
+            ### {args:index}
+                * Returns the specific argument at the specific index if specified, otherwise all arguments.
+                * Also supports ranges and multiple specific argument indexes.
+                * Examples:
+                    - `{args}` -> Returns all arguments.
+                    - `{args:0}` -> Returns the first argument.
+                    - `{args:1-3}` -> Returns arguments 2 to 4.
+                    - `{args:2:}` -> Returns every argument after the third argument.
+                    - `{args:0,2,4}` -> Returns arguments 1, 3, and 5.
+                    - `{args:-1}` -> Returns the last argument.
+                    - `{args:::-1}` -> Returns all arguments in reverse order.
+                * Important distinction:
+                    - `{args:0,2,4}` uses **commas** to select multiple specific indices (returns args at indexes 0, 2, and 4).
+                    - `{args:0:2:4}` uses **colons** for slice notation (start:stop:step) (returns args from index 0 to 2 with step 4).
+                    - Make sure to not confuse them together.
             """
-            return kwargs.get("args", "")
-
-        @self.formatter.register("arg")
-        async def arg(ctx, i, **kwargs):
-            """
-            ### {arg:index}
-                * Returns the argument at the specified index. (0-based)
-                * Example: `{arg:1}` returns the second argument.
-            """
-            args_string = kwargs.get("args", "")
-            args_list = args_string.split()
-
             try:
-                index = int(str(i).strip())
-            except ValueError:
-                return f"[arg error: invalid index `{i}`]"
+                args_string = kwargs.get("args", "")
+                args_list = shlex.split(args_string)
 
-            if 0 <= index < len(args_list):
-                return args_list[index]
-            return ""
+                if not val or not val.strip():
+                    return args_string
 
-        @self.formatter.register("rest")
-        def rest(ctx, i, **kwargs):
-            """
-            ### {rest:index}
-                * Returns all arguments from the specified index onward.
-                * Example: `{rest:2}` returns arguments starting from the 3rd one.
-            """
-            split_args = kwargs.get("args", "").split()
-            return " ".join(split_args[int(i) :]) if i.isdigit() else ""
+                val = val.strip()
+
+                if "," in val:
+                    result = []
+                    for idx_str in val.split(","):
+                        idx = int(idx_str.strip())
+                        if idx < 0:
+                            idx = len(args_list) + idx
+                        if 0 <= idx < len(args_list):
+                            result.append(args_list[idx])
+                    return shlex.join(result) if result else ""
+
+                if ":" in val:
+                    parts = val.split(":")
+                    start = int(parts[0]) if parts[0] and parts[0] != "" else None
+                    end = (
+                        int(parts[1])
+                        if len(parts) > 1 and parts[1] and parts[1] != ""
+                        else None
+                    )
+                    step = (
+                        int(parts[2])
+                        if len(parts) > 2 and parts[2] and parts[2] != ""
+                        else None
+                    )
+                    s = slice(start, end, step)
+                    result = args_list[s]
+                    return shlex.join(result) if result else ""
+
+                if "-" in val and not val.startswith("-"):
+                    start, end = map(int, val.split("-"))
+                    if start < 0:
+                        start = len(args_list) + start
+                    if end < 0:
+                        end = len(args_list) + end
+                    result = args_list[start : end + 1]
+                    return shlex.join(result) if result else ""
+
+                idx = int(val)
+                if idx < 0:
+                    idx = len(args_list) + idx
+                return args_list[idx] if 0 <= idx < len(args_list) else ""
+
+            except Exception as e:
+                return f"[args error: {str(e)}]"
 
         @self.formatter.register("newline")
         def _newline(ctx, amount, **kwargs):
