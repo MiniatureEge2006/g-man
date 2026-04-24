@@ -5562,10 +5562,36 @@ class Tags(commands.Cog):
             """
             try:
                 args_string = kwargs.get("args", "")
-                args_list = shlex.split(args_string)
+                args_list = []
+                current_arg = []
+                in_quotes = False
+                quote_char = None
+                escape_next = False
+
+                for char in args_string:
+                    if escape_next:
+                        current_arg.append(char)
+                        escape_next = False
+                    elif char == "\\":
+                        escape_next = True
+                    elif char in ('"', "'") and not in_quotes:
+                        in_quotes = True
+                        quote_char = char
+                    elif char == quote_char and in_quotes:
+                        in_quotes = False
+                        quote_char = None
+                    elif char.isspace() and not in_quotes:
+                        if current_arg:
+                            args_list.append("".join(current_arg))
+                            current_arg = []
+                    else:
+                        current_arg.append(char)
+
+                if current_arg:
+                    args_list.append("".join(current_arg))
 
                 if not val or not val.strip():
-                    return args_string
+                    return " ".join(args_list)
 
                 val = val.strip()
 
@@ -5577,7 +5603,7 @@ class Tags(commands.Cog):
                             idx = len(args_list) + idx
                         if 0 <= idx < len(args_list):
                             result.append(args_list[idx])
-                    return shlex.join(result) if result else ""
+                    return " ".join(result) if result else ""
 
                 if ":" in val:
                     parts = val.split(":")
@@ -5594,7 +5620,7 @@ class Tags(commands.Cog):
                     )
                     s = slice(start, end, step)
                     result = args_list[s]
-                    return shlex.join(result) if result else ""
+                    return " ".join(result) if result else ""
 
                 if "-" in val and not val.startswith("-"):
                     start, end = map(int, val.split("-"))
@@ -5603,7 +5629,7 @@ class Tags(commands.Cog):
                     if end < 0:
                         end = len(args_list) + end
                     result = args_list[start : end + 1]
-                    return shlex.join(result) if result else ""
+                    return " ".join(result) if result else ""
 
                 idx = int(val)
                 if idx < 0:
