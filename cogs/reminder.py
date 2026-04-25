@@ -106,7 +106,7 @@ class Reminder(commands.Cog):
         )
         if not reminder_time:
             await ctx.send(
-                "Invalid time format. Please use a format like `tomorrow at 3pm`, `in 1 hour`, or `2 weeks`."
+                "Invalid time format. Please use a format like `tomorrow at 3pm`, `in 1 hour`, or `in 2 weeks`."
             )
             return
         current_time = datetime.now(timezone.utc)
@@ -119,7 +119,7 @@ class Reminder(commands.Cog):
         )
         await ctx.reply(
             f"Okay, I'll remind you in <t:{int(reminder_time.timestamp())}:R> (<t:{int(reminder_time.timestamp())}:F>, {reminder_time.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)')}) about `{reminder_text}`."
-            if user is ctx.author
+            if user is ctx.author or user is None
             else f"Okay, I'll remind {target_user.mention} in <t:{int(reminder_time.timestamp())}:R> (<t:{int(reminder_time.timestamp())}:F>, {reminder_time.strftime('%Y-%m-%d %H:%M:%S (%B %d, %Y at %I:%M:%S %p)')}) about `{reminder_text}`.",
             mention_author=False,
         )
