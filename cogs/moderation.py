@@ -578,6 +578,46 @@ class Moderation(commands.Cog):
             discord.ui.Separator(),
         ]
 
+        if message.message_snapshots:
+            snapshot = message.message_snapshots[0]
+            snap_components = []
+
+            if snapshot.content:
+                snap_content = snapshot.content[:1900] + (
+                    "..." if len(snapshot.content) > 1900 else ""
+                )
+                snap_components.append(
+                    discord.ui.TextDisplay(
+                        content=f"**Forwarded Content**\n>>> {snap_content}"
+                    )
+                )
+
+            if snapshot.attachments:
+                snap_components.extend(
+                    self._attachment_components(
+                        snapshot.attachments, label_prefix="Forwarded Attachment"
+                    )
+                )
+
+            if snapshot.embeds:
+                rich = [e for e in snapshot.embeds if e.type == "rich"]
+                if rich:
+                    e0 = rich[0]
+                    parts = [f"**Forwarded Embed(s):** {len(snapshot.embeds)} total"]
+                    if e0.title:
+                        parts.append(f"**Title:** {e0.title[:100]}")
+                    if e0.description:
+                        parts.append(
+                            f"**Description:** {e0.description[:100]}{'...' if len(e0.description) > 100 else ''}"
+                        )
+                    if e0.url:
+                        parts.append(f"**URL:** [Link]({e0.url})")
+
+                snap_components.append(discord.ui.TextDisplay(content="\n".join(parts)))
+
+            if snap_components:
+                components.extend(snap_components)
+
         if message.content:
             content = message.content[:1900] + (
                 "..." if len(message.content) > 1900 else ""
