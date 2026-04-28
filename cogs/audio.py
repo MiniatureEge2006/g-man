@@ -808,10 +808,9 @@ class Audio(commands.Cog):
         if (
             ctx.voice_client
             and ctx.author.voice
-            and ctx.author.voice.channel
-            == ctx.voice_client.channel(
-                ctx.voice_client.is_playing() or ctx.voice_client.is_paused()
-            )
+            and ctx.author.voice.channel == ctx.voice_client.channel
+            and ctx.voice_client.is_playing()
+            or ctx.voice_client.is_paused()
         ):
             state = self.get_state(ctx.guild.id)
             current = state.currently_playing
