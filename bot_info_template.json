@@ -3,7 +3,9 @@
   "login": "Your Discord app token",
   "prefix": "Your bot prefix",
   "database": "Your PostgreSQL database URL",
-  "ollama_model": "Your Ollama AI model",
-  "ollama_system_prompt": "Your Ollama AI model's system prompt. Leave this empty to use the default.",
-  "ollama_api_key": "Your Ollama API key"
+  "llama_base_url": "Your llama.cpp server url",
+  "llama_model": "Your default llama.cpp model",
+  "llama_system_prompt": "Your llama.cpp model's default system prompt (Leave empty for default)",
+  "llama_api_key": "Your llama.cpp server api key",
+  "searxng_url": "Your SearXNG url"
 }

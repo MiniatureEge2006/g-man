@@ -17,7 +17,7 @@ No bullshit Discord multi-purpose bot.
 * A YouTube search command.
 * Music commands with FFMPEG audio filters support along with a queue system.
 * A prefix changing system.
-* An AI chatbot command via Ollama that supports executing TagScript.
+* An AI chatbot command via llama.cpp that supports executing TagScript.
 * Code execution server and command that includes custom packages like yt-dlp, ffmpeg, etc. which is useful for scripting.
 * And lastly, a tag system which has its own engine for formatting text and stuff called TagScript.
 
@@ -26,7 +26,8 @@ You can now just type `g-help` in a channel to see all the commands.
 
 ## Requirements
 * [FFmpeg](https://ffmpeg.org) for basic and advanced media manipulation, music commands, and generally for a lot of things.
-* [Ollama](https://ollama.com) for G-AI related stuff. You aren't required to use models locally, as Ollama themselves have cloud models you can use.
+* [llama.cpp](https://github.com/ggml-org/llama.cpp) for G-AI related stuff.
+* [SearXNG](https://searxng.org) for G-AI's web searching capability. You can just use a docker container for this.
 * [Docker](https://www.docker.com) for the code execution server. Do keep in mind you **don't** need Docker Desktop, just Docker and Docker Compose is required.
 * [LibreTranslate](https://docs.libretranslate.com/guides/installation/) for just a very specific TagScript function called `{translate}`. Completely optional.
 * [PostgreSQL](https://www.postgresql.org) for pretty much a lot of major functionality.

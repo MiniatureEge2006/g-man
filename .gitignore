@@ -4,6 +4,7 @@ bot_info.json
 
 # These should be downloaded manually
 g-coder/executions/*
+settings.yml
 
 !tutorial/bg.mp4
 !clips/hypercam.jpg

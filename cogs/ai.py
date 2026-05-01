@@ -1,3 +1,4 @@
+import html
 import inspect
 import io
 import json
@@ -5,9 +6,9 @@ import re
 import time
 from typing import Optional
 
+import aiohttp
 import asyncpg
 import discord
-import ollama
 from discord import app_commands
 from discord.ext import commands
 
@@ -19,6 +20,13 @@ class AI(commands.Cog):
         self.bot = bot
         self.conversations = {}
         self.db: Optional[asyncpg.Pool] = None
+        self._session: Optional[aiohttp.ClientSession] = None
+
+    @property
+    def session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
 
     def _get_tagscript_function_docs(
         self, ctx: commands.Context, function_names: list[str] = None
@@ -113,7 +121,7 @@ class AI(commands.Cog):
         self, ctx: commands.Context, content: str = ""
     ) -> str:
         base_prompt = (
-            bot_info.data["ollama_system_prompt"]
+            bot_info.data["llama_system_prompt"]
             or "You are G-Man from the Half-Life series. You are speaking with Dr. Gordon Freeman."
         )
         if self.db:
@@ -223,12 +231,10 @@ class AI(commands.Cog):
             conversation_key = self.get_conversation(ctx)
             user_history = await self.get_conversation_history(conversation_key)
             system_prompt = await self.create_system_prompt(ctx, prompt)
+
             messages = [{"role": "system", "content": system_prompt}]
-
+            messages.extend(user_history)
             messages.append({"role": "user", "content": prompt})
-
-            if user_history:
-                messages[1:1] = user_history
 
             if stream_mode and not web_mode:
                 final_content = await self.stream_ai_response(
@@ -236,41 +242,44 @@ class AI(commands.Cog):
                 )
                 if final_content is None:
                     return
-                user_history.extend(
-                    [
-                        {"role": "user", "content": prompt},
-                        {"role": "assistant", "content": final_content},
-                    ]
-                )
+
+                user_history.append({"role": "user", "content": prompt})
+                user_history.append({"role": "assistant", "content": final_content})
                 await self.save_conversation_history(conversation_key, user_history)
                 return
 
-            response = await self.get_ai_response(
+            response_data = await self.get_ai_response(
                 messages, think_mode, web_mode, model_name
             )
-            final_content = response.message.content
+            final_content = response_data["choices"][0]["message"]["content"]
             display_content = final_content
 
             if debug_mode:
+                usage = response_data.get("usage", {})
+                timings = response_data.get("timings", {})
                 stats_text = (
                     "**Debug**\n"
-                    f"Model: {response.model}\n"
-                    f"Done Reason: {response.done_reason}\n"
-                    f"Total Duration: {response.total_duration}\n"
-                    f"Prompt Eval Count: {response.prompt_eval_count}\n"
-                    f"Prompt Eval Duration: {response.prompt_eval_duration}\n"
-                    f"Eval Count: {response.eval_count}\n"
-                    f"Eval Duration: {response.eval_duration}\n"
+                    f"Model: {response_data.get('model', 'unknown')}\n"
+                    f"Prompt Tokens: {usage.get('prompt_tokens', 'N/A')}\n"
+                    f"Completion Tokens: {usage.get('completion_tokens', 'N/A')}\n"
+                    f"Total Tokens: {usage.get('total_tokens', 'N/A')}\n"
+                    f"Prompt ms: {timings.get('prompt_ms', 'N/A')}\n"
+                    f"Predicted ms: {timings.get('predicted_ms', 'N/A')}\n"
+                    f"Predicted per second: {timings.get('predicted_per_second', 'N/A')}\n"
                 )
                 display_content = f"{stats_text}\n\n{display_content}"
 
-            if show_thinking and getattr(response.message, "thinking", None):
-                display_content = (
-                    "**Thinking...**\n"
-                    f"{response.message.thinking}\n"
-                    "**...done thinking.**\n"
-                    f"{final_content}"
+            if show_thinking:
+                reasoning = response_data["choices"][0]["message"].get(
+                    "reasoning_content"
                 )
+                if reasoning:
+                    display_content = (
+                        "**Thinking...**\n"
+                        f"{reasoning}\n"
+                        "**...done thinking.**\n"
+                        f"{final_content}"
+                    )
 
             if not final_content:
                 await ctx.reply("AI returned no content.")
@@ -304,18 +313,14 @@ class AI(commands.Cog):
                                 url=f"https://discord.com/users/{ctx.author.id}",
                             )
                             embed.set_footer(
-                                text=f"AI response took {time.time() - start_time:.2f} seconds",
-                                icon_url="https://ollama.com/public/og.png",
+                                text=f"AI response took {time.time() - start_time:.2f} seconds"
                             )
                             await ctx.reply(embed=embed)
                         else:
                             await ctx.reply(text)
-                    user_history.extend(
-                        [
-                            {"role": "user", "content": prompt},
-                            {"role": "assistant", "content": final_content},
-                        ]
-                    )
+
+                    user_history.append({"role": "user", "content": prompt})
+                    user_history.append({"role": "assistant", "content": final_content})
                     await self.save_conversation_history(conversation_key, user_history)
                     return
                 except Exception:
@@ -333,19 +338,14 @@ class AI(commands.Cog):
                     url=f"https://discord.com/users/{ctx.author.id}",
                 )
                 embed.set_footer(
-                    text=f"AI response took {time.time() - start_time:.2f} seconds",
-                    icon_url="https://ollama.com/public/og.png",
+                    text=f"AI response took {time.time() - start_time:.2f} seconds"
                 )
                 await ctx.reply(embed=embed)
             else:
                 await ctx.reply(display_content)
 
-            user_history.extend(
-                [
-                    {"role": "user", "content": prompt},
-                    {"role": "assistant", "content": final_content},
-                ]
-            )
+            user_history.append({"role": "user", "content": prompt})
+            user_history.append({"role": "assistant", "content": final_content})
             await self.save_conversation_history(conversation_key, user_history)
 
         except Exception as e:
@@ -363,60 +363,106 @@ class AI(commands.Cog):
         EDIT_INTERVAL = 2
         PLACEHOLDER = "*Generating...*"
 
-        try:
-            ollama_client = ollama.AsyncClient()
-            stream = await ollama_client.chat(
-                model=model_name or bot_info.data["ollama_model"],
-                messages=messages,
-                think=think_mode,
-                stream=True,
-            )
+        base_url = bot_info.data.get("llama_base_url", "http://localhost:8080")
+        api_key = bot_info.data.get("llama_api_key")
+        headers = {
+            "Content-Type": "application/json",
+        }
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
 
+        payload = {
+            "model": model_name or bot_info.data.get("llama_model", "default"),
+            "messages": messages,
+            "stream": True,
+        }
+        payload["chat_template_kwargs"] = (
+            {"enable_thinking": True} if think_mode else {"enable_thinking": False}
+        )
+
+        try:
             sent_message = await ctx.reply(PLACEHOLDER)
             accumulated = ""
             accumulated_thinking = ""
             thinking_done = False
             last_edit = time.time()
 
-            async for chunk in stream:
-                raw_thinking = getattr(chunk.message, "thinking", None)
-                if raw_thinking and isinstance(raw_thinking, str):
-                    accumulated_thinking += raw_thinking
-
-                raw = chunk.message.content
-                if isinstance(raw, list):
-                    delta = "".join(
-                        part.get("text", "") if isinstance(part, dict) else str(part)
-                        for part in raw
+            async with self.session.post(
+                f"{base_url}/v1/chat/completions",
+                headers=headers,
+                json=payload,
+            ) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    raise commands.CommandError(
+                        f"llama-server error (status {resp.status}): {text}"
                     )
-                elif isinstance(raw, str):
-                    delta = raw
-                else:
-                    delta = ""
 
-                if delta and accumulated_thinking:
-                    thinking_done = True
-                accumulated += delta
+                async for line in resp.content:
+                    line = line.decode("utf-8").strip()
+                    if not line or not line.startswith("data: "):
+                        continue
+                    data = line[6:]
+                    if data == "[DONE]":
+                        break
 
-                now = time.time()
-                if now - last_edit >= EDIT_INTERVAL:
-                    if show_thinking and accumulated_thinking:
-                        if thinking_done:
-                            display = f"**Thinking...**\n{accumulated_thinking}\n**...done thinking.**\n\n{accumulated}"
+                    try:
+                        chunk = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+
+                    delta = chunk["choices"][0].get("delta", {})
+                    raw_thinking = delta.get("reasoning_content")
+                    if raw_thinking and isinstance(raw_thinking, str):
+                        accumulated_thinking += raw_thinking
+
+                    content = delta.get("content") or ""
+                    if content and accumulated_thinking:
+                        thinking_done = True
+                    accumulated += content
+
+                    now = time.time()
+                    if now - last_edit >= EDIT_INTERVAL:
+                        if show_thinking and accumulated_thinking:
+                            if thinking_done:
+                                display = f"**Thinking...**\n{accumulated_thinking}\n**...done thinking.**\n\n{accumulated}"
+                            else:
+                                display = f"**Thinking...**\n{accumulated_thinking}"
                         else:
-                            display = f"**Thinking...**\n{accumulated_thinking}"
-                    else:
-                        display = accumulated
-                    if display.strip():
-                        try:
-                            await sent_message.edit(content=display[:2000])
-                        except discord.HTTPException:
-                            pass
-                        last_edit = now
+                            display = accumulated
+                        if display.strip():
+                            try:
+                                await sent_message.edit(content=display[:2000])
+                            except discord.HTTPException:
+                                pass
+                            last_edit = now
 
             if not accumulated:
                 await sent_message.edit(content="AI returned no content.")
                 return None
+
+            tags = ctx.bot.get_cog("Tags")
+            if tags and hasattr(tags, "formatter"):
+                try:
+                    text, embeds, view, files = await tags.formatter.format(
+                        accumulated, ctx
+                    )
+
+                    if embeds or (view and view.children) or files:
+                        await sent_message.delete()
+
+                        message_content = text[:2000] if text else None
+                        await ctx.reply(
+                            content=message_content,
+                            embeds=embeds[:10],
+                            view=view if view and view.children else None,
+                            files=files[:10],
+                        )
+                        return accumulated
+                    elif text:
+                        accumulated = text
+                except Exception:
+                    pass
 
             if show_thinking and accumulated_thinking:
                 display_content = f"**Thinking...**\n{accumulated_thinking}\n**...done thinking.**\n\n{accumulated}"
@@ -436,24 +482,17 @@ class AI(commands.Cog):
                 )
                 if start_time:
                     embed.set_footer(
-                        text=f"AI response took {time.time() - start_time:.2f} seconds",
-                        icon_url="https://ollama.com/public/og.png",
+                        text=f"AI response took {time.time() - start_time:.2f} seconds"
                     )
-                await sent_message.edit(content=None, embed=embed)
+
+                await sent_message.delete()
+                await ctx.reply(embed=embed)
             else:
                 await sent_message.edit(content=display_content)
 
             return accumulated
-        except ollama.ResponseError as e:
-            if e.status_code == 404:
-                ollama_client2 = ollama.AsyncClient()
-                models = [m.model for m in (await ollama_client2.list()).models]
-                raise commands.CommandError(
-                    f"Model `{model_name}` not found. Available models:\n `{'\n'.join(models)}`"
-                )
-            raise commands.CommandError(
-                f"Ollama API error (status {e.status_code}): {str(e)}"
-            )
+        except aiohttp.ClientError as e:
+            raise commands.CommandError(f"llama-server connection failed: {str(e)}")
         except Exception as e:
             raise commands.CommandError(f"AI stream failed: {str(e)}")
 
@@ -463,69 +502,154 @@ class AI(commands.Cog):
         think_mode: bool = False,
         web_mode: bool = False,
         model_name: Optional[str] = None,
-    ) -> tuple:
-        try:
-            ollama_client = ollama.AsyncClient(
-                headers={
-                    "Authorization": "Bearer " + bot_info.data["ollama_api_key"]
-                    if web_mode
-                    else None
-                }
-            )
-            while True:
-                available_tools = {
-                    "web_search": ollama_client.web_search,
-                    "web_fetch": ollama_client.web_fetch,
-                }
-                response = await ollama_client.chat(
-                    model=model_name or bot_info.data["ollama_model"],
-                    messages=messages,
-                    think=think_mode,
-                    tools=[ollama_client.web_search, ollama_client.web_fetch]
-                    if web_mode
-                    else None,
-                )
-                msg = response.message
+    ) -> dict:
+        base_url = bot_info.data.get("llama_base_url", "http://localhost:8080")
+        api_key = bot_info.data.get("llama_api_key")
+        headers = {
+            "Content-Type": "application/json",
+        }
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
 
-                if web_mode and getattr(msg, "tool_calls", None):
-                    for tool_call in msg.tool_calls:
-                        function_to_call = available_tools.get(tool_call.function.name)
-                        if function_to_call:
-                            args = tool_call.function.arguments
-                            result = await function_to_call(**args)
-                            messages.append(
-                                {
-                                    "role": "tool",
-                                    "tool_name": tool_call.function.name,
-                                    "content": str(result)[:2000],
-                                }
-                            )
+        payload = {
+            "model": model_name or bot_info.data.get("llama_model", "default"),
+            "messages": messages,
+        }
+        payload["chat_template_kwargs"] = (
+            {"enable_thinking": True} if think_mode else {"enable_thinking": False}
+        )
+
+        if web_mode:
+            payload["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "web_search",
+                        "description": "Search the web for information",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"query": {"type": "string"}},
+                            "required": ["query"],
+                        },
+                    },
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "web_fetch",
+                        "description": "Fetch a webpage",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"url": {"type": "string"}},
+                            "required": ["url"],
+                        },
+                    },
+                },
+            ]
+
+        try:
+            while True:
+                async with self.session.post(
+                    f"{base_url}/v1/chat/completions",
+                    headers=headers,
+                    json=payload,
+                ) as resp:
+                    if resp.status != 200:
+                        text = await resp.text()
+                        raise RuntimeError(
+                            f"llama-server error (status {resp.status}): {text}"
+                        )
+                    response_data = await resp.json()
+
+                msg = response_data["choices"][0]["message"]
+
+                if web_mode and msg.get("tool_calls"):
+                    messages.append(msg)
+                    for tool_call in msg["tool_calls"]:
+                        func = tool_call["function"]
+                        tool_name = func["name"]
+                        try:
+                            args = json.loads(func["arguments"])
+                        except json.JSONDecodeError:
+                            args = {}
+
+                        result = ""
+                        if tool_name == "web_search":
+                            result = await self._web_search(args.get("query", ""))
+                        elif tool_name == "web_fetch":
+                            result = await self._web_fetch(args.get("url", ""))
                         else:
-                            messages.append(
-                                {
-                                    "role": "tool",
-                                    "tool_name": tool_call.function.name,
-                                    "content": f"Tool {tool_call.function.name} not found",
-                                }
-                            )
+                            result = f"Tool {tool_name} not found"
+
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call["id"],
+                                "content": str(result)[:2000],
+                            }
+                        )
                     continue
-                return response
-        except ollama.ResponseError as e:
-            if e.status_code == 404:
-                models = []
-                model_list = await ollama_client.list()
-                for model in model_list.models:
-                    available_model_name = model.model
-                    models.append(available_model_name)
-                raise RuntimeError(
-                    f"Model `{model_name}` not found. Available models:\n `{'\n'.join(models)}`"
-                )
-            else:
-                raise RuntimeError(
-                    f"Ollama API error (status {e.status_code}): {str(e)}"
-                )
+                return response_data
+        except aiohttp.ClientError as e:
+            raise RuntimeError(f"llama-server connection failed: {str(e)}")
         except Exception as e:
             raise RuntimeError(f"AI request failed: {str(e)}")
+
+    async def _web_search(self, query: str) -> str:
+        if not query:
+            return "No query provided"
+
+        searx_url = bot_info.data.get("searxng_url", "http://localhost:7070")
+
+        params = {
+            "q": query,
+            "format": "json",
+            "language": "en-US",
+        }
+
+        try:
+            async with self.session.get(
+                f"{searx_url}/search",
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                if resp.status != 200:
+                    return f"SearXNG returned status {resp.status}"
+                data = await resp.json()
+
+            results = data.get("results", [])
+            if not results:
+                return f"No search results found for '{query}'"
+
+            formatted = []
+            for r in results[:5]:
+                title = r.get("title", "")
+                url = r.get("url", "")
+                content = r.get("content", "")
+                if title:
+                    formatted.append(f"{title}\n{url}\n{content}")
+
+            return "\n\n".join(formatted)
+
+        except Exception as e:
+            return f"Web search failed: {str(e)}"
+
+    async def _web_fetch(self, url: str) -> str:
+        if not url:
+            return "No URL provided"
+        try:
+            async with self.session.get(
+                url,
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                text = await resp.text()
+                text = re.sub(r"<[^>]+>", "", text)
+                text = html.unescape(text)
+                text = " ".join(text.split())
+                return text[:2000]
+        except Exception as e:
+            return f"Web fetch failed: {str(e)}"
 
     @commands.hybrid_command(
         name="setsystemprompt",
@@ -826,6 +950,10 @@ class AI(commands.Cog):
 
         except Exception as e:
             await ctx.send(f"Failed to reset conversation: {e}")
+
+    async def cog_unload(self):
+        if self._session and not self._session.closed:
+            await self._session.close()
 
 
 async def setup(bot):

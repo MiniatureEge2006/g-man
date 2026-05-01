@@ -25,7 +25,6 @@ import asyncpg
 import dateparser
 import discord
 import matplotlib.font_manager
-import ollama
 import yt_dlp
 from discord import app_commands
 from discord.ext import commands
@@ -5421,91 +5420,137 @@ class Tags(commands.Cog):
                     messages.extend(history)
 
                 messages.append({"role": "user", "content": prompt})
-                ollama_client = ollama.AsyncClient(
-                    headers={
-                        "Authorization": "Bearer " + bot_info.data["ollama_api_key"]
-                        if web_mode
-                        else None
-                    }
-                )
-                while True:
-                    available_tools = {
-                        "web_search": ollama_client.web_search,
-                        "web_fetch": ollama_client.web_fetch,
-                    }
-                    response = await ollama_client.chat(
-                        model=model_name or bot_info.data["ollama_model"],
-                        messages=messages,
-                        think=think_mode,
-                        tools=[ollama_client.web_search, ollama_client.web_fetch]
-                        if web_mode
-                        else None,
-                    )
-                    msg = response.message
-                    if web_mode and getattr(msg, "tool_calls", None):
-                        for tool_call in msg.tool_calls:
-                            function_to_call = available_tools.get(
-                                tool_call.function.name
-                            )
-                            if function_to_call:
-                                args = tool_call.function.arguments
-                                result = await function_to_call(**args)
-                                messages.append(
-                                    {
-                                        "role": "tool",
-                                        "tool_name": tool_call.function.name,
-                                        "content": str(result)[:2000],
-                                    }
-                                )
-                            else:
-                                messages.append(
-                                    {
-                                        "role": " tool",
-                                        "tool_name": tool_call.function.name,
-                                        "content": f"Tool {tool_call.function.name} not found",
-                                    }
-                                )
+                base_url = bot_info.data.get("llama_base_url", "http://localhost:8080")
+                api_key = bot_info.data.get("llama_api_key")
 
+                headers = {"Content-Type": "application/json"}
+                if api_key:
+                    headers["Authorization"] = f"Bearer {api_key}"
+
+                payload = {
+                    "model": model_name or bot_info.data.get("llama_model", "default"),
+                    "messages": messages,
+                }
+                payload["chat_template_kwargs"] = (
+                    {"enable_thinking": True}
+                    if think_mode
+                    else {"enable_thinking": False}
+                )
+
+                if web_mode:
+                    payload["tools"] = [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "web_search",
+                                "description": "Search the web for information",
+                                "parameters": {
+                                    "type": "object",
+                                    "properties": {"query": {"type": "string"}},
+                                    "required": ["query"],
+                                },
+                            },
+                        },
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "web_fetch",
+                                "description": "Fetch a webpage",
+                                "parameters": {
+                                    "type": "object",
+                                    "properties": {"url": {"type": "string"}},
+                                    "required": ["url"],
+                                },
+                            },
+                        },
+                    ]
+
+                session = ai.session
+
+                while True:
+                    async with session.post(
+                        f"{base_url}/v1/chat/completions",
+                        headers=headers,
+                        json=payload,
+                    ) as resp:
+                        if resp.status != 200:
+                            text = await resp.text()
+                            return f"[AI error: llama-server error (status {resp.status}): {text}]"
+
+                        response_data = await resp.json()
+
+                    msg = response_data["choices"][0]["message"]
+
+                    if web_mode and msg.get("tool_calls"):
+                        messages.append(msg)
+                        for tool_call in msg["tool_calls"]:
+                            func = tool_call["function"]
+                            tool_name = func["name"]
+                            try:
+                                args = json.loads(func["arguments"])
+                            except json.JSONDecodeError:
+                                args = {}
+
+                            result = ""
+                            if tool_name == "web_search":
+                                result = await ai._web_search(args.get("query", ""))
+                            elif tool_name == "web_fetch":
+                                result = await ai._web_fetch(args.get("url", ""))
+                            else:
+                                result = f"Tool {tool_name} not found"
+
+                            messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": tool_call["id"],
+                                    "content": str(result)[:2000],
+                                }
+                            )
                         continue
 
-                    final_content = msg.content
-                    display_content = final_content
-                    if debug_mode:
-                        stats_text = (
-                            "**Debug**\n"
-                            f"Model: {response.model}\n"
-                            f"Done Reason: {response.done_reason}\n"
-                            f"Total Duration: {response.total_duration}\n"
-                            f"Prompt Eval Count: {response.prompt_eval_count}\n"
-                            f"Prompt Eval Duration: {response.prompt_eval_duration}\n"
-                            f"Eval Count: {response.eval_count}\n"
-                            f"Eval Duration: {response.eval_duration}\n"
-                        )
-                        display_content = f"{stats_text}\n\n{display_content}"
-                    if show_thinking and getattr(msg, "thinking", None):
+                    final_content = msg.get("content", "")
+                    break
+
+                if not final_content:
+                    return "[AI error: Model returned no content]"
+
+                display_content = final_content
+
+                if debug_mode:
+                    usage = response_data.get("usage", {})
+                    timings = response_data.get("timings", {})
+                    stats_text = (
+                        "**Debug**\n"
+                        f"Model: {response_data.get('model', 'unknown')}\n"
+                        f"Prompt Tokens: {usage.get('prompt_tokens', 'N/A')}\n"
+                        f"Completion Tokens: {usage.get('completion_tokens', 'N/A')}\n"
+                        f"Total Tokens: {usage.get('total_tokens', 'N/A')}\n"
+                        f"Prompt ms: {timings.get('prompt_ms', 'N/A')}\n"
+                        f"Predicted ms: {timings.get('predicted_ms', 'N/A')}\n"
+                        f"Predicted per second: {timings.get('predicted_per_second', 'N/A')}\n"
+                    )
+                    display_content = f"{stats_text}\n\n{display_content}"
+
+                if show_thinking:
+                    reasoning = msg.get("reasoning_content")
+                    if reasoning:
                         display_content = (
                             "**Thinking...**\n"
-                            f"{msg.thinking}\n"
+                            f"{reasoning}\n"
                             "**...done thinking.**\n"
                             f"{final_content}"
                         )
 
-                    user_history = [
-                        {"role": "user", "content": prompt},
-                        {"role": "assistant", "content": final_content},
-                    ]
-                    await ai.save_conversation_history(conv_key, user_history)
+                user_history = [
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": final_content},
+                ]
+                await ai.save_conversation_history(conv_key, user_history)
 
-                    return display_content
+                return display_content
 
-            except ollama.ResponseError as e:
-                if e.status_code == 404:
-                    models = []
-                    model_list = await ollama_client.list()
-                    for model in model_list.models:
-                        available_model_name = model.model
-                        models.append(available_model_name)
-                    return f"[AI error: Model `{model_name}` not found. Available models:\n `{'\n'.join(models)}`]"
+            except aiohttp.ClientError as e:
+                return f"[AI error: llama-server connection failed: {str(e)}]"
             except Exception as e:
                 return f"[AI error: {str(e)}]"
 
