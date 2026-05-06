@@ -145,6 +145,16 @@ class AI(commands.Cog):
             if user_row and user_row["prompt"]:
                 base_prompt = user_row["prompt"]
 
+        tags = ctx.bot.get_cog("Tags")
+        if tags and hasattr(tags, "formatter"):
+            try:
+                text, _, _, _ = await tags.formatter.format(base_prompt, ctx)
+
+                if text:
+                    base_prompt = text
+            except Exception:
+                pass
+
         formatted_docs = ""
         if content:
             tags_cog = ctx.bot.get_cog("Tags")
