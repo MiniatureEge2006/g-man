@@ -51,29 +51,48 @@ SELECT (SELECT prefixes FROM user_prefixes WHERE user_id = $1) AS personal_prefi
 
 
 async def set_prefix(entity_id: int, prefix: str, is_guild: bool = True):
-    table = "guild_prefixes" if is_guild else "user_prefixes"
-    id_field = "guild_id" if is_guild else "user_id"
-
-    async with bot.db.acquire() as conn:
-        current_prefixes = await conn.fetchval(
-            f"SELECT prefixes FROM {table} WHERE {id_field} = $1", entity_id
-        )
-
-        if current_prefixes is None:
-            current_prefixes = []
-        else:
-            current_prefixes = list(current_prefixes)
-
-        if prefix not in current_prefixes:
-            current_prefixes.append(prefix)
-            await conn.execute(
-                f"INSERT INTO {table} ({id_field}, prefixes) VALUES ($1, $2) ON CONFLICT ({id_field}) DO UPDATE SET prefixes = $2",
-                entity_id,
-                current_prefixes,
+    if is_guild:
+        async with bot.db.acquire() as conn:
+            current_prefixes = await conn.fetchval(
+                "SELECT prefixes FROM guild_prefixes WHERE guild_id = $1", entity_id
             )
-            return f"Added prefix `{prefix}` successfully."
-        else:
-            return f"Prefix `{prefix}` is already set."
+
+            if current_prefixes is None:
+                current_prefixes = []
+            else:
+                current_prefixes = list(current_prefixes)
+
+            if prefix not in current_prefixes:
+                current_prefixes.append(prefix)
+                await conn.execute(
+                    "INSERT INTO guild_prefixes (guild_id, prefixes) VALUES ($1, $2) ON CONFLICT (guild_id) DO UPDATE SET prefixes = $2",
+                    entity_id,
+                    current_prefixes,
+                )
+                return f"Added prefix `{prefix}` successfully."
+            else:
+                return f"Prefix `{prefix}` is already set."
+    else:
+        async with bot.db.acquire() as conn:
+            current_prefixes = await conn.fetchval(
+                "SELECT prefixes FROM user_prefixes WHERE user_id = $1", entity_id
+            )
+
+            if current_prefixes is None:
+                current_prefixes = []
+            else:
+                current_prefixes = list(current_prefixes)
+
+            if prefix not in current_prefixes:
+                current_prefixes.append(prefix)
+                await conn.execute(
+                    "INSERT INTO user_prefixes (user_id, prefixes) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET prefixes = $2",
+                    entity_id,
+                    current_prefixes,
+                )
+                return f"Added prefix `{prefix}` successfully."
+            else:
+                return f"Prefix `{prefix}` is already set."
 
 
 extensions = [
