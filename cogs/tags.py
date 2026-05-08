@@ -5336,6 +5336,7 @@ class Tags(commands.Cog):
                     - G_AI_SHOW_THINKING
                     - G_AI_WEB_SEARCH
                     - G_AI_DEBUG
+                    - G_AI_MEDIA_URL
                 * Example: `{ai:hello}`
             """
             try:
@@ -5370,56 +5371,50 @@ class Tags(commands.Cog):
                     "yes",
                     "on",
                 )
+                media_url = tag_settings.get("G_AI_MEDIA_URL")
 
-                class AIContext:
-                    __slots__ = (
-                        "bot",
-                        "author",
-                        "guild",
-                        "channel",
-                        "message",
-                        "_state",
-                    )
-
-                    def __init__(self, original_ctx):
-                        self.bot = original_ctx.bot
-                        self.author = original_ctx.author
-                        self.guild = original_ctx.guild
-                        self.channel = original_ctx.channel
-                        self.message = original_ctx.message
-                        self._state = original_ctx._state
-
-                    async def typing(self):
+                image_parts = []
+                session = ai.session
+                if media_url:
+                    try:
+                        async with session.get(media_url) as resp:
+                            if (
+                                resp.status == 200
+                                and resp.content_type
+                                and resp.content_type.startswith("image/")
+                            ):
+                                img_data = await resp.read()
+                                b64_data = base64.b64encode(img_data).decode("utf-8")
+                                image_parts.append(
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": f"data:{resp.content_type};base64,{b64_data}"
+                                        },
+                                    }
+                                )
+                    except Exception:
                         pass
 
-                    async def reply(self, content, **kwargs):
-                        return content
+                if image_parts:
+                    user_content = [{"type": "text", "text": prompt}] + image_parts
+                else:
+                    user_content = prompt
 
-                    async def send(self, content, **kwargs):
-                        return content
-
-                fake_ctx = AIContext(ctx)
+                conversation_key = ai.get_conversation(ctx)
+                user_history = await ai.get_conversation_history(conversation_key)
 
                 messages = [
                     {
                         "role": "system",
                         "content": system_prompt_override
                         if system_prompt_override
-                        else await ai.create_system_prompt(fake_ctx, prompt),
+                        else await ai.create_system_prompt(ctx, prompt),
                     }
                 ]
 
-                conv_key = (
-                    (fake_ctx.guild.id, fake_ctx.channel.id, fake_ctx.author.id)
-                    if fake_ctx.guild
-                    else (fake_ctx.author.id, fake_ctx.channel.id)
-                )
-                history = await ai.get_conversation_history(conv_key)
-
-                if history:
-                    messages.extend(history)
-
-                messages.append({"role": "user", "content": prompt})
+                messages.extend(user_history)
+                messages.append({"role": "user", "content": user_content})
                 base_url = bot_info.data.get("llama_base_url", "http://localhost:8080")
                 api_key = bot_info.data.get("llama_api_key")
 
@@ -5464,8 +5459,6 @@ class Tags(commands.Cog):
                             },
                         },
                     ]
-
-                session = ai.session
 
                 while True:
                     async with session.post(
@@ -5541,11 +5534,9 @@ class Tags(commands.Cog):
                             f"{final_content}"
                         )
 
-                user_history = [
-                    {"role": "user", "content": prompt},
-                    {"role": "assistant", "content": final_content},
-                ]
-                await ai.save_conversation_history(conv_key, user_history)
+                user_history.append({"role": "user", "content": user_content})
+                user_history.append({"role": "assistant", "content": final_content})
+                await ai.save_conversation_history(conversation_key, user_history)
 
                 return display_content
 

@@ -1,3 +1,4 @@
+import base64
 import html
 import inspect
 import io
@@ -238,13 +239,75 @@ class AI(commands.Cog):
             debug_mode = re.search(r"(^|\s)--debug($|\s)", prompt) is not None
             if debug_mode:
                 prompt = re.sub(r"(^|\s)--debug($|\s)", " ", prompt).strip()
+
+            media_flag = re.search(r"(^|\s)--media($|\s)", prompt) is not None
+            if media_flag:
+                prompt = re.sub(r"(^|\s)--media($|\s)", " ", prompt).strip()
+
+            media_url = None
+            media_url_match = re.search(r"(^|\s)--media-url\s+(\S+)", prompt)
+            if media_url_match:
+                media_url = media_url_match.group(2)
+                prompt = re.sub(r"(^|\s)--media-url\s+\S+", " ", prompt).strip()
+
+            image_parts = []
+            if media_flag and ctx.message.attachments:
+                for attachment in ctx.message.attachments:
+                    if attachment.content_type and attachment.content_type.startswith(
+                        "image/"
+                    ):
+                        try:
+                            async with self.session.get(attachment.url) as resp:
+                                if resp.status == 200:
+                                    img_data = await resp.read()
+                                    b64_data = base64.b64encode(img_data).decode(
+                                        "utf-8"
+                                    )
+                                    image_parts.append(
+                                        {
+                                            "type": "image_url",
+                                            "image_url": {
+                                                "url": f"data:{attachment.content_type};base64,{b64_data}"
+                                            },
+                                        }
+                                    )
+                                    break
+                        except Exception:
+                            pass
+
+            if media_url:
+                try:
+                    async with self.session.get(media_url) as resp:
+                        if (
+                            resp.status == 200
+                            and resp.content_type
+                            and resp.content_type.startswith("image/")
+                        ):
+                            img_data = await resp.read()
+                            b64_data = base64.b64encode(img_data).decode("utf-8")
+                            image_parts.append(
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:{resp.content_type};base64,{b64_data}"
+                                    },
+                                }
+                            )
+                except Exception:
+                    pass
+
+            if image_parts:
+                user_content = [{"type": "text", "text": prompt}] + image_parts
+            else:
+                user_content = prompt
+
             conversation_key = self.get_conversation(ctx)
             user_history = await self.get_conversation_history(conversation_key)
             system_prompt = await self.create_system_prompt(ctx, prompt)
 
             messages = [{"role": "system", "content": system_prompt}]
             messages.extend(user_history)
-            messages.append({"role": "user", "content": prompt})
+            messages.append({"role": "user", "content": user_content})
 
             if stream_mode and not web_mode:
                 final_content = await self.stream_ai_response(
@@ -253,7 +316,7 @@ class AI(commands.Cog):
                 if final_content is None:
                     return
 
-                user_history.append({"role": "user", "content": prompt})
+                user_history.append({"role": "user", "content": user_content})
                 user_history.append({"role": "assistant", "content": final_content})
                 await self.save_conversation_history(conversation_key, user_history)
                 return
@@ -329,7 +392,7 @@ class AI(commands.Cog):
                         else:
                             await ctx.reply(text)
 
-                    user_history.append({"role": "user", "content": prompt})
+                    user_history.append({"role": "user", "content": user_content})
                     user_history.append({"role": "assistant", "content": final_content})
                     await self.save_conversation_history(conversation_key, user_history)
                     return
@@ -354,7 +417,7 @@ class AI(commands.Cog):
             else:
                 await ctx.reply(display_content)
 
-            user_history.append({"role": "user", "content": prompt})
+            user_history.append({"role": "user", "content": user_content})
             user_history.append({"role": "assistant", "content": final_content})
             await self.save_conversation_history(conversation_key, user_history)
 
