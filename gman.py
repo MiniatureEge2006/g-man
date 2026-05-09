@@ -152,20 +152,6 @@ def setup_logger():
     discord_logger.addHandler(handler)
 
 
-# Loads extensions, returns string saying what reloaded
-async def reload_extensions(exs):
-    module_msg = ""
-    for ex in exs:
-        try:
-            if ex in bot.extensions:
-                await bot.unload_extension(ex)
-            await bot.load_extension(ex)
-            module_msg += 'module "{}" reloaded\n'.format(ex)
-        except Exception as e:
-            module_msg += 'reloading "{}" failed, error is:```{}```\n'.format(ex, e)
-    return module_msg
-
-
 @bot.check
 async def global_permissions_check(ctx: commands.Context):
     if ctx.author.id in bot_info.data["owners"]:
@@ -361,15 +347,16 @@ async def check_access(ctx: commands.Context):
             raise commands.CheckFailure("User/Channel/Role is blocked.")
 
 
-# Set up stuff
 @bot.event
 async def on_ready():
     logger = logging.getLogger("gman.on.ready")
-    global extensions
-    try:
-        logger.info(await reload_extensions(extensions))
-    except Exception as e:
-        logger.error(f"Error reloading extensions: {e}")
+    for ex in extensions:
+        try:
+            if ex not in bot.extensions:
+                await bot.load_extension(ex)
+                logger.info(f"Loaded extension: {ex}")
+        except Exception as e:
+            logger.error(f"Failed to load extension {ex}: {e}")
     try:
         bot.db = await asyncpg.create_pool(bot_info.data["database"])
         logger.info(f"Connected to PostgreSQL database via {bot_info.data['database']}")
@@ -511,7 +498,6 @@ async def on_command(ctx: commands.Context):
     logger.info(log_message)
 
 
-# Command error
 @bot.event
 async def on_command_error(ctx: commands.Context, error):
     logger = logging.getLogger("gman.on.command.error")
@@ -2079,24 +2065,365 @@ async def listguildprefixes(ctx: commands.Context):
             await ctx.send(f"Guild prefixes: {', '.join([f'`{p}`' for p in prefixes])}")
 
 
-# Reloading extensions
-@bot.command(description="Reloads extensions.", pass_context=True)
+@bot.command(name="load", description="Load a cog/extension.", pass_context=True)
 @bot_info.is_owner()
-async def reload(ctx, *, exs: str = None):
-    module_msg = "d"  # d
-    if exs is None:
-        module_msg = await reload_extensions(extensions)
+async def load(ctx, *, extension: str):
+    logger = logging.getLogger("gman.commands.owner.load")
+
+    extension = extension.strip()
+    if extension.endswith(".py"):
+        extension = extension[:-3]
+    if not extension.startswith("cogs."):
+        extension = f"cogs.{extension}"
+
+    try:
+        if extension in bot.extensions:
+            await ctx.send(
+                f"Extension `{extension}` is already loaded. Use `{ctx.prefix}reload` to reload it or `{ctx.prefix}unload` first."
+            )
+            return
+
+        await bot.load_extension(extension)
+        await ctx.send(f"Successfully loaded extension: `{extension}`")
+        logger.info(f"Loaded extension: {extension}")
+
+    except commands.ExtensionNotFound:
+        await ctx.send(f"Extension `{extension}` not found.")
+    except commands.ExtensionAlreadyLoaded:
+        await ctx.send(f"Extension `{extension}` is already loaded.")
+    except commands.NoEntryPointError:
+        await ctx.send(f"Extension `{extension}` has no `setup` function.")
+    except commands.ExtensionFailed as e:
+        await ctx.send(
+            f"Failed to load extension `{extension}`. Error: ```py\n{str(e)}\n```"
+        )
+        logger.error(f"Failed to load extension {extension}: {e}")
+
+
+@bot.command(name="unload", description="Unload a cog/extension.", pass_context=True)
+@bot_info.is_owner()
+async def unload(ctx, *, extension: str):
+    logger = logging.getLogger("gman.commands.owner.unload")
+
+    extension = extension.strip()
+    if extension.endswith(".py"):
+        extension = extension[:-3]
+    if not extension.startswith("cogs."):
+        extension = f"cogs.{extension}"
+
+    try:
+        if extension not in bot.extensions:
+            await ctx.send(f"Extension `{extension}` is not loaded.")
+            return
+
+        await bot.unload_extension(extension)
+        await ctx.send(f"Successfully unloaded extension: `{extension}`")
+        logger.info(f"Unloaded extension: {extension}")
+
+    except commands.ExtensionNotLoaded:
+        await ctx.send(f"Extension `{extension}` is not loaded.")
+    except commands.ExtensionFailed as e:
+        await ctx.send(
+            f"Failed to unload extension `{extension}`. Error: ```py\n{str(e)}\n```"
+        )
+        logger.error(f"Failed to unload extension {extension}: {e}")
+
+
+@bot.command(
+    name="reload",
+    description="Reload extensions. Use '*' to reload all, or specify extensions.",
+    pass_context=True,
+)
+@bot_info.is_owner()
+async def reload(ctx, *, extensions_input: str = None):
+    logger = logging.getLogger("gman.commands.owner.reload")
+
+    extensions_to_reload = []
+
+    if extensions_input is None:
+        extensions_to_reload = extensions
+        await ctx.send(
+            f"Reloading all default extensions ({len(extensions_to_reload)} total)..."
+        )
+
+    elif extensions_input.strip() == "*":
+        extensions_to_reload = list(bot.extensions.keys())
+        await ctx.send(
+            f"Reloading all currently loaded extensions ({len(extensions_to_reload)} total)..."
+        )
+
     else:
-        module_msg = await reload_extensions(exs.split())
-    await ctx.send(module_msg)
+        raw_extensions = extensions_input.split()
+        for ext in raw_extensions:
+            ext = ext.strip()
+            if ext.endswith(".py"):
+                ext = ext[:-3]
+            if not ext.startswith("cogs."):
+                ext = f"cogs.{ext}"
+            extensions_to_reload.append(ext)
 
+        await ctx.send(f"Reloading {len(extensions_to_reload)} extension(s)...")
 
-async def setup(bot):
-    for ex in extensions:
+    success_count = 0
+    failure_count = 0
+    results = []
+
+    for ext in extensions_to_reload:
         try:
-            await bot.load_extension(ex)
+            if ext in bot.extensions:
+                await bot.unload_extension(ext)
+            await bot.load_extension(ext)
+            success_count += 1
+            results.append(f"[SUCCESS] {ext}")
+            logger.info(f"Reloaded extension: {ext}")
         except Exception as e:
-            print("Failed to load {} because: {}".format(ex, e))
+            failure_count += 1
+            error_msg = str(e)
+            results.append(f"[FAILED] {ext} - {error_msg[:100]}")
+            logger.error(f"Failed to reload extension {ext}: {e}")
+
+    response_parts = []
+
+    if success_count > 0:
+        response_parts.append(f"Successfully reloaded {success_count} extension(s):")
+        for result in results:
+            if result.startswith("[SUCCESS]"):
+                response_parts.append(f"  {result}")
+
+    if failure_count > 0:
+        response_parts.append(f"\nFailed to reload {failure_count} extension(s):")
+        for result in results:
+            if result.startswith("[FAILED]"):
+                response_parts.append(f"  {result}")
+
+    if not results:
+        await ctx.send("No extensions to reload.")
+        return
+
+    response = "\n".join(response_parts)
+    if len(response) <= 2000:
+        await ctx.send(f"```\n{response}\n```")
+    else:
+        for i in range(0, len(response), 1900):
+            await ctx.send(f"```\n{response[i : i + 1900]}\n```")
+
+
+@bot.command(
+    name="listextensions",
+    description="List all loaded extensions/cogs.",
+    aliases=["extensions", "cogs", "listcogs"],
+)
+@bot_info.is_owner()
+async def list_extensions(ctx):
+    if not bot.extensions:
+        await ctx.send("No extensions are currently loaded.")
+        return
+
+    loaded_extensions = sorted(bot.extensions.keys())
+    default_extensions = set(extensions)
+    cogs_info = []
+
+    for ext in loaded_extensions:
+        cog_name = "Unknown"
+        if ext in bot.cogs:
+            cog_name = bot.cogs[ext].__class__.__name__
+
+        is_default = ext in default_extensions
+        marker = "[DEFAULT]" if is_default else "[CUSTOM]"
+        cogs_info.append(f"{marker} {ext} ({cog_name})")
+
+    pages = []
+    current_page = []
+    current_length = 0
+
+    header = f"Total loaded extensions: {len(loaded_extensions)}\n\n"
+    current_length = len(header)
+    current_page.append(header)
+
+    for cog_info in cogs_info:
+        line = f"{cog_info}\n"
+        if current_length + len(line) > 1800:
+            pages.append("".join(current_page))
+            current_page = [header]
+            current_length = len(header)
+        current_page.append(line)
+        current_length += len(line)
+
+    if current_page:
+        pages.append("".join(current_page))
+
+    if len(pages) == 1:
+        await ctx.send(f"```\n{pages[0]}\n```")
+        return
+
+    class ExtensionListPaginator(discord.ui.View):
+        def __init__(self, pages: list, author: discord.Member):
+            super().__init__(timeout=60.0)
+            self.pages = pages
+            self.current_page = 0
+            self.author = author
+            self.message = None
+            self.update_buttons()
+
+        def update_buttons(self):
+            self.children[0].disabled = self.current_page == 0
+            self.children[1].disabled = self.current_page == len(self.pages) - 1
+
+        async def interaction_check(self, interaction: discord.Interaction):
+            if interaction.user != self.author:
+                await interaction.response.send_message(
+                    "You can't control this pagination.", ephemeral=True
+                )
+                return False
+            return True
+
+        async def on_timeout(self):
+            if self.message:
+                await self.message.edit(view=None)
+
+        @discord.ui.button(
+            label="Previous", style=discord.ButtonStyle.primary, disabled=True
+        )
+        async def previous(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
+            self.current_page -= 1
+            await self.update_page(interaction)
+
+        @discord.ui.button(
+            label="Next", style=discord.ButtonStyle.primary, disabled=False
+        )
+        async def next(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
+            self.current_page += 1
+            await self.update_page(interaction)
+
+        @discord.ui.button(label="Stop", style=discord.ButtonStyle.danger)
+        async def stop(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
+            await interaction.response.edit_message(view=None)
+            self.stop()
+
+        async def update_page(self, interaction: discord.Interaction):
+            self.update_buttons()
+            content = f"```\n{self.pages[self.current_page]}\n```"
+            await interaction.response.edit_message(content=content, view=self)
+
+    view = ExtensionListPaginator(pages, ctx.author)
+    await ctx.send(f"```\n{pages[0]}\n```", view=view)
+
+
+@bot.command(
+    name="extensioninfo",
+    description="Show detailed information about a specific extension/cog.",
+    aliases=["extinfo", "coginfo"],
+)
+@bot_info.is_owner()
+async def extension_info(ctx, *, extension: str):
+    extension = extension.strip()
+    if extension.endswith(".py"):
+        extension = extension[:-3]
+    if not extension.startswith("cogs."):
+        extension = f"cogs.{extension}"
+
+    is_loaded = extension in bot.extensions
+    is_in_default = extension in extensions
+
+    info_parts = [
+        f"Extension: {extension}",
+        f"Loaded: {is_loaded}",
+        f"Default extension: {is_in_default}",
+    ]
+
+    if is_loaded:
+        cog = None
+
+        cog = bot.cogs.get(extension)
+
+        if not cog:
+            cog_name = extension.split(".")[-1]
+            cog = bot.cogs.get(cog_name)
+
+        if not cog:
+            for name, c in bot.cogs.items():
+                if c.__class__.__module__.startswith(extension):
+                    cog = c
+                    break
+
+        if cog:
+            cog_qualified_name = cog.qualified_name
+            cog_description = cog.description or "No description provided."
+            cog_class = cog.__class__.__name__
+            cog_module = cog.__class__.__module__
+
+            top_level_commands = cog.get_commands()
+            all_commands = list(cog.walk_commands())
+            listeners = cog.get_listeners()
+
+            app_commands = []
+            if hasattr(cog, "walk_app_commands"):
+                app_commands = list(cog.walk_app_commands())
+
+            info_parts.extend(
+                [
+                    "\nCog Information:",
+                    f"  Name: {cog_qualified_name}",
+                    f"  Description: {cog_description}",
+                    f"  Class: {cog_class}",
+                    f"  Module: {cog_module}",
+                    f"  Top-Level Commands: {len(top_level_commands)}",
+                    f"  Total Commands: {len(all_commands)}",
+                    f"  Listeners: {len(listeners)}",
+                    f"  App Commands: {len(app_commands)}",
+                ]
+            )
+
+            if top_level_commands:
+                info_parts.append(f"\nTop-Level Commands ({len(top_level_commands)}):")
+                for cmd in top_level_commands:
+                    cmd_name = f"{cmd.qualified_name}"
+                    cmd_brief = cmd.brief or cmd.description or "No description"
+                    cmd_aliases = f" [{', '.join(cmd.aliases)}]" if cmd.aliases else ""
+                    cmd_hidden = " [HIDDEN]" if cmd.hidden else ""
+
+                    info_parts.append(f"  * {cmd_name}{cmd_aliases}{cmd_hidden}")
+                    info_parts.append(f"    {cmd_brief[:150]}")
+
+            groups = [
+                cmd
+                for cmd in top_level_commands
+                if hasattr(cmd, "commands") and cmd.commands
+            ]
+            if groups:
+                info_parts.append("\nCommand Groups:")
+                for group in groups:
+                    sub_count = len(group.commands)
+                    info_parts.append(f"  * {group.name} ({sub_count} subcommands)")
+                    for sub in group.commands:
+                        info_parts.append(f"    - {sub.name}")
+
+            if listeners:
+                info_parts.append(f"\nEvent Listeners ({len(listeners)}):")
+                for name, func in listeners:
+                    doc = func.__doc__
+                    summary = doc.split("\n")[0][:100] if doc else "No docstring"
+                    info_parts.append(f"  * {name}")
+                    info_parts.append(f"    {summary}")
+
+            if app_commands:
+                info_parts.append(f"\nSlash Commands ({len(app_commands)}):")
+                for app_cmd in app_commands[:10]:
+                    info_parts.append(f"  * /{app_cmd.qualified_name}")
+                if len(app_commands) > 10:
+                    info_parts.append(f"  ... and {len(app_commands) - 10} more")
+
+        else:
+            info_parts.append("\nNo cog found for this extension")
+            info_parts.append(f"Loaded cogs: {', '.join(bot.cogs.keys())}")
+
+    await ctx.send(f"```\n{chr(10).join(info_parts)}\n```")
 
 
 @bot.hybrid_command(name="eval", description="Evaluate code.", aliases=["exec"])
@@ -2294,5 +2621,5 @@ def cleanup_code(content: str) -> str:
 
 setup_logger()
 
-# Start the bot
+
 bot.run(bot_info.data["login"], log_handler=None)
