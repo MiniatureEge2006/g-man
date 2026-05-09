@@ -2,6 +2,7 @@ import asyncio
 import re
 from datetime import datetime, timedelta, timezone
 from typing import List, Literal, Optional, Union
+from urllib.parse import urlparse
 
 import asyncpg
 import discord
@@ -171,6 +172,40 @@ class Moderation(commands.Cog):
             )
 
         return components
+
+    async def get_next_filter_id(self, guild_id: int) -> int:
+        query = """
+            SELECT COALESCE(
+                (SELECT f1.filter_id + 1
+                 FROM chat_filters f1
+                 WHERE f1.guild_id = $1
+                 AND NOT EXISTS (
+                     SELECT 1 FROM chat_filters f2
+                     WHERE f2.guild_id = $1
+                     AND f2.filter_id = f1.filter_id + 1
+                 )
+                 ORDER BY f1.filter_id
+                 LIMIT 1), 1) AS next_id
+        """
+        result = await self.db.fetchval(query, guild_id)
+        return result if result else 1
+
+    async def get_next_slowmode_id(self, guild_id: int) -> int:
+        query = """
+            SELECT COALESCE(
+                (SELECT s1.slowmode_id + 1
+                 FROM manual_slowmodes s1
+                 WHERE s1.guild_id = $1
+                 AND NOT EXISTS (
+                     SELECT 1 FROM manual_slowmodes s2
+                     WHERE s2.guild_id = $1
+                     AND s2.slowmode_id = s1.slowmode_id + 1
+                 )
+                 ORDER BY s1.slowmode_id
+                 LIMIT 1), 1) AS next_id
+        """
+        result = await self.db.fetchval(query, guild_id)
+        return result if result else 1
 
     @commands.hybrid_group(
         name="logger", description="Manage event logging for different channels."
@@ -613,7 +648,9 @@ class Moderation(commands.Cog):
                     if e0.url:
                         parts.append(f"**URL:** [Link]({e0.url})")
 
-                snap_components.append(discord.ui.TextDisplay(content="\n".join(parts)))
+                    snap_components.append(
+                        discord.ui.TextDisplay(content="\n".join(parts))
+                    )
 
             if snap_components:
                 components.extend(snap_components)
@@ -2177,11 +2214,7 @@ class Moderation(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        if (
-            message.author.bot
-            or not message.guild
-            or message.author.guild_permissions.manage_messages
-        ):
+        if message.author.bot or not message.guild:
             return
 
         role_ids = [role.id for role in getattr(message.author, "roles", [])]
@@ -2190,7 +2223,7 @@ class Moderation(commands.Cog):
             message.guild.id, message.channel.id, message.author.id, role_ids
         )
 
-        if slowmode:
+        if slowmode and not message.author.guild_permissions.bypass_slowmode:
             last_message = None
             async for msg in message.channel.history(limit=10):
                 if msg.author == message.author and msg.id != message.id:
@@ -2218,26 +2251,65 @@ class Moderation(commands.Cog):
         filters = await self.get_filters_for_context(
             message.guild.id, message.channel.id, message.author.id, role_ids
         )
+        if filters and not message.author.guild_permissions.manage_messages:
+            for filter in filters:
+                try:
+                    if filter["filter_type"] == "regex":
+                        if re.search(filter["pattern"], message.content, re.IGNORECASE):
+                            await self.handle_filter_trigger(filter, message)
+                    elif filter["filter_type"] == "word":
+                        if any(
+                            word.lower() in message.content.lower()
+                            for word in filter["pattern"].split(",")
+                        ):
+                            await self.handle_filter_trigger(filter, message)
+                    elif filter["filter_type"] == "link":
+                        if self.check_forbidden_links(
+                            message.content, filter["pattern"]
+                        ):
+                            await self.handle_filter_trigger(filter, message)
+                except Exception:
+                    pass
 
-        for filter in filters:
+    def check_forbidden_links(self, content: str, pattern: str) -> bool:
+        forbidden = [d.strip().lower() for d in pattern.split(",") if d.strip()]
+
+        urls = re.findall(
+            r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+(?:/[^\s<>"\']*)?',
+            content,
+            re.IGNORECASE,
+        )
+        domains = re.findall(
+            r'(?:^|\s)(?:[\w-]+\.)+[\w-]{2,}(?:\.[\w-]+)*(?:/[^\s<>"\']*)?(?=\s|$|\.\s)',
+            content,
+        )
+
+        obfuscated = re.findall(
+            r"(?:[\w-]+)\s*[\[\(\{]?\s*[.]\s*[\]\)\}]?\s*[\w-]+", content
+        )
+        for obs in obfuscated:
+            clean = (
+                re.sub(r"[\[\](){}]", "", obs).replace("•", ".").replace(" dot ", ".")
+            )
+            clean = re.sub(r"\s+", "", clean)
+            if "." in clean:
+                domains.append(clean)
+
+        for url in urls + domains:
             try:
-                if filter["filter_type"] == "regex":
-                    if re.search(filter["pattern"], message.content, re.IGNORECASE):
-                        await self.handle_filter_trigger(filter, message)
-                elif filter["filter_type"] == "word":
-                    if any(
-                        word.lower() in message.content.lower()
-                        for word in filter["pattern"].split(",")
-                    ):
-                        await self.handle_filter_trigger(filter, message)
-                elif filter["filter_type"] == "link":
-                    if any(
-                        link in message.content.lower()
-                        for link in filter["pattern"].split(",")
-                    ):
-                        await self.handle_filter_trigger(filter, message)
+                parsed = urlparse(url if "://" in url else f"http://{url}")
+                domain = parsed.netloc.lower()
+                if domain.startswith("www."):
+                    domain = domain[4:]
+
+                for f in forbidden:
+                    if domain == f or domain.endswith(f".{f}") or f in url.lower():
+                        return True
             except Exception:
-                pass
+                if any(f in url.lower() for f in forbidden):
+                    return True
+
+        return False
 
     async def handle_filter_trigger(self, filter: dict, message: discord.Message):
         try:
@@ -2277,7 +2349,8 @@ class Moderation(commands.Cog):
             elif filter["action"] == "ban":
                 try:
                     await message.author.ban(
-                        reason="Violated the chat filter.", delete_message_seconds=0
+                        reason="Violated the chat filter.",
+                        delete_message_seconds=filter.get("delete_seconds", 0),
                     )
                 except discord.Forbidden:
                     pass
@@ -2288,236 +2361,206 @@ class Moderation(commands.Cog):
     @app_commands.allowed_installs(guilds=True, users=False)
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     async def filter_group(self, ctx: commands.Context):
-        return
+        pass
 
-    @filter_group.command(name="server", description="Add a server-wide filter.")
+    @filter_group.command(name="add", description="Add a chat filter rule.")
     @commands.has_permissions(manage_messages=True)
     @app_commands.describe(
+        target="What type to target.",
+        target_id="ID or mention of the target. (for channel/user/role)",
         filter_type="Type of filter.",
-        pattern="Pattern to match.",
-        action="Action to take.",
+        pattern="Pattern to match. (regex pattern, comma-separated words, or domain list)",
+        action="Action to take when triggered.",
         custom_message="Optional DM.",
-        duration_minutes="Timeout duration for mute action.",
+        timeout_minutes="Timeout duration for mute action. (1-40320 minutes)",
+        delete_days="Days of messages to delete for ban action. (0-7)",
     )
-    async def filter_server(
+    async def filter_add(
         self,
         ctx: commands.Context,
-        filter_type: Literal["regex", "word", "link"],
-        pattern: str,
-        action: Literal["delete", "warn", "mute", "kick", "ban"],
+        target: Literal["server", "channel", "user", "role"],
+        target_id: Optional[str] = None,
+        filter_type: Literal["regex", "word", "link"] = "word",
+        pattern: Optional[str] = None,
+        action: Literal["delete", "warn", "mute", "kick", "ban"] = "delete",
         custom_message: Optional[str] = None,
-        duration_minutes: Optional[int] = 60,
+        timeout_minutes: Optional[int] = 60,
+        delete_days: Optional[int] = 1,
     ):
         await ctx.typing()
-        await self._add_filter(
-            ctx,
-            "server",
-            None,
-            filter_type,
-            pattern,
-            action,
-            custom_message,
-            duration_minutes,
-        )
 
-    @filter_group.command(name="channel", description="Add a channel specific filter.")
-    @commands.has_permissions(manage_messages=True)
-    @app_commands.describe(
-        channel="Channel to target.",
-        filter_type="Type of filter.",
-        pattern="Pattern to match.",
-        action="Action to take.",
-        custom_message="Optional DM.",
-        duration_minutes="Timeout duration for mute action.",
-    )
-    async def filter_channel(
-        self,
-        ctx: commands.Context,
-        channel: discord.abc.GuildChannel | discord.Thread,
-        filter_type: Literal["regex", "word", "link"],
-        pattern: str,
-        action: Literal["delete", "warn", "mute", "kick", "ban"],
-        custom_message: Optional[str] = None,
-        duration_minutes: Optional[int] = 60,
-    ):
-        await ctx.typing()
-        await self._add_filter(
-            ctx,
-            "channel",
-            channel.id,
-            filter_type,
-            pattern,
-            action,
-            custom_message,
-            duration_minutes,
-        )
-
-    @filter_group.command(name="user", description="Add a user specific filter.")
-    @commands.has_permissions(manage_messages=True)
-    @app_commands.describe(
-        user="User to target.",
-        filter_type="Type of filter.",
-        pattern="Pattern to match.",
-        action="Action to take.",
-        custom_message="Optional DM.",
-        duration_minutes="Timeout duration for mute action.",
-    )
-    async def filter_user(
-        self,
-        ctx: commands.Context,
-        user: discord.User,
-        filter_type: Literal["regex", "word", "link"],
-        pattern: str,
-        action: Literal["delete", "warn", "mute", "kick", "ban"],
-        custom_message: Optional[str] = None,
-        duration_minutes: Optional[int] = 60,
-    ):
-        await ctx.typing()
-        await self._add_filter(
-            ctx,
-            "user",
-            user.id,
-            filter_type,
-            pattern,
-            action,
-            custom_message,
-            duration_minutes,
-        )
-
-    @filter_group.command(name="role", description="Add a role specific filter.")
-    @commands.has_permissions(manage_messages=True)
-    @app_commands.describe(
-        role="Role to target.",
-        filter_type="Type of filter.",
-        pattern="Pattern to match.",
-        action="Action to take.",
-        custom_message="Optional DM.",
-        duration_minutes="Timeout duration for mute action.",
-    )
-    async def filter_role(
-        self,
-        ctx: commands.Context,
-        role: discord.Role,
-        filter_type: Literal["regex", "word", "link"],
-        pattern: str,
-        action: Literal["delete", "warn", "mute", "kick", "ban"],
-        custom_message: Optional[str] = None,
-        duration_minutes: Optional[int] = 60,
-    ):
-        await ctx.typing()
-        await self._add_filter(
-            ctx,
-            "role",
-            role.id,
-            filter_type,
-            pattern,
-            action,
-            custom_message,
-            duration_minutes,
-        )
-
-    async def _add_filter(
-        self,
-        ctx: commands.Context,
-        target_type: str,
-        target_id: Optional[int],
-        filter_type: str,
-        pattern: str,
-        action: str,
-        custom_message: Optional[str],
-        duration_minutes: Optional[int],
-    ):
-        if action == "mute":
-            if not duration_minutes or duration_minutes <= 0:
-                await ctx.send(
-                    "Timeout duration must be greater than 0.", ephemeral=True
-                )
-                return
-            if duration_minutes > 40320:
-                await ctx.send(
-                    "Maximum timeout is 28 days. (40320 minutes)", ephemeral=True
-                )
-                return
-        else:
-            duration_minutes = None
-
-        try:
-            if filter_type == "regex":
-                re.compile(pattern)
-        except re.error:
-            await ctx.send("Invalid regex pattern.", ephemeral=True)
+        resolved_target_id = None
+        target_name = "server-wide"
+        if pattern is None:
+            await ctx.send("A pattern for filtering is required.", ephemeral=True)
             return
+        if target == "server":
+            resolved_target_id = None
+        elif target == "channel":
+            try:
+                channel = await commands.TextChannelConverter().convert(ctx, target_id)
+                resolved_target_id = channel.id
+                target_name = channel.mention
+            except Exception:
+                await ctx.send(f"Invalid channel: {target_id}", ephemeral=True)
+                return
+        elif target == "user":
+            try:
+                user = await commands.UserConverter().convert(ctx, target_id)
+                resolved_target_id = user.id
+                target_name = user.mention
+            except Exception:
+                await ctx.send(f"Invalid user: {target_id}", ephemeral=True)
+                return
+        elif target == "role":
+            try:
+                role = await commands.RoleConverter().convert(ctx, target_id)
+                resolved_target_id = role.id
+                target_name = role.mention
+            except Exception:
+                await ctx.send(f"Invalid role: {target_id}", ephemeral=True)
+                return
+
+        if action == "mute":
+            if timeout_minutes < 1:
+                await ctx.send("Timeout must be at least 1 minute.", ephemeral=True)
+                return
+            if timeout_minutes > 40320:
+                await ctx.send(
+                    "Timeout cannot exceed 28 days (40320 minutes).", ephemeral=True
+                )
+                return
+
+        if action == "ban":
+            if delete_days < 0 or delete_days > 7:
+                await ctx.send("Delete days must be between 0 and 7.", ephemeral=True)
+                return
+
+        delete_seconds = delete_days * 86400 if action == "ban" else None
+
+        if filter_type == "regex":
+            try:
+                re.compile(pattern)
+            except re.error as e:
+                await ctx.send(f"Invalid regex pattern: {str(e)}", ephemeral=True)
+                return
+
+        if filter_type in ("word", "link"):
+            words = [w.strip().lower() for w in pattern.split(",") if w.strip()]
+            if not words:
+                await ctx.send("No valid patterns provided.", ephemeral=True)
+                return
+            pattern = ",".join(words)
 
         try:
+            filter_id = await self.get_next_filter_id(ctx.guild.id)
+
+            existing = await self.db.fetchrow(
+                """
+                SELECT filter_id FROM chat_filters
+                WHERE guild_id = $1 AND target_type = $2
+                AND (target_id = $3 OR (target_id IS NULL AND $3 IS NULL))
+                AND filter_type = $4 AND pattern = $5
+                """,
+                ctx.guild.id,
+                target,
+                resolved_target_id,
+                filter_type,
+                pattern,
+            )
+
+            if existing:
+                await ctx.send(
+                    f"A similar filter already exists (ID: {existing['filter_id']}).",
+                    ephemeral=True,
+                )
+                return
+
             await self.db.execute(
                 """
                 INSERT INTO chat_filters (
-                    guild_id, filter_type, pattern, action,
-                    target_type, target_id, custom_message,
-                    duration_minutes, added_by
+                    filter_id, guild_id, target_type, target_id, filter_type, pattern, action,
+                    custom_message, timeout_minutes, delete_seconds, added_by, created_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
                 """,
+                filter_id,
                 ctx.guild.id,
+                target,
+                resolved_target_id,
                 filter_type,
                 pattern,
                 action,
-                target_type,
-                target_id,
                 custom_message,
-                duration_minutes,
+                timeout_minutes if action == "mute" else None,
+                delete_seconds,
                 ctx.author.id,
             )
+
             self.filter_cache.clear()
-            target_name = {
-                "server": "server-wide",
-                "channel": f"<#{target_id}>",
-                "user": f"<@{target_id}>",
-                "role": f"<@&{target_id}>",
-            }[target_type]
+
             response = f"Added **{filter_type}** filter for {target_name} -> `{action}`"
             if action == "mute":
-                response += f" ({duration_minutes}m)"
+                response += f" ({timeout_minutes}m)"
+            elif action == "ban":
+                response += f" (delete {delete_days}d)"
+            if custom_message:
+                response += f"\nCustom message: {custom_message[:100]}"
+
             await ctx.send(response)
+
         except Exception as e:
             await ctx.send(f"Failed to add filter: {str(e)}")
 
-    @filter_group.command(name="list", description="List all filters.", aliases=["ls"])
+    @filter_group.command(
+        name="list", description="List all chat filters.", aliases=["ls"]
+    )
     @commands.has_permissions(manage_messages=True)
     async def filter_list(self, ctx: commands.Context):
         await ctx.typing()
+
         rows = await self.db.fetch(
-            "SELECT * FROM chat_filters WHERE guild_id = $1 ORDER BY target_type, id",
+            """
+            SELECT f.*, COUNT(*) OVER() as total
+            FROM chat_filters f
+            WHERE guild_id = $1
+            ORDER BY target_type, created_at DESC
+            """,
             ctx.guild.id,
         )
+
         if not rows:
-            await ctx.send("No filters were set up.", ephemeral=True)
+            await ctx.send("No chat filters were set up.", ephemeral=True)
             return
 
-        embed = discord.Embed(title="Chat Filters", color=discord.Color.blurple())
+        embed = discord.Embed(
+            title=f"Chat Filters ({len(rows)})", color=discord.Color.blurple()
+        )
+
         for r in rows:
-            target = "Server-wide"
-            if r["target_type"] == "channel":
-                target = f"<#{r['target_id']}>"
+            if r["target_type"] == "server":
+                target = "Server-wide"
+            elif r["target_type"] == "channel":
+                target = f"{ctx.guild.get_channel(r['target_id']).mention or f'Channel:{r['target_id']}'}"
             elif r["target_type"] == "user":
-                target = f"<@{r['target_id']}>"
-            elif r["target_type"] == "role":
-                target = f"<@&{r['target_id']}>"
+                target = f"{ctx.guild.get_member(r['target_id']).mention or f'User:{r['target_id']}'}"
+            else:
+                target = f"{ctx.guild.get_role(r['target_id']).mention or f'Role:{r['target_id']}'}"
+
+            pattern_display = r["pattern"][:50] + (
+                "..." if len(r["pattern"]) > 50 else ""
+            )
 
             embed.add_field(
-                name=f"ID `{r['id']}` | {r['filter_type'].upper()} -> {r['action'].upper()}",
+                name=f"`#{r['filter_id']}` {r['filter_type']} -> {r['action']}",
                 value=(
-                    f"**Pattern:** `{r['pattern'][:60]}{'...' if len(r['pattern']) > 60 else ''}`\n"
                     f"**Target:** {target}\n"
-                    f"**Duration:** {r.get('duration_minutes', 'N/A')} min\n"
-                    f"**Added by:** <@{r['added_by']}>"
+                    f"**Pattern:** `{pattern_display}`\n"
+                    f"**Added:** <t:{int(r['created_at'].timestamp())}:R>"
                 ),
                 inline=False,
             )
-        embed.set_footer(
-            text=f"Requested by {ctx.author.name}",
-            icon_url=ctx.author.display_avatar.url,
-        )
+
         await ctx.send(embed=embed)
 
     @filter_group.command(
@@ -2527,16 +2570,78 @@ class Moderation(commands.Cog):
     @app_commands.describe(filter_id="The filter ID to remove.")
     async def filter_remove(self, ctx: commands.Context, filter_id: int):
         await ctx.typing()
+
         result = await self.db.fetchrow(
-            "DELETE FROM chat_filters WHERE guild_id = $1 AND id = $2 RETURNING *",
+            "DELETE FROM chat_filters WHERE guild_id = $1 AND filter_id = $2 RETURNING filter_type, target_type",
             ctx.guild.id,
             filter_id,
         )
+
         if result:
             self.filter_cache.clear()
-            await ctx.send(f"Filter ID `{filter_id}` removed.")
+            await ctx.send(
+                f"Removed filter `#{filter_id}` ({result['filter_type']} -> {result['target_type']})."
+            )
         else:
-            await ctx.send(f"No filter with ID `{filter_id}` exists.", ephemeral=True)
+            await ctx.send(f"No filter found with ID `{filter_id}`.", ephemeral=True)
+
+    @filter_group.command(name="clear", description="Remove all filters for a target.")
+    @commands.has_permissions(manage_messages=True)
+    @app_commands.describe(
+        target="Target type to clear filters from.",
+        target_id="ID or mention of the target. (for channel/user/role)",
+    )
+    async def filter_clear(
+        self,
+        ctx: commands.Context,
+        target: Literal["server", "channel", "user", "role"],
+        target_id: Optional[str] = None,
+    ):
+        await ctx.typing()
+
+        resolved_target_id = None
+        if target == "channel" and target_id:
+            try:
+                channel = await commands.TextChannelConverter().convert(ctx, target_id)
+                resolved_target_id = channel.id
+            except Exception:
+                await ctx.send(f"Invalid channel: {target_id}", ephemeral=True)
+                return
+        elif target == "user" and target_id:
+            try:
+                user = await commands.UserConverter().convert(ctx, target_id)
+                resolved_target_id = user.id
+            except Exception:
+                await ctx.send(f"Invalid user: {target_id}", ephemeral=True)
+                return
+        elif target == "role" and target_id:
+            try:
+                role = await commands.RoleConverter().convert(ctx, target_id)
+                resolved_target_id = role.id
+            except Exception:
+                await ctx.send(f"Invalid role: {target_id}", ephemeral=True)
+                return
+
+        result = await self.db.execute(
+            """
+            DELETE FROM chat_filters
+            WHERE guild_id = $1 AND target_type = $2
+            AND (target_id = $3 OR (target_id IS NULL AND $3 IS NULL))
+            """,
+            ctx.guild.id,
+            target,
+            resolved_target_id,
+        )
+
+        count = int(result.split()[1]) if result.startswith("DELETE") else 0
+
+        if count > 0:
+            self.filter_cache.clear()
+            await ctx.send(f"Removed {count} filter(s) from {target} target.")
+        else:
+            await ctx.send(
+                f"No filters found for that {target} target.", ephemeral=True
+            )
 
     @commands.hybrid_group(
         name="slowmode", description="Set manual slowmode on any target."
@@ -2547,45 +2652,49 @@ class Moderation(commands.Cog):
         return
 
     @slowmode_group.command(
-        name="server", description="Set server-wide manual slowmode."
+        name="add", description="Add or update a manual slowmode rule for a target."
     )
     @commands.has_permissions(manage_channels=True)
-    @app_commands.describe(delay="Slowmode in seconds.")
-    async def slowmode_server(self, ctx: commands.Context, delay: int):
-        await self._set_slowmode(ctx, "server", None, delay)
-
-    @slowmode_group.command(
-        name="channel", description="Set manual slowmode for a specific channel."
+    @app_commands.describe(
+        target="Type of target.",
+        target_id="ID or mention of the target. (required for channel, user, role)",
+        delay="Slowmode delay in seconds. (0 to disable)",
     )
-    @commands.has_permissions(manage_channels=True)
-    @app_commands.describe(channel="Channel to target.", delay="Slowmode in seconds.")
-    async def slowmode_channel(
+    async def slowmode_add(
         self,
         ctx: commands.Context,
-        channel: discord.abc.GuildChannel | discord.Thread,
-        delay: int,
+        target: Literal["server", "channel", "user", "role"],
+        target_id: Optional[str] = None,
+        delay: int = 0,
     ):
-        await self._set_slowmode(ctx, "channel", channel.id, delay)
+        await ctx.typing()
 
-    @slowmode_group.command(
-        name="user", description="Set manual slowmode for a specific user."
-    )
-    @commands.has_permissions(manage_channels=True)
-    @app_commands.describe(user="User to target.", delay="Slowmode in seconds.")
-    async def slowmode_user(
-        self, ctx: commands.Context, user: discord.User, delay: int
-    ):
-        await self._set_slowmode(ctx, "user", user.id, delay)
+        resolved_target_id = None
+        if target == "server":
+            resolved_target_id = None
+        elif target == "channel":
+            try:
+                channel = await commands.TextChannelConverter().convert(ctx, target_id)
+                resolved_target_id = channel.id
+            except Exception:
+                await ctx.send(f"Invalid channel: {target_id}", ephemeral=True)
+                return
+        elif target == "user":
+            try:
+                user = await commands.UserConverter().convert(ctx, target_id)
+                resolved_target_id = user.id
+            except Exception:
+                await ctx.send(f"Invalid user: {target_id}", ephemeral=True)
+                return
+        elif target == "role":
+            try:
+                role = await commands.RoleConverter().convert(ctx, target_id)
+                resolved_target_id = role.id
+            except Exception:
+                await ctx.send(f"Invalid role: {target_id}", ephemeral=True)
+                return
 
-    @slowmode_group.command(
-        name="role", description="Set manual slowmode for a specific role."
-    )
-    @commands.has_permissions(manage_channels=True)
-    @app_commands.describe(role="Role to target.", delay="Slowmode in seconds.")
-    async def slowmode_role(
-        self, ctx: commands.Context, role: discord.Role, delay: int
-    ):
-        await self._set_slowmode(ctx, "role", role.id, delay)
+        await self._set_slowmode(ctx, target, resolved_target_id, delay)
 
     @slowmode_group.command(
         name="list",
@@ -2624,7 +2733,7 @@ class Moderation(commands.Cog):
                 target = "Server-wide"
 
             embed.add_field(
-                name=f"ID `{r['id']}`",
+                name=f"ID `{r['slowmode_id']}`",
                 value=(
                     f"**Target:** {target}\n"
                     f"**Delay:** {r['delay_seconds']} second(s)\n"
@@ -2648,7 +2757,7 @@ class Moderation(commands.Cog):
     async def slowmode_remove(self, ctx: commands.Context, rule_id: int):
         await ctx.typing()
         result = await self.db.fetchrow(
-            "DELETE FROM manual_slowmodes WHERE guild_id = $1 AND id = $2 RETURNING *",
+            "DELETE FROM manual_slowmodes WHERE guild_id = $1 AND slowmode_id = $2 RETURNING *",
             ctx.guild.id,
             rule_id,
         )
@@ -2686,26 +2795,50 @@ class Moderation(commands.Cog):
         role_id = target_id if target_type == "role" else None
 
         try:
-            await self.db.execute(
-                """
-            INSERT INTO manual_slowmodes (
-                guild_id, channel_id, user_id, role_id,
-                delay_seconds, enabled, added_by
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            ON CONFLICT (guild_id, channel_id, user_id, role_id)
-            DO UPDATE SET
-                delay_seconds = EXCLUDED.delay_seconds,
-                enabled = EXCLUDED.enabled
-            """,
+            existing = await self.db.fetchrow(
+                "SELECT slowmode_id FROM manual_slowmodes WHERE guild_id = $1 AND channel_id = $2 AND user_id = $3 AND role_id = $4",
                 ctx.guild.id,
                 channel_id,
                 user_id,
                 role_id,
-                delay,
-                enabled,
-                ctx.author.id,
             )
+
+            if existing:
+                await self.db.execute(
+                    """
+                    UPDATE manual_slowmodes
+                    SET delay_seconds = $1, enabled = $2, added_by = $3, added_at = NOW()
+                    WHERE guild_id = $4 AND channel_id = $5 AND user_id = $6 AND role_id = $7
+                    """,
+                    delay,
+                    enabled,
+                    ctx.author.id,
+                    ctx.guild.id,
+                    channel_id,
+                    user_id,
+                    role_id,
+                )
+                slowmode_id = existing["slowmode_id"]
+            else:
+                slowmode_id = await self.get_next_slowmode_id(ctx.guild.id)
+                await self.db.execute(
+                    """
+                    INSERT INTO manual_slowmodes (
+                        slowmode_id, guild_id, channel_id, user_id, role_id,
+                        delay_seconds, enabled, added_by, added_at
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+                    """,
+                    slowmode_id,
+                    ctx.guild.id,
+                    channel_id,
+                    user_id,
+                    role_id,
+                    delay,
+                    enabled,
+                    ctx.author.id,
+                )
+
             self.slowmode_cache.clear()
 
             target_name = {

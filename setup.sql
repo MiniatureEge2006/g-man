@@ -114,20 +114,6 @@ CREATE TABLE IF NOT EXISTS tags (
 );
 
 
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conname = 'unique_tag' AND conrelid = 'tags'::regclass
-    ) THEN
-        BEGIN
-            ALTER TABLE tags ADD CONSTRAINT unique_tag UNIQUE (name, guild_id, user_id);
-        EXCEPTION WHEN duplicate_object THEN
-        END;
-    END IF;
-END $$;
-
-
 CREATE TABLE IF NOT EXISTS tag_aliases (
     id SERIAL PRIMARY KEY,
     alias TEXT NOT NULL,
@@ -150,7 +136,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS tag_aliases_guild_unique
 
 CREATE UNIQUE INDEX IF NOT EXISTS tag_aliases_user_unique
     ON tag_aliases (alias, user_id) WHERE user_id IS NOT NULL;
-
 
 
 CREATE INDEX IF NOT EXISTS idx_tags_guild ON tags (guild_id) WHERE guild_id IS NOT NULL;
@@ -179,6 +164,7 @@ CREATE TABLE IF NOT EXISTS command_usage (
 
 CREATE TABLE IF NOT EXISTS chat_filters (
     id SERIAL PRIMARY KEY,
+    filter_id INTEGER,
     guild_id BIGINT NOT NULL,
     filter_type TEXT NOT NULL CHECK (filter_type IN ('regex', 'word', 'link')),
     pattern TEXT NOT NULL,
@@ -186,14 +172,17 @@ CREATE TABLE IF NOT EXISTS chat_filters (
     target_type TEXT NOT NULL CHECK (target_type IN ('server', 'channel', 'user', 'role')),
     target_id BIGINT,
     custom_message TEXT,
-    duration_minutes INTEGER DEFAULT 60,
+    timeout_minutes INTEGER DEFAULT 60,
+    delete_seconds INTEGER,
     added_by BIGINT,
-    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (guild_id, filter_id),
     UNIQUE (guild_id, filter_type, pattern, target_type, target_id)
 );
 
 CREATE TABLE IF NOT EXISTS manual_slowmodes (
     id SERIAL PRIMARY KEY,
+    slowmode_id INTEGER,
     guild_id BIGINT NOT NULL,
     channel_id BIGINT,
     user_id BIGINT,
@@ -202,6 +191,7 @@ CREATE TABLE IF NOT EXISTS manual_slowmodes (
     enabled BOOLEAN DEFAULT TRUE,
     added_by BIGINT,
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (guild_id, slowmode_id),
     CONSTRAINT uq_manual_slowmode_target
         UNIQUE (guild_id, channel_id, user_id, role_id),
     CONSTRAINT valid_target CHECK (

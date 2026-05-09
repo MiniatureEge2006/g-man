@@ -30,7 +30,19 @@ class Reminder(commands.Cog):
             self.reminder_task.cancel()
 
     async def get_next_reminder_id(self, guild_id: int) -> int:
-        query = "SELECT COALESCE(MAX(reminder_id), 0) + 1 AS next_id FROM reminders WHERE guild_id = $1;"
+        query = """
+            SELECT COALESCE(
+                (SELECT reminder_id + 1
+                 FROM reminders
+                 WHERE guild_id = $1
+                 AND NOT EXISTS (
+                     SELECT 1 FROM reminders r2
+                     WHERE r2.guild_id = $1
+                     AND r2.reminder_id = reminders.reminder_id + 1
+                 )
+                 ORDER BY reminder_id
+                 LIMIT 1), 1) AS next_id
+        """
         result = await self.db_pool.fetchval(query, guild_id)
         return result if result else 1
 
