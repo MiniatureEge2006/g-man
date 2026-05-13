@@ -11,6 +11,7 @@ RUN echo 'dev-python/strawberry-graphql' >> /etc/portage/package.accept_keywords
 RUN echo 'dev-python/sqlmodel' >> /etc/portage/package.accept_keywords/keywords
 RUN echo 'app-shells/nushell' >> /etc/portage/package.accept_keywords/keywords
 RUN echo 'app-shells/fish' >> /etc/portage/package.accept_keywords/keywords
+RUN echo 'app-shells/elvish' >> /etc/portage/package.accept_keywords/keywords
 RUN echo 'dev-dotnet/libgdiplus cairo' >> /etc/portage/package.use/use
 RUN echo 'media-video/ffmpeg lame qrcode opus vpx vorbis truetype rubberband quirc fribidi flite x264 x265 dav1d fdk' >> /etc/portage/package.use/use
 RUN echo 'net-print/cups-meta postscript' >> /etc/portage/package.use/use
@@ -25,6 +26,7 @@ RUN emerge --getbinpkg --update --deep --newuse @world
 RUN emerge --getbinpkg --noreplace \
     app-shells/nushell \
     app-shells/fish \
+    app-shells/elvish \
     dev-python/pip \
     dev-python/ffmpeg-python \
     dev-python/pillow \
@@ -62,7 +64,8 @@ RUN emerge --getbinpkg --noreplace \
     x11-libs/gtk+ \
     x11-libs/libxkbcommon \
     net-print/cups-meta \
-    media-libs/alsa-lib
+    media-libs/alsa-lib \
+    sci-libs/libqalculate
 
 
 RUN groupadd -g 1000 gcoder && useradd -r -u 1000 -g gcoder -m -d /home/gcoder gcoder

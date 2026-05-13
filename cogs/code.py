@@ -17,6 +17,8 @@ LANGUAGE_ALIASES: dict[str, str] = {
     "fish": "fish",
     "nushell": "nu",
     "nu": "nu",
+    "elvish": "elvish",
+    "elv": "elvish",
     "js": "javascript",
     "javascript": "javascript",
     "node": "javascript",

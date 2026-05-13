@@ -21,6 +21,7 @@ ALLOWED_LANGUAGES = [
     "bash",
     "fish",
     "nu",
+    "elvish",
     "python",
     "javascript",
     "typescript",
@@ -186,6 +187,14 @@ async def execute_code(language: str, code: str, files: List[UploadFile]):
             nu_file.chmod(0o700)
             output, return_code = await run_with_timeout(
                 ["nu", str(nu_file)], cwd=work_dir
+            )
+        elif language == "elvish":
+            elv_file = work_dir / "script.elv"
+            with elv_file.open("w") as f:
+                f.write(code)
+            elv_file.chmod(0o700)
+            output, return_code = await run_with_timeout(
+                ["elvish", str(elv_file)], cwd=work_dir
             )
         elif language in ["javascript", "typescript"]:
             if language == "typescript":

@@ -6995,17 +6995,46 @@ class Tags(commands.Cog):
             return str(variables.get(name.strip(), ""))
 
         @self.formatter.register("math")
-        def _math(ctx, expr, **kwargs):
+        @self.formatter.register("calc")
+        @self.formatter.register("calculate")
+        async def _math(ctx, expr, **kwargs):
             """
             ### {math:expression}
-                * Evaluates a mathematical expression.
+                * Evaluates a mathematical expression via libqalculate.
+                * Supports all libqalculate functionality.
                 * Example: `{math:5+3*2}` -> "11"
             """
+            if not expr or not expr.strip():
+                return "0"
+
+            proc = None
             try:
-                expr = str(expr)
-                if not expr:
-                    return "0"
-                return str(eval(expr, {"__builtins__": None}, {}))
+                proc = await asyncio.create_subprocess_exec(
+                    "qalc",
+                    "-t",
+                    expr.strip(),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=5.0)
+
+                if proc.returncode != 0:
+                    err = stderr.decode().strip()
+                    out = stdout.decode().strip()
+                    return (
+                        err
+                        or out
+                        or f"[math error: qalc returned exit code {proc.returncode}]"
+                    )
+
+                return stdout.decode().strip()
+
+            except asyncio.TimeoutError:
+                if proc is not None and proc.returncode is None:
+                    proc.kill()
+                return "[math error: timed out]"
+            except FileNotFoundError:
+                return "[math error: qalc not installed]"
             except Exception as e:
                 return f"[math error: {e}]"
 
@@ -7091,6 +7120,27 @@ class Tags(commands.Cog):
             """
             return await self.execute_language(
                 ctx, "nu", code, suppress_files=True, **kwargs
+            )
+
+        @self.formatter.register("elvish")
+        @self.formatter.register("elv")
+        async def _elvish(ctx, code, **kwargs):
+            """
+            ### {elvish:code}
+                * Execute Elvish code.
+                * Example: `{elvish:echo 'hi'}` -> "hi"
+            """
+            return await self.execute_language(ctx, "elvish", code, **kwargs)
+
+        @self.formatter.register("_elvish")
+        @self.formatter.register("_elv")
+        async def _elvish_suppress(ctx, code, **kwargs):
+            """
+            ### {_elvish:code}
+                * Execute Elvish code. Output files go into the registry but are NOT sent to Discord.
+            """
+            return await self.execute_language(
+                ctx, "elvish", code, suppress_files=True, **kwargs
             )
 
         @self.formatter.register("javascript")
