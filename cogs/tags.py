@@ -311,23 +311,33 @@ class DiscordGenerator:
         )
 
         if "fields" in kwargs:
-            for field in kwargs["fields"]:
-                embed.add_field(
-                    name=field.get("name", ""),
-                    value=field.get("value", ""),
-                    inline=field.get("inline", True),
-                )
+            fields = kwargs["fields"]
+            if isinstance(fields, list):
+                for field in fields:
+                    if isinstance(field, dict):
+                        embed.add_field(
+                            name=field.get("name", ""),
+                            value=field.get("value", ""),
+                            inline=field.get("inline", True),
+                        )
+
         if "author" in kwargs:
-            embed.set_author(
-                name=kwargs["author"].get("name"),
-                icon_url=kwargs["author"].get("icon_url"),
-                url=kwargs["author"].get("url"),
-            )
+            author = kwargs["author"]
+            if isinstance(author, dict):
+                embed.set_author(
+                    name=author.get("name"),
+                    icon_url=author.get("icon_url"),
+                    url=author.get("url"),
+                )
+
         if "footer" in kwargs:
-            embed.set_footer(
-                text=kwargs["footer"].get("text"),
-                icon_url=kwargs["footer"].get("icon_url"),
-            )
+            footer = kwargs["footer"]
+            if isinstance(footer, dict):
+                embed.set_footer(
+                    text=footer.get("text"),
+                    icon_url=footer.get("icon_url"),
+                )
+
         if "timestamp" in kwargs:
             try:
                 timestamp = kwargs["timestamp"]
@@ -336,10 +346,17 @@ class DiscordGenerator:
                 embed.timestamp = timestamp
             except Exception:
                 pass
+
         if "thumbnail" in kwargs:
-            embed.set_thumbnail(url=kwargs["thumbnail"].get("url"))
+            thumbnail = kwargs["thumbnail"]
+            if isinstance(thumbnail, dict):
+                embed.set_thumbnail(url=thumbnail.get("url"))
+
         if "image" in kwargs:
-            embed.set_image(url=kwargs["image"].get("url"))
+            image = kwargs["image"]
+            if isinstance(image, dict):
+                embed.set_image(url=image.get("url"))
+
         return embed
 
     @staticmethod
