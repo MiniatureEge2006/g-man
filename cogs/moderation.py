@@ -27,6 +27,348 @@ class Moderation(commands.Cog):
         self.slowmode_cache = {}
         self.db = asyncpg.Pool
 
+    async def _evaluate_tagscript(self, template: str, ctx_data: dict) -> tuple:
+        try:
+            if not template:
+                return "", [], None, []
+
+            tags = self.bot.get_cog("Tags")
+
+            class FakeContext:
+                def __init__(self, data, bot):
+                    self.author = data.get("author")
+                    self.guild = data.get("guild")
+                    self.channel = data.get("channel")
+                    self.bot = bot
+                    self.message = data.get("message")
+                    self.me = bot.user if bot else None
+
+            fake_ctx = FakeContext(ctx_data, self.bot)
+            kwargs = {
+                k: v
+                for k, v in ctx_data.items()
+                if k not in ("author", "guild", "channel", "message")
+            }
+
+            if "message" in ctx_data:
+                msg = ctx_data["message"]
+                kwargs["message_id"] = str(getattr(msg, "id", ""))
+                kwargs["message_content"] = getattr(msg, "content", "") or ""
+                kwargs["message_clean_content"] = (
+                    getattr(msg, "clean_content", "") or ""
+                )
+                kwargs["message_jump_url"] = getattr(msg, "jump_url", "")
+                kwargs["message_created_at"] = (
+                    msg.created_at.isoformat()
+                    if getattr(msg, "created_at", None)
+                    else ""
+                )
+                kwargs["message_edited_at"] = (
+                    msg.edited_at.isoformat() if getattr(msg, "edited_at", None) else ""
+                )
+
+                msg_embeds = getattr(msg, "embeds", []) or []
+                msg_attachments = getattr(msg, "attachments", []) or []
+
+                kwargs["message_has_embeds"] = str(len(msg_embeds) > 0).lower()
+                kwargs["message_embed_count"] = str(len(msg_embeds))
+                kwargs["message_has_attachments"] = str(
+                    len(msg_attachments) > 0
+                ).lower()
+                kwargs["message_attachment_count"] = str(len(msg_attachments))
+
+                kwargs["message_embed_titles"] = []
+                kwargs["message_embed_descriptions"] = []
+                kwargs["message_embed_urls"] = []
+
+                for i, embed in enumerate(msg_embeds):
+                    kwargs[f"message_embed_title_{i}"] = (
+                        getattr(embed, "title", "") or ""
+                    )
+                    kwargs[f"message_embed_description_{i}"] = (
+                        getattr(embed, "description", "") or ""
+                    )
+                    kwargs[f"message_embed_url_{i}"] = getattr(embed, "url", "") or ""
+                    kwargs[f"message_embed_color_{i}"] = (
+                        str(embed.color) if getattr(embed, "color", None) else ""
+                    )
+                    kwargs[f"message_embed_image_{i}"] = (
+                        embed.image.url if getattr(embed, "image", None) else ""
+                    )
+                    kwargs[f"message_embed_thumbnail_{i}"] = (
+                        embed.thumbnail.url if getattr(embed, "thumbnail", None) else ""
+                    )
+
+                    if getattr(embed, "title", None):
+                        kwargs["message_embed_titles"].append(embed.title)
+                    if getattr(embed, "description", None):
+                        kwargs["message_embed_descriptions"].append(embed.description)
+                    if getattr(embed, "url", None):
+                        kwargs["message_embed_urls"].append(embed.url)
+
+                if msg_embeds:
+                    embed = msg_embeds[0]
+                    kwargs["message_embed_title"] = getattr(embed, "title", "") or ""
+                    kwargs["message_embed_description"] = (
+                        getattr(embed, "description", "") or ""
+                    )
+                    kwargs["message_embed_url"] = getattr(embed, "url", "") or ""
+                    kwargs["message_embed_color"] = (
+                        str(embed.color) if getattr(embed, "color", None) else ""
+                    )
+                    kwargs["message_embed_image"] = (
+                        embed.image.url if getattr(embed, "image", None) else ""
+                    )
+                    kwargs["message_embed_thumbnail"] = (
+                        embed.thumbnail.url if getattr(embed, "thumbnail", None) else ""
+                    )
+
+                kwargs["message_attachment_filenames"] = []
+                kwargs["message_attachment_urls"] = []
+                kwargs["message_attachment_proxy_urls"] = []
+
+                for i, att in enumerate(msg_attachments):
+                    kwargs[f"message_attachment_filename_{i}"] = getattr(
+                        att, "filename", ""
+                    )
+                    kwargs[f"message_attachment_url_{i}"] = getattr(att, "url", "")
+                    kwargs[f"message_attachment_proxy_url_{i}"] = getattr(
+                        att, "proxy_url", ""
+                    )
+                    kwargs[f"message_attachment_size_{i}"] = str(
+                        getattr(att, "size", "0")
+                    )
+                    kwargs[f"message_attachment_content_type_{i}"] = (
+                        getattr(att, "content_type", "") or ""
+                    )
+
+                    if getattr(att, "filename", None):
+                        kwargs["message_attachment_filenames"].append(att.filename)
+                    if getattr(att, "url", None):
+                        kwargs["message_attachment_urls"].append(att.url)
+                    if getattr(att, "proxy_url", None):
+                        kwargs["message_attachment_proxy_urls"].append(att.proxy_url)
+
+                if msg_attachments:
+                    att = msg_attachments[0]
+                    kwargs["message_attachment_filename"] = getattr(att, "filename", "")
+                    kwargs["message_attachment_url"] = getattr(att, "url", "")
+                    kwargs["message_attachment_proxy_url"] = getattr(
+                        att, "proxy_url", ""
+                    )
+                    kwargs["message_attachment_size"] = str(getattr(att, "size", "0"))
+                    kwargs["message_attachment_content_type"] = (
+                        getattr(att, "content_type", "") or ""
+                    )
+
+            if "before_message" in ctx_data:
+                before = ctx_data["before_message"]
+                kwargs["before_content"] = getattr(before, "content", "") or ""
+                kwargs["before_clean_content"] = (
+                    getattr(before, "clean_content", "") or ""
+                )
+
+                before_embeds = getattr(before, "embeds", []) or []
+                before_attachments = getattr(before, "attachments", []) or []
+
+                kwargs["before_has_embeds"] = str(len(before_embeds) > 0).lower()
+                kwargs["before_embed_count"] = str(len(before_embeds))
+                kwargs["before_has_attachments"] = str(
+                    len(before_attachments) > 0
+                ).lower()
+                kwargs["before_attachment_count"] = str(len(before_attachments))
+
+                kwargs["before_embed_titles"] = []
+                kwargs["before_embed_descriptions"] = []
+                kwargs["before_embed_urls"] = []
+
+                for i, embed in enumerate(before_embeds):
+                    kwargs[f"before_embed_title_{i}"] = (
+                        getattr(embed, "title", "") or ""
+                    )
+                    kwargs[f"before_embed_description_{i}"] = (
+                        getattr(embed, "description", "") or ""
+                    )
+                    kwargs[f"before_embed_url_{i}"] = getattr(embed, "url", "") or ""
+                    kwargs[f"before_embed_color_{i}"] = (
+                        str(embed.color) if getattr(embed, "color", None) else ""
+                    )
+                    kwargs[f"before_embed_image_{i}"] = (
+                        embed.image.url if getattr(embed, "image", None) else ""
+                    )
+                    kwargs[f"before_embed_thumbnail_{i}"] = (
+                        embed.thumbnail.url if getattr(embed, "thumbnail", None) else ""
+                    )
+
+                    if getattr(embed, "title", None):
+                        kwargs["before_embed_titles"].append(embed.title)
+                    if getattr(embed, "description", None):
+                        kwargs["before_embed_descriptions"].append(embed.description)
+                    if getattr(embed, "url", None):
+                        kwargs["before_embed_urls"].append(embed.url)
+
+                if before_embeds:
+                    embed = before_embeds[0]
+                    kwargs["before_embed_title"] = getattr(embed, "title", "") or ""
+                    kwargs["before_embed_description"] = (
+                        getattr(embed, "description", "") or ""
+                    )
+                    kwargs["before_embed_url"] = getattr(embed, "url", "") or ""
+                    kwargs["before_embed_color"] = (
+                        str(embed.color) if getattr(embed, "color", None) else ""
+                    )
+                    kwargs["before_embed_image"] = (
+                        embed.image.url if getattr(embed, "image", None) else ""
+                    )
+                    kwargs["before_embed_thumbnail"] = (
+                        embed.thumbnail.url if getattr(embed, "thumbnail", None) else ""
+                    )
+
+                kwargs["before_attachment_filenames"] = []
+                kwargs["before_attachment_urls"] = []
+                kwargs["before_attachment_proxy_urls"] = []
+
+                for i, att in enumerate(before_attachments):
+                    kwargs[f"before_attachment_filename_{i}"] = getattr(
+                        att, "filename", ""
+                    )
+                    kwargs[f"before_attachment_url_{i}"] = getattr(att, "url", "")
+                    kwargs[f"before_attachment_proxy_url_{i}"] = getattr(
+                        att, "proxy_url", ""
+                    )
+                    kwargs[f"before_attachment_size_{i}"] = str(
+                        getattr(att, "size", "0")
+                    )
+                    kwargs[f"before_attachment_content_type_{i}"] = (
+                        getattr(att, "content_type", "") or ""
+                    )
+
+                    if getattr(att, "filename", None):
+                        kwargs["before_attachment_filenames"].append(att.filename)
+                    if getattr(att, "url", None):
+                        kwargs["before_attachment_urls"].append(att.url)
+                    if getattr(att, "proxy_url", None):
+                        kwargs["before_attachment_proxy_urls"].append(att.proxy_url)
+
+                if before_attachments:
+                    att = before_attachments[0]
+                    kwargs["before_attachment_filename"] = getattr(att, "filename", "")
+                    kwargs["before_attachment_url"] = getattr(att, "url", "")
+                    kwargs["before_attachment_proxy_url"] = getattr(
+                        att, "proxy_url", ""
+                    )
+                    kwargs["before_attachment_size"] = str(getattr(att, "size", "0"))
+                    kwargs["before_attachment_content_type"] = (
+                        getattr(att, "content_type", "") or ""
+                    )
+
+            if "after_message" in ctx_data:
+                after = ctx_data["after_message"]
+                kwargs["after_content"] = getattr(after, "content", "") or ""
+                kwargs["after_clean_content"] = (
+                    getattr(after, "clean_content", "") or ""
+                )
+
+                after_embeds = getattr(after, "embeds", []) or []
+                after_attachments = getattr(after, "attachments", []) or []
+
+                kwargs["after_has_embeds"] = str(len(after_embeds) > 0).lower()
+                kwargs["after_embed_count"] = str(len(after_embeds))
+                kwargs["after_has_attachments"] = str(
+                    len(after_attachments) > 0
+                ).lower()
+                kwargs["after_attachment_count"] = str(len(after_attachments))
+
+                kwargs["after_embed_titles"] = []
+                kwargs["after_embed_descriptions"] = []
+                kwargs["after_embed_urls"] = []
+
+                for i, embed in enumerate(after_embeds):
+                    kwargs[f"after_embed_title_{i}"] = getattr(embed, "title", "") or ""
+                    kwargs[f"after_embed_description_{i}"] = (
+                        getattr(embed, "description", "") or ""
+                    )
+                    kwargs[f"after_embed_url_{i}"] = getattr(embed, "url", "") or ""
+                    kwargs[f"after_embed_color_{i}"] = (
+                        str(embed.color) if getattr(embed, "color", None) else ""
+                    )
+                    kwargs[f"after_embed_image_{i}"] = (
+                        embed.image.url if getattr(embed, "image", None) else ""
+                    )
+                    kwargs[f"after_embed_thumbnail_{i}"] = (
+                        embed.thumbnail.url if getattr(embed, "thumbnail", None) else ""
+                    )
+
+                    if getattr(embed, "title", None):
+                        kwargs["after_embed_titles"].append(embed.title)
+                    if getattr(embed, "description", None):
+                        kwargs["after_embed_descriptions"].append(embed.description)
+                    if getattr(embed, "url", None):
+                        kwargs["after_embed_urls"].append(embed.url)
+
+                if after_embeds:
+                    embed = after_embeds[0]
+                    kwargs["after_embed_title"] = getattr(embed, "title", "") or ""
+                    kwargs["after_embed_description"] = (
+                        getattr(embed, "description", "") or ""
+                    )
+                    kwargs["after_embed_url"] = getattr(embed, "url", "") or ""
+                    kwargs["after_embed_color"] = (
+                        str(embed.color) if getattr(embed, "color", None) else ""
+                    )
+                    kwargs["after_embed_image"] = (
+                        embed.image.url if getattr(embed, "image", None) else ""
+                    )
+                    kwargs["after_embed_thumbnail"] = (
+                        embed.thumbnail.url if getattr(embed, "thumbnail", None) else ""
+                    )
+
+                kwargs["after_attachment_filenames"] = []
+                kwargs["after_attachment_urls"] = []
+                kwargs["after_attachment_proxy_urls"] = []
+
+                for i, att in enumerate(after_attachments):
+                    kwargs[f"after_attachment_filename_{i}"] = getattr(
+                        att, "filename", ""
+                    )
+                    kwargs[f"after_attachment_url_{i}"] = getattr(att, "url", "")
+                    kwargs[f"after_attachment_proxy_url_{i}"] = getattr(
+                        att, "proxy_url", ""
+                    )
+                    kwargs[f"after_attachment_size_{i}"] = str(
+                        getattr(att, "size", "0")
+                    )
+                    kwargs[f"after_attachment_content_type_{i}"] = (
+                        getattr(att, "content_type", "") or ""
+                    )
+
+                    if getattr(att, "filename", None):
+                        kwargs["after_attachment_filenames"].append(att.filename)
+                    if getattr(att, "url", None):
+                        kwargs["after_attachment_urls"].append(att.url)
+                    if getattr(att, "proxy_url", None):
+                        kwargs["after_attachment_proxy_urls"].append(att.proxy_url)
+
+                if after_attachments:
+                    att = after_attachments[0]
+                    kwargs["after_attachment_filename"] = getattr(att, "filename", "")
+                    kwargs["after_attachment_url"] = getattr(att, "url", "")
+                    kwargs["after_attachment_proxy_url"] = getattr(att, "proxy_url", "")
+                    kwargs["after_attachment_size"] = str(getattr(att, "size", "0"))
+                    kwargs["after_attachment_content_type"] = (
+                        getattr(att, "content_type", "") or ""
+                    )
+
+            kwargs["event_type"] = ctx_data.get("event", "")
+
+            text, embeds, view, files = await tags.formatter.format(
+                template, fake_ctx, **kwargs
+            )
+            text = text.strip() if text else ""
+            return text, embeds, view, files
+        except Exception as e:
+            return f"[TagScript Error: {e}]", [], None, []
+
     async def get_filters_for_context(
         self, guild_id: int, channel_id: int, user_id: int, role_ids: List[int]
     ) -> List[dict]:
@@ -62,7 +404,7 @@ class Moderation(commands.Cog):
 
         slowmode = await self.db.fetchrow(
             """
-            SELECT * FROM manual_slowmodes
+            SELECT slowmode_id, delay_seconds, custom_message FROM manual_slowmodes
             WHERE guild_id = $1 AND enabled = TRUE AND (
                 (user_id = $3) OR
                 (role_id = ANY($4::bigint[])) OR
@@ -221,6 +563,7 @@ class Moderation(commands.Cog):
         event_type="The type of events to log.",
         include_channels="Channels to include. (comma-separated, leave empty for all.)",
         exclude_channels="Channels to exclude. (comma-separated.)",
+        template="Custom TagScript template. (replaces default layout.)",
     )
     @commands.has_permissions(manage_guild=True)
     async def logger_add(
@@ -240,6 +583,7 @@ class Moderation(commands.Cog):
         ],
         include_channels: Optional[str] = None,
         exclude_channels: Optional[str] = None,
+        template: Optional[str] = None,
     ):
         await ctx.typing()
 
@@ -307,9 +651,9 @@ class Moderation(commands.Cog):
                 """
                 INSERT INTO logging_rules (
                     guild_id, log_channel_id, event_category,
-                    include_channel_ids, exclude_channel_ids, added_by, created_at
+                    include_channel_ids, exclude_channel_ids, added_by, created_at, template
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, NOW())
+                VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7)
                 """,
                 [
                     (
@@ -319,6 +663,7 @@ class Moderation(commands.Cog):
                         include_channels_ids if include_channels_ids else None,
                         exclude_channels_ids if exclude_channels_ids else None,
                         ctx.author.id,
+                        template,
                     )
                     for category in to_insert
                 ],
@@ -333,6 +678,8 @@ class Moderation(commands.Cog):
                 response += f"\n**Included channels:** {', '.join([f'<#{id}>' for id in include_channels_ids])}"
             if exclude_channels_ids:
                 response += f"\n**Excluded channels:** {', '.join([f'<#{id}>' for id in exclude_channels_ids])}"
+            if template:
+                response += f"\n**Custom template:** {template[:100]}"
 
             await ctx.send(response)
         except Exception as e:
@@ -467,6 +814,8 @@ class Moderation(commands.Cog):
                             [f"<#{id}>" for id in rule["exclude_channel_ids"]]
                         )
                         settings.append(f"Excluded: {excluded}")
+                    if rule.get("template"):
+                        settings.append("Custom template")
 
                     creator = ctx.guild.get_member(rule["added_by"])
                     creator_name = (
@@ -582,6 +931,78 @@ class Moderation(commands.Cog):
                 await asyncio.sleep(delay)
         return None, None
 
+    async def _send_log(
+        self,
+        rules: List[dict],
+        event_category: str,
+        ctx_data: dict,
+        default_view_builder: callable = None,
+        default_container_builder: callable = None,
+    ):
+        already_sent: set[int] = set()
+
+        for rule in rules:
+            log_channel_id = rule["log_channel_id"]
+            if log_channel_id in already_sent:
+                continue
+
+            channel = ctx_data.get("channel")
+            if (
+                channel
+                and rule.get("exclude_channel_ids")
+                and channel.id in rule["exclude_channel_ids"]
+            ):
+                continue
+            if (
+                channel
+                and rule.get("include_channel_ids")
+                and channel.id not in rule["include_channel_ids"]
+            ):
+                continue
+
+            log_channel = self.bot.get_channel(log_channel_id)
+            if not log_channel or not isinstance(log_channel, discord.TextChannel):
+                continue
+
+            if not log_channel.permissions_for(log_channel.guild.me).send_messages:
+                continue
+
+            try:
+                if rule.get("template"):
+                    text, embeds, view, files = await self._evaluate_tagscript(
+                        rule["template"], ctx_data
+                    )
+                    if text.startswith("[TagScript Error:"):
+                        await log_channel.send(text[:2000])
+                        already_sent.add(log_channel_id)
+                        continue
+                    kwargs = {}
+                    if text:
+                        kwargs["content"] = text[:2000]
+                    if embeds:
+                        kwargs["embeds"] = embeds[:10]
+                    if view:
+                        kwargs["view"] = view
+                    if files:
+                        kwargs["files"] = files[:10]
+                    if not kwargs:
+                        await log_channel.send("Log template produced no output.")
+                    else:
+                        await log_channel.send(**kwargs)
+                elif default_view_builder:
+                    view = await default_view_builder()
+                    await log_channel.send(view=view)
+                elif default_container_builder:
+                    container = await default_container_builder()
+                    view = LogView(container)
+                    await log_channel.send(view=view)
+                else:
+                    await log_channel.send(f"Log event: {event_category}")
+
+                already_sent.add(log_channel_id)
+            except discord.HTTPException as e:
+                await log_channel.send(f"Log failed to send: {str(e)}")
+
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message):
         if not message.guild or message.author.bot:
@@ -593,52 +1014,91 @@ class Moderation(commands.Cog):
         author = message.author
         ts = discord.utils.utcnow()
 
-        meta = (
-            f"**Author:** {author.mention} (`{author}` - ID: `{author.id}`)\n"
-            f"**Channel:** {message.channel.mention} - **Message ID:** `{message.id}`"
-        )
-        if moderator and moderator.id != author.id:
-            meta += f"\n**Deleted by:** {moderator.mention} (`{moderator}`)"
-            if reason:
-                meta += f"\n**Reason:** {reason[:500]}"
+        async def build_default_view():
+            meta = (
+                f"**Author:** {author.mention} (`{author}` - ID: `{author.id}`)\n"
+                f"**Channel:** {message.channel.mention} - **Message ID:** `{message.id}`"
+            )
+            if moderator and moderator.id != author.id:
+                meta += f"\n**Deleted by:** {moderator.mention} (`{moderator}`)"
+                if reason:
+                    meta += f"\n**Reason:** {reason[:500]}"
 
-        components = [
-            discord.ui.TextDisplay(content="## Message Deleted"),
-            discord.ui.Section(
-                discord.ui.TextDisplay(content=meta),
-                accessory=discord.ui.Thumbnail(
-                    media=discord.UnfurledMediaItem(url=author.display_avatar.url)
+            components = [
+                discord.ui.TextDisplay(content="## Message Deleted"),
+                discord.ui.Section(
+                    discord.ui.TextDisplay(content=meta),
+                    accessory=discord.ui.Thumbnail(
+                        media=discord.UnfurledMediaItem(url=author.display_avatar.url)
+                    ),
                 ),
-            ),
-            discord.ui.Separator(),
-        ]
+                discord.ui.Separator(),
+            ]
 
-        if message.message_snapshots:
-            snapshot = message.message_snapshots[0]
-            snap_components = []
+            if message.message_snapshots:
+                snapshot = message.message_snapshots[0]
+                snap_components = []
 
-            if snapshot.content:
-                snap_content = snapshot.content[:1900] + (
-                    "..." if len(snapshot.content) > 1900 else ""
-                )
-                snap_components.append(
-                    discord.ui.TextDisplay(
-                        content=f"**Forwarded Content**\n>>> {snap_content}"
+                if snapshot.content:
+                    snap_content = snapshot.content[:1900] + (
+                        "..." if len(snapshot.content) > 1900 else ""
                     )
+                    snap_components.append(
+                        discord.ui.TextDisplay(
+                            content=f"**Forwarded Content**\n>>> {snap_content}"
+                        )
+                    )
+
+                if snapshot.attachments:
+                    snap_components.extend(
+                        self._attachment_components(
+                            snapshot.attachments, label_prefix="Forwarded Attachment"
+                        )
+                    )
+
+                if snapshot.embeds:
+                    rich = [e for e in snapshot.embeds if e.type == "rich"]
+                    if rich:
+                        e0 = rich[0]
+                        parts = [
+                            f"**Forwarded Embed(s):** {len(snapshot.embeds)} total"
+                        ]
+                        if e0.title:
+                            parts.append(f"**Title:** {e0.title[:100]}")
+                        if e0.description:
+                            parts.append(
+                                f"**Description:** {e0.description[:100]}{'...' if len(e0.description) > 100 else ''}"
+                            )
+                        if e0.url:
+                            parts.append(f"**URL:** [Link]({e0.url})")
+
+                        snap_components.append(
+                            discord.ui.TextDisplay(content="\n".join(parts))
+                        )
+
+                if snap_components:
+                    components.extend(snap_components)
+
+            if message.content:
+                content = message.content[:1900] + (
+                    "..." if len(message.content) > 1900 else ""
+                )
+                components.append(
+                    discord.ui.TextDisplay(content=f"**Content**\n>>> {content}")
                 )
 
-            if snapshot.attachments:
-                snap_components.extend(
+            if message.attachments:
+                components.extend(
                     self._attachment_components(
-                        snapshot.attachments, label_prefix="Forwarded Attachment"
+                        message.attachments, label_prefix="Attachment"
                     )
                 )
 
-            if snapshot.embeds:
-                rich = [e for e in snapshot.embeds if e.type == "rich"]
+            if message.embeds:
+                rich = [e for e in message.embeds if e.type == "rich"]
                 if rich:
                     e0 = rich[0]
-                    parts = [f"**Forwarded Embed(s):** {len(snapshot.embeds)} total"]
+                    parts = [f"**Embed(s):** {len(message.embeds)} total"]
                     if e0.title:
                         parts.append(f"**Title:** {e0.title[:100]}")
                     if e0.description:
@@ -647,53 +1107,17 @@ class Moderation(commands.Cog):
                         )
                     if e0.url:
                         parts.append(f"**URL:** [Link]({e0.url})")
+                    components.append(discord.ui.TextDisplay(content="\n".join(parts)))
 
-                    snap_components.append(
-                        discord.ui.TextDisplay(content="\n".join(parts))
-                    )
-
-            if snap_components:
-                components.extend(snap_components)
-
-        if message.content:
-            content = message.content[:1900] + (
-                "..." if len(message.content) > 1900 else ""
-            )
             components.append(
-                discord.ui.TextDisplay(content=f"**Content**\n>>> {content}")
+                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>")
             )
 
-        if message.attachments:
-            components.extend(
-                self._attachment_components(
-                    message.attachments, label_prefix="Attachment"
-                )
+            container = discord.ui.Container(
+                *components,
+                accent_color=discord.Color.red(),
             )
-
-        if message.embeds:
-            rich = [e for e in message.embeds if e.type == "rich"]
-            if rich:
-                e0 = rich[0]
-                parts = [f"**Embed(s):** {len(message.embeds)} total"]
-                if e0.title:
-                    parts.append(f"**Title:** {e0.title[:100]}")
-                if e0.description:
-                    parts.append(
-                        f"**Description:** {e0.description[:100]}{'...' if len(e0.description) > 100 else ''}"
-                    )
-                if e0.url:
-                    parts.append(f"**URL:** [Link]({e0.url})")
-                components.append(discord.ui.TextDisplay(content="\n".join(parts)))
-
-        components.append(
-            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>")
-        )
-
-        container = discord.ui.Container(
-            *components,
-            accent_color=discord.Color.red(),
-        )
-        view = LogView(container)
+            return LogView(container)
 
         try:
             rules = await self.db.fetch(
@@ -702,32 +1126,22 @@ class Moderation(commands.Cog):
                 "message",
             )
 
-            already_sent: set[int] = set()
+            ctx_data = {
+                "author": message.author,
+                "guild": message.guild,
+                "channel": message.channel,
+                "message": message,
+                "moderator": moderator,
+                "reason": reason,
+                "deleted_at": ts,
+                "message_id": message.id,
+                "jump_url": message.jump_url,
+                "event": "message_delete",
+            }
 
-            for rule in rules:
-                if (
-                    rule["exclude_channel_ids"]
-                    and message.channel.id in rule["exclude_channel_ids"]
-                ):
-                    continue
-                if (
-                    rule["include_channel_ids"]
-                    and message.channel.id not in rule["include_channel_ids"]
-                ):
-                    continue
-
-                log_channel_id = rule["log_channel_id"]
-                if log_channel_id in already_sent:
-                    continue
-
-                log_channel = self.bot.get_channel(log_channel_id)
-                if log_channel and isinstance(log_channel, discord.TextChannel):
-                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
-                        try:
-                            await log_channel.send(view=view)
-                            already_sent.add(log_channel_id)
-                        except discord.HTTPException:
-                            pass
+            await self._send_log(
+                rules, "message", ctx_data, default_view_builder=build_default_view
+            )
         except Exception:
             pass
 
@@ -747,89 +1161,90 @@ class Moderation(commands.Cog):
         author = before.author
         ts = discord.utils.utcnow()
 
-        meta = (
-            f"**Author:** {author.mention} (`{author}` - ID: `{author.id}`)\n"
-            f"**Channel:** {before.channel.mention} - **Message ID:** `{before.id}` - [Jump]({after.jump_url})"
-        )
+        async def build_default_view():
+            meta = (
+                f"**Author:** {author.mention} (`{author}` - ID: `{author.id}`)\n"
+                f"**Channel:** {before.channel.mention} - **Message ID:** `{before.id}` - [Jump]({after.jump_url})"
+            )
 
-        components = [
-            discord.ui.TextDisplay(content="## Message Edited"),
-            discord.ui.Section(
-                discord.ui.TextDisplay(content=meta),
-                accessory=discord.ui.Thumbnail(
-                    media=discord.UnfurledMediaItem(url=author.display_avatar.url)
+            components = [
+                discord.ui.TextDisplay(content="## Message Edited"),
+                discord.ui.Section(
+                    discord.ui.TextDisplay(content=meta),
+                    accessory=discord.ui.Thumbnail(
+                        media=discord.UnfurledMediaItem(url=author.display_avatar.url)
+                    ),
                 ),
-            ),
-            discord.ui.Separator(),
-        ]
+                discord.ui.Separator(),
+            ]
 
-        if before.content != after.content:
-            before_content = before.content[:900] + (
-                "..." if len(before.content) > 900 else ""
-            )
-            after_content = after.content[:900] + (
-                "..." if len(after.content) > 900 else ""
-            )
-            components.append(
-                discord.ui.TextDisplay(
-                    content=f"**Before**\n>>> {before_content or '*No content*'}"
+            if before.content != after.content:
+                before_content = before.content[:900] + (
+                    "..." if len(before.content) > 900 else ""
                 )
-            )
-            components.append(
-                discord.ui.TextDisplay(
-                    content=f"**After**\n>>> {after_content or '*No content*'}"
+                after_content = after.content[:900] + (
+                    "..." if len(after.content) > 900 else ""
                 )
-            )
-
-        if before.attachments != after.attachments:
-            added = [a for a in after.attachments if a not in before.attachments]
-            removed = [a for a in before.attachments if a not in after.attachments]
-            if removed:
                 components.append(
                     discord.ui.TextDisplay(
-                        content=f"**Attachments Removed** ({len(removed)})"
+                        content=f"**Before**\n>>> {before_content or '*No content*'}"
                     )
                 )
-                components.extend(self._attachment_components(removed))
-            if added:
                 components.append(
                     discord.ui.TextDisplay(
-                        content=f"**Attachments Added** ({len(added)})"
+                        content=f"**After**\n>>> {after_content or '*No content*'}"
                     )
                 )
-                components.extend(self._attachment_components(added))
 
-        if before.embeds != after.embeds:
-            added_embeds = [e for e in after.embeds if e not in before.embeds]
-            removed_embeds = [e for e in before.embeds if e not in after.embeds]
-            for label, embed_list in (
-                ("Embeds Added", added_embeds),
-                ("Embeds Removed", removed_embeds),
-            ):
-                if not embed_list:
-                    continue
-                parts = [f"**{label}:** {len(embed_list)} embed(s)"]
-                for i, e in enumerate(embed_list[:3]):
-                    if e.type == "rich":
-                        line = f"Embed {i + 1}:"
-                        if e.title:
-                            line += f" {e.title[:60]}"
-                        if e.url:
-                            line += f" - [Link]({e.url})"
-                        parts.append(line)
-                if len(embed_list) > 3:
-                    parts.append(f"...and {len(embed_list) - 3} more")
-                components.append(discord.ui.TextDisplay(content="\n".join(parts)))
+            if before.attachments != after.attachments:
+                added = [a for a in after.attachments if a not in before.attachments]
+                removed = [a for a in before.attachments if a not in after.attachments]
+                if removed:
+                    components.append(
+                        discord.ui.TextDisplay(
+                            content=f"**Attachments Removed** ({len(removed)})"
+                        )
+                    )
+                    components.extend(self._attachment_components(removed))
+                if added:
+                    components.append(
+                        discord.ui.TextDisplay(
+                            content=f"**Attachments Added** ({len(added)})"
+                        )
+                    )
+                    components.extend(self._attachment_components(added))
 
-        components.append(
-            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>")
-        )
+            if before.embeds != after.embeds:
+                added_embeds = [e for e in after.embeds if e not in before.embeds]
+                removed_embeds = [e for e in before.embeds if e not in after.embeds]
+                for label, embed_list in (
+                    ("Embeds Added", added_embeds),
+                    ("Embeds Removed", removed_embeds),
+                ):
+                    if not embed_list:
+                        continue
+                    parts = [f"**{label}:** {len(embed_list)} embed(s)"]
+                    for i, e in enumerate(embed_list[:3]):
+                        if e.type == "rich":
+                            line = f"Embed {i + 1}:"
+                            if e.title:
+                                line += f" {e.title[:60]}"
+                            if e.url:
+                                line += f" - [Link]({e.url})"
+                            parts.append(line)
+                    if len(embed_list) > 3:
+                        parts.append(f"...and {len(embed_list) - 3} more")
+                    components.append(discord.ui.TextDisplay(content="\n".join(parts)))
 
-        container = discord.ui.Container(
-            *components,
-            accent_color=discord.Color.orange(),
-        )
-        view = LogView(container)
+            components.append(
+                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>")
+            )
+
+            container = discord.ui.Container(
+                *components,
+                accent_color=discord.Color.orange(),
+            )
+            return LogView(container)
 
         try:
             rules = await self.db.fetch(
@@ -838,32 +1253,21 @@ class Moderation(commands.Cog):
                 "message",
             )
 
-            already_sent: set[int] = set()
+            ctx_data = {
+                "author": before.author,
+                "guild": before.guild,
+                "channel": before.channel,
+                "before_message": before,
+                "after_message": after,
+                "edited_at": ts,
+                "message_id": before.id,
+                "jump_url": after.jump_url,
+                "event": "message_edit",
+            }
 
-            for rule in rules:
-                if (
-                    rule["exclude_channel_ids"]
-                    and before.channel.id in rule["exclude_channel_ids"]
-                ):
-                    continue
-                if (
-                    rule["include_channel_ids"]
-                    and before.channel.id not in rule["include_channel_ids"]
-                ):
-                    continue
-
-                log_channel_id = rule["log_channel_id"]
-                if log_channel_id in already_sent:
-                    continue
-
-                log_channel = self.bot.get_channel(log_channel_id)
-                if log_channel and isinstance(log_channel, discord.TextChannel):
-                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
-                        try:
-                            await log_channel.send(view=view)
-                            already_sent.add(log_channel_id)
-                        except discord.HTTPException:
-                            pass
+            await self._send_log(
+                rules, "message", ctx_data, default_view_builder=build_default_view
+            )
         except Exception:
             pass
 
@@ -871,27 +1275,27 @@ class Moderation(commands.Cog):
     async def on_member_join(self, member: discord.Member):
         ts = discord.utils.utcnow()
 
-        components = [
-            discord.ui.TextDisplay(content="## Member Joined"),
-            discord.ui.Section(
-                discord.ui.TextDisplay(
-                    content=(
-                        f"**Member:** {member.mention} (`{member}` - ID: `{member.id}`)\n"
-                        f"**Account Created:** <t:{int(member.created_at.timestamp())}:R>"
-                    )
+        async def build_default_view():
+            components = [
+                discord.ui.TextDisplay(content="## Member Joined"),
+                discord.ui.Section(
+                    discord.ui.TextDisplay(
+                        content=(
+                            f"**Member:** {member.mention} (`{member}` - ID: `{member.id}`)\n"
+                            f"**Account Created:** <t:{int(member.created_at.timestamp())}:R>"
+                        )
+                    ),
+                    accessory=discord.ui.Thumbnail(
+                        media=discord.UnfurledMediaItem(url=member.display_avatar.url)
+                    ),
                 ),
-                accessory=discord.ui.Thumbnail(
-                    media=discord.UnfurledMediaItem(url=member.display_avatar.url)
-                ),
-            ),
-            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
-        ]
-
-        container = discord.ui.Container(
-            *components,
-            accent_color=discord.Color.green(),
-        )
-        view = LogView(container)
+                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+            ]
+            container = discord.ui.Container(
+                *components,
+                accent_color=discord.Color.green(),
+            )
+            return LogView(container)
 
         try:
             rules = await self.db.fetch(
@@ -900,21 +1304,17 @@ class Moderation(commands.Cog):
                 "member",
             )
 
-            already_sent: set[int] = set()
+            ctx_data = {
+                "member": member,
+                "guild": member.guild,
+                "joined_at": ts,
+                "account_created": member.created_at,
+                "event": "member_join",
+            }
 
-            for rule in rules:
-                log_channel_id = rule["log_channel_id"]
-                if log_channel_id in already_sent:
-                    continue
-
-                log_channel = self.bot.get_channel(log_channel_id)
-                if log_channel and isinstance(log_channel, discord.TextChannel):
-                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
-                        try:
-                            await log_channel.send(view=view)
-                            already_sent.add(log_channel_id)
-                        except discord.HTTPException:
-                            pass
+            await self._send_log(
+                rules, "member", ctx_data, default_view_builder=build_default_view
+            )
         except Exception:
             pass
 
@@ -931,39 +1331,40 @@ class Moderation(commands.Cog):
         ]
         roles_str = ", ".join(roles) if roles else "No roles"
 
-        detail = (
-            f"**Member:** {member.mention} (`{member}` - ID: `{member.id}`)\n"
-            f"**Joined:** {f'<t:{int(member.joined_at.timestamp())}:R>' if member.joined_at else 'Unknown'}\n"
-            f"**Account Created:** <t:{int(member.created_at.timestamp())}:R>"
-        )
-        if was_kicked:
-            detail += f"\n**Kicked by:** {moderator.mention} (`{moderator}`)"
-            if reason:
-                detail += f"\n**Reason:** {reason[:400]}"
+        async def build_default_view():
+            detail = (
+                f"**Member:** {member.mention} (`{member}` - ID: `{member.id}`)\n"
+                f"**Joined:** {f'<t:{int(member.joined_at.timestamp())}:R>' if member.joined_at else 'Unknown'}\n"
+                f"**Account Created:** <t:{int(member.created_at.timestamp())}:R>"
+            )
+            if was_kicked:
+                detail += f"\n**Kicked by:** {moderator.mention} (`{moderator}`)"
+                if reason:
+                    detail += f"\n**Reason:** {reason[:400]}"
 
-        title = "Member Kicked" if was_kicked else "Member Left"
-        color = discord.Color.red()
+            title = "Member Kicked" if was_kicked else "Member Left"
+            color = discord.Color.red()
 
-        components = [
-            discord.ui.TextDisplay(content=f"## {title}"),
-            discord.ui.Section(
-                discord.ui.TextDisplay(content=detail),
-                accessory=discord.ui.Thumbnail(
-                    media=discord.UnfurledMediaItem(url=member.display_avatar.url)
+            components = [
+                discord.ui.TextDisplay(content=f"## {title}"),
+                discord.ui.Section(
+                    discord.ui.TextDisplay(content=detail),
+                    accessory=discord.ui.Thumbnail(
+                        media=discord.UnfurledMediaItem(url=member.display_avatar.url)
+                    ),
                 ),
-            ),
-            discord.ui.Separator(),
-            discord.ui.TextDisplay(
-                content=f"**Roles:** {roles_str[:800]}{'...' if len(roles_str) > 800 else ''}"
-            ),
-            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
-        ]
+                discord.ui.Separator(),
+                discord.ui.TextDisplay(
+                    content=f"**Roles:** {roles_str[:800]}{'...' if len(roles_str) > 800 else ''}"
+                ),
+                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+            ]
 
-        container = discord.ui.Container(
-            *components,
-            accent_color=color,
-        )
-        view = LogView(container)
+            container = discord.ui.Container(
+                *components,
+                accent_color=color,
+            )
+            return LogView(container)
 
         try:
             rules = await self.db.fetch(
@@ -972,21 +1373,20 @@ class Moderation(commands.Cog):
                 "member",
             )
 
-            already_sent: set[int] = set()
+            ctx_data = {
+                "member": member,
+                "guild": member.guild,
+                "moderator": moderator,
+                "reason": reason,
+                "was_kicked": was_kicked,
+                "left_at": ts,
+                "roles": roles,
+                "event": "member_remove",
+            }
 
-            for rule in rules:
-                log_channel_id = rule["log_channel_id"]
-                if log_channel_id in already_sent:
-                    continue
-
-                log_channel = self.bot.get_channel(log_channel_id)
-                if log_channel and isinstance(log_channel, discord.TextChannel):
-                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
-                        try:
-                            await log_channel.send(view=view)
-                            already_sent.add(log_channel_id)
-                        except discord.HTTPException:
-                            pass
+            await self._send_log(
+                rules, "member", ctx_data, default_view_builder=build_default_view
+            )
         except Exception:
             pass
 
@@ -998,32 +1398,36 @@ class Moderation(commands.Cog):
             moderator, reason = await self.get_moderator_from_audit_log(
                 after.guild, after, discord.AuditLogAction.member_update
             )
-            detail = (
-                f"**Member:** {after.mention} (`{after}` - ID: `{after.id}`)\n"
-                f"**Before:** {before.nick or '*No nickname*'}\n"
-                f"**After:** {after.nick or '*No nickname*'}"
-            )
-            if moderator:
-                detail += f"\n**Changed by:** {moderator.mention} (`{moderator}`)"
-                if reason:
-                    detail += f"\n**Reason:** {reason[:400]}"
 
-            components = [
-                discord.ui.TextDisplay(content="## Member Nickname Changed"),
-                discord.ui.Section(
-                    discord.ui.TextDisplay(content=detail),
-                    accessory=discord.ui.Thumbnail(
-                        media=discord.UnfurledMediaItem(url=after.display_avatar.url)
+            async def build_default_view():
+                detail = (
+                    f"**Member:** {after.mention} (`{after}` - ID: `{after.id}`)\n"
+                    f"**Before:** {before.nick or '*No nickname*'}\n"
+                    f"**After:** {after.nick or '*No nickname*'}"
+                )
+                if moderator:
+                    detail += f"\n**Changed by:** {moderator.mention} (`{moderator}`)"
+                    if reason:
+                        detail += f"\n**Reason:** {reason[:400]}"
+
+                components = [
+                    discord.ui.TextDisplay(content="## Member Nickname Changed"),
+                    discord.ui.Section(
+                        discord.ui.TextDisplay(content=detail),
+                        accessory=discord.ui.Thumbnail(
+                            media=discord.UnfurledMediaItem(
+                                url=after.display_avatar.url
+                            )
+                        ),
                     ),
-                ),
-                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
-            ]
+                    discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+                ]
 
-            container = discord.ui.Container(
-                *components,
-                accent_color=discord.Color.blue(),
-            )
-            view = LogView(container)
+                container = discord.ui.Container(
+                    *components,
+                    accent_color=discord.Color.blue(),
+                )
+                return LogView(container)
 
             try:
                 rules = await self.db.fetch(
@@ -1032,23 +1436,20 @@ class Moderation(commands.Cog):
                     "member",
                 )
 
-                already_sent: set[int] = set()
+                ctx_data = {
+                    "member": after,
+                    "guild": after.guild,
+                    "before_nick": before.nick,
+                    "after_nick": after.nick,
+                    "moderator": moderator,
+                    "reason": reason,
+                    "changed_at": ts,
+                    "event": "member_nickname_change",
+                }
 
-                for rule in rules:
-                    log_channel_id = rule["log_channel_id"]
-                    if log_channel_id in already_sent:
-                        continue
-
-                    log_channel = self.bot.get_channel(log_channel_id)
-                    if log_channel and isinstance(log_channel, discord.TextChannel):
-                        if log_channel.permissions_for(
-                            log_channel.guild.me
-                        ).send_messages:
-                            try:
-                                await log_channel.send(view=view)
-                                already_sent.add(log_channel_id)
-                            except discord.HTTPException:
-                                pass
+                await self._send_log(
+                    rules, "member", ctx_data, default_view_builder=build_default_view
+                )
             except Exception:
                 pass
 
@@ -1056,18 +1457,249 @@ class Moderation(commands.Cog):
             added_roles = [role for role in after.roles if role not in before.roles]
             removed_roles = [role for role in before.roles if role not in after.roles]
             if added_roles or removed_roles:
-                lines = [f"**Member:** {after.mention} (`{after}` - ID: `{after.id}`)"]
-                if added_roles:
-                    lines.append(
-                        f"**Added:** {', '.join(r.mention for r in added_roles)}"
+
+                async def build_default_view():
+                    lines = [
+                        f"**Member:** {after.mention} (`{after}` - ID: `{after.id}`)"
+                    ]
+                    if added_roles:
+                        lines.append(
+                            f"**Added:** {', '.join(r.mention for r in added_roles)}"
+                        )
+                    if removed_roles:
+                        lines.append(
+                            f"**Removed:** {', '.join(r.mention for r in removed_roles)}"
+                        )
+
+                    components = [
+                        discord.ui.TextDisplay(content="## Member Roles Updated"),
+                        discord.ui.Section(
+                            discord.ui.TextDisplay(content="\n".join(lines)),
+                            accessory=discord.ui.Thumbnail(
+                                media=discord.UnfurledMediaItem(
+                                    url=after.display_avatar.url
+                                )
+                            ),
+                        ),
+                        discord.ui.TextDisplay(
+                            content=f"-# <t:{int(ts.timestamp())}:f>"
+                        ),
+                    ]
+
+                    container = discord.ui.Container(
+                        *components,
+                        accent_color=discord.Color.blue(),
                     )
-                if removed_roles:
-                    lines.append(
-                        f"**Removed:** {', '.join(r.mention for r in removed_roles)}"
+                    return LogView(container)
+
+                try:
+                    rules = await self.db.fetch(
+                        "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                        after.guild.id,
+                        "member",
+                    )
+
+                    ctx_data = {
+                        "member": after,
+                        "guild": after.guild,
+                        "added_roles": added_roles,
+                        "removed_roles": removed_roles,
+                        "updated_at": ts,
+                        "event": "member_roles_update",
+                    }
+
+                    await self._send_log(
+                        rules,
+                        "member",
+                        ctx_data,
+                        default_view_builder=build_default_view,
+                    )
+                except Exception:
+                    pass
+
+        if before.guild_avatar != after.guild_avatar:
+
+            async def build_default_view():
+                inner = [
+                    discord.ui.TextDisplay(
+                        content=f"**Member:** {after.mention} (`{after}` - ID: `{after.id}`)"
+                    )
+                ]
+                if before.guild_avatar:
+                    inner.append(
+                        discord.ui.TextDisplay(
+                            content=f"**Before:** [Link]({before.guild_avatar.url})"
+                        )
+                    )
+                if after.guild_avatar:
+                    inner.append(
+                        discord.ui.TextDisplay(
+                            content=f"**After:** [Link]({after.guild_avatar.url})"
+                        )
                     )
 
                 components = [
-                    discord.ui.TextDisplay(content="## Member Roles Updated"),
+                    discord.ui.TextDisplay(content="## Member Server Avatar Changed"),
+                    discord.ui.Section(
+                        *inner,
+                        accessory=discord.ui.Thumbnail(
+                            media=discord.UnfurledMediaItem(
+                                url=after.guild_avatar.url
+                                if after.guild_avatar
+                                else after.display_avatar.url
+                            )
+                        ),
+                    ),
+                    discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+                ]
+
+                container = discord.ui.Container(
+                    *components,
+                    accent_color=discord.Color.purple(),
+                )
+                return LogView(container)
+
+            try:
+                rules = await self.db.fetch(
+                    "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                    after.guild.id,
+                    "member",
+                )
+
+                ctx_data = {
+                    "member": after,
+                    "guild": after.guild,
+                    "before_avatar": before.guild_avatar,
+                    "after_avatar": after.guild_avatar,
+                    "updated_at": ts,
+                    "event": "member_avatar_change",
+                }
+
+                await self._send_log(
+                    rules, "member", ctx_data, default_view_builder=build_default_view
+                )
+            except Exception:
+                pass
+
+        if before.premium_since is None and after.premium_since is not None:
+
+            async def build_default_view():
+                components = [
+                    discord.ui.TextDisplay(content="## Member Started Boosting"),
+                    discord.ui.Section(
+                        discord.ui.TextDisplay(
+                            content=f"**Member:** {after.mention} (`{after}` - ID: `{after.id}`)"
+                        ),
+                        accessory=discord.ui.Thumbnail(
+                            media=discord.UnfurledMediaItem(
+                                url=after.display_avatar.url
+                            )
+                        ),
+                    ),
+                    discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+                ]
+
+                container = discord.ui.Container(
+                    *components,
+                    accent_color=discord.Color.gold(),
+                )
+                return LogView(container)
+
+            try:
+                rules = await self.db.fetch(
+                    "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                    after.guild.id,
+                    "member",
+                )
+
+                ctx_data = {
+                    "member": after,
+                    "guild": after.guild,
+                    "boosted_at": ts,
+                    "event": "member_boost_start",
+                }
+
+                await self._send_log(
+                    rules, "member", ctx_data, default_view_builder=build_default_view
+                )
+            except Exception:
+                pass
+
+        elif before.premium_since is not None and after.premium_since is None:
+
+            async def build_default_view():
+                components = [
+                    discord.ui.TextDisplay(content="## Member Stopped Boosting"),
+                    discord.ui.Section(
+                        discord.ui.TextDisplay(
+                            content=f"**Member:** {after.mention} (`{after}` - ID: `{after.id}`)"
+                        ),
+                        accessory=discord.ui.Thumbnail(
+                            media=discord.UnfurledMediaItem(
+                                url=after.display_avatar.url
+                            )
+                        ),
+                    ),
+                    discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+                ]
+
+                container = discord.ui.Container(
+                    *components,
+                    accent_color=discord.Color.orange(),
+                )
+                return LogView(container)
+
+            try:
+                rules = await self.db.fetch(
+                    "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
+                    after.guild.id,
+                    "member",
+                )
+
+                ctx_data = {
+                    "member": after,
+                    "guild": after.guild,
+                    "stopped_at": ts,
+                    "event": "member_boost_stop",
+                }
+
+                await self._send_log(
+                    rules, "member", ctx_data, default_view_builder=build_default_view
+                )
+            except Exception:
+                pass
+
+    @commands.Cog.listener()
+    async def on_user_update(self, before: discord.User, after: discord.User):
+        if not (
+            before.name != after.name
+            or before.discriminator != after.discriminator
+            or before.avatar != after.avatar
+        ):
+            return
+        ts = discord.utils.utcnow()
+
+        for guild in self.bot.guilds:
+            if not guild.get_member(after.id):
+                continue
+
+            async def build_default_view():
+                lines = [f"**User:** {after.mention} (`{after}` - ID: `{after.id}`)"]
+                if (
+                    before.name != after.name
+                    or before.discriminator != after.discriminator
+                ):
+                    lines.append(f"**Before:** `{before.name}#{before.discriminator}`")
+                    lines.append(f"**After:** `{after.name}#{after.discriminator}`")
+                if before.avatar != after.avatar:
+                    if before.avatar:
+                        lines.append(
+                            f"**Previous Avatar:** [Link]({before.display_avatar.url})"
+                        )
+                    lines.append(f"**New Avatar:** [Link]({after.display_avatar.url})")
+
+                components = [
+                    discord.ui.TextDisplay(content="## User Profile Updated"),
                     discord.ui.Section(
                         discord.ui.TextDisplay(content="\n".join(lines)),
                         accessory=discord.ui.Thumbnail(
@@ -1083,236 +1715,7 @@ class Moderation(commands.Cog):
                     *components,
                     accent_color=discord.Color.blue(),
                 )
-                view = LogView(container)
-
-                try:
-                    rules = await self.db.fetch(
-                        "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
-                        after.guild.id,
-                        "member",
-                    )
-
-                    already_sent: set[int] = set()
-
-                    for rule in rules:
-                        log_channel_id = rule["log_channel_id"]
-                        if log_channel_id in already_sent:
-                            continue
-
-                        log_channel = self.bot.get_channel(log_channel_id)
-                        if log_channel and isinstance(log_channel, discord.TextChannel):
-                            if log_channel.permissions_for(
-                                log_channel.guild.me
-                            ).send_messages:
-                                try:
-                                    await log_channel.send(view=view)
-                                    already_sent.add(log_channel_id)
-                                except discord.HTTPException:
-                                    pass
-                except Exception:
-                    pass
-
-        if before.guild_avatar != after.guild_avatar:
-            inner = [
-                discord.ui.TextDisplay(
-                    content=f"**Member:** {after.mention} (`{after}` - ID: `{after.id}`)"
-                )
-            ]
-            if before.guild_avatar:
-                inner.append(
-                    discord.ui.TextDisplay(
-                        content=f"**Before:** [Link]({before.guild_avatar.url})"
-                    )
-                )
-            if after.guild_avatar:
-                inner.append(
-                    discord.ui.TextDisplay(
-                        content=f"**After:** [Link]({after.guild_avatar.url})"
-                    )
-                )
-
-            components = [
-                discord.ui.TextDisplay(content="## Member Server Avatar Changed"),
-                discord.ui.Section(
-                    *inner,
-                    accessory=discord.ui.Thumbnail(
-                        media=discord.UnfurledMediaItem(
-                            url=after.guild_avatar.url
-                            if after.guild_avatar
-                            else after.display_avatar.url
-                        )
-                    ),
-                ),
-                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
-            ]
-
-            container = discord.ui.Container(
-                *components,
-                accent_color=discord.Color.purple(),
-            )
-            view = LogView(container)
-
-            try:
-                rules = await self.db.fetch(
-                    "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
-                    after.guild.id,
-                    "member",
-                )
-
-                already_sent: set[int] = set()
-
-                for rule in rules:
-                    log_channel_id = rule["log_channel_id"]
-                    if log_channel_id in already_sent:
-                        continue
-
-                    log_channel = self.bot.get_channel(log_channel_id)
-                    if log_channel and isinstance(log_channel, discord.TextChannel):
-                        if log_channel.permissions_for(
-                            log_channel.guild.me
-                        ).send_messages:
-                            try:
-                                await log_channel.send(view=view)
-                                already_sent.add(log_channel_id)
-                            except discord.HTTPException:
-                                pass
-            except Exception:
-                pass
-
-        if before.premium_since is None and after.premium_since is not None:
-            components = [
-                discord.ui.TextDisplay(content="## Member Started Boosting"),
-                discord.ui.Section(
-                    discord.ui.TextDisplay(
-                        content=f"**Member:** {after.mention} (`{after}` - ID: `{after.id}`)"
-                    ),
-                    accessory=discord.ui.Thumbnail(
-                        media=discord.UnfurledMediaItem(url=after.display_avatar.url)
-                    ),
-                ),
-                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
-            ]
-
-            container = discord.ui.Container(
-                *components,
-                accent_color=discord.Color.gold(),
-            )
-            view = LogView(container)
-
-            try:
-                rules = await self.db.fetch(
-                    "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
-                    after.guild.id,
-                    "member",
-                )
-
-                already_sent: set[int] = set()
-
-                for rule in rules:
-                    log_channel_id = rule["log_channel_id"]
-                    if log_channel_id in already_sent:
-                        continue
-
-                    log_channel = self.bot.get_channel(log_channel_id)
-                    if log_channel and isinstance(log_channel, discord.TextChannel):
-                        if log_channel.permissions_for(
-                            log_channel.guild.me
-                        ).send_messages:
-                            try:
-                                await log_channel.send(view=view)
-                                already_sent.add(log_channel_id)
-                            except discord.HTTPException:
-                                pass
-            except Exception:
-                pass
-
-        elif before.premium_since is not None and after.premium_since is None:
-            components = [
-                discord.ui.TextDisplay(content="## Member Stopped Boosting"),
-                discord.ui.Section(
-                    discord.ui.TextDisplay(
-                        content=f"**Member:** {after.mention} (`{after}` - ID: `{after.id}`)"
-                    ),
-                    accessory=discord.ui.Thumbnail(
-                        media=discord.UnfurledMediaItem(url=after.display_avatar.url)
-                    ),
-                ),
-                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
-            ]
-
-            container = discord.ui.Container(
-                *components,
-                accent_color=discord.Color.orange(),
-            )
-            view = LogView(container)
-
-            try:
-                rules = await self.db.fetch(
-                    "SELECT * FROM logging_rules WHERE guild_id = $1 AND event_category = $2",
-                    after.guild.id,
-                    "member",
-                )
-
-                already_sent: set[int] = set()
-
-                for rule in rules:
-                    log_channel_id = rule["log_channel_id"]
-                    if log_channel_id in already_sent:
-                        continue
-
-                    log_channel = self.bot.get_channel(log_channel_id)
-                    if log_channel and isinstance(log_channel, discord.TextChannel):
-                        if log_channel.permissions_for(
-                            log_channel.guild.me
-                        ).send_messages:
-                            try:
-                                await log_channel.send(view=view)
-                                already_sent.add(log_channel_id)
-                            except discord.HTTPException:
-                                pass
-            except Exception:
-                pass
-
-    @commands.Cog.listener()
-    async def on_user_update(self, before: discord.User, after: discord.User):
-        if not (
-            before.name != after.name
-            or before.discriminator != after.discriminator
-            or before.avatar != after.avatar
-        ):
-            return
-        ts = discord.utils.utcnow()
-        for guild in self.bot.guilds:
-            if not guild.get_member(after.id):
-                continue
-
-            lines = [f"**User:** {after.mention} (`{after}` - ID: `{after.id}`)"]
-            if before.name != after.name or before.discriminator != after.discriminator:
-                lines.append(f"**Before:** `{before.name}#{before.discriminator}`")
-                lines.append(f"**After:** `{after.name}#{after.discriminator}`")
-            if before.avatar != after.avatar:
-                if before.avatar:
-                    lines.append(
-                        f"**Previous Avatar:** [Link]({before.display_avatar.url})"
-                    )
-                lines.append(f"**New Avatar:** [Link]({after.display_avatar.url})")
-
-            components = [
-                discord.ui.TextDisplay(content="## User Profile Updated"),
-                discord.ui.Section(
-                    discord.ui.TextDisplay(content="\n".join(lines)),
-                    accessory=discord.ui.Thumbnail(
-                        media=discord.UnfurledMediaItem(url=after.display_avatar.url)
-                    ),
-                ),
-                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
-            ]
-
-            container = discord.ui.Container(
-                *components,
-                accent_color=discord.Color.blue(),
-            )
-            view = LogView(container)
+                return LogView(container)
 
             try:
                 rules = await self.db.fetch(
@@ -1321,23 +1724,18 @@ class Moderation(commands.Cog):
                     "user",
                 )
 
-                already_sent: set[int] = set()
+                ctx_data = {
+                    "user": after,
+                    "guild": guild,
+                    "before_user": before,
+                    "after_user": after,
+                    "updated_at": ts,
+                    "event": "user_update",
+                }
 
-                for rule in rules:
-                    log_channel_id = rule["log_channel_id"]
-                    if log_channel_id in already_sent:
-                        continue
-
-                    log_channel = self.bot.get_channel(log_channel_id)
-                    if log_channel and isinstance(log_channel, discord.TextChannel):
-                        if log_channel.permissions_for(
-                            log_channel.guild.me
-                        ).send_messages:
-                            try:
-                                await log_channel.send(view=view)
-                                already_sent.add(log_channel_id)
-                            except discord.HTTPException:
-                                pass
+                await self._send_log(
+                    rules, "user", ctx_data, default_view_builder=build_default_view
+                )
             except Exception:
                 pass
 
@@ -1349,33 +1747,35 @@ class Moderation(commands.Cog):
             guild, user, discord.AuditLogAction.ban
         )
         ts = discord.utils.utcnow()
-        detail = (
-            f"**User:** {user.mention} (`{user}` - ID: `{user.id}`)\n"
-            f"**Account Created:** <t:{int(user.created_at.timestamp())}:R>"
-        )
-        if isinstance(user, discord.Member) and user.joined_at:
-            detail += f"\n**Joined:** <t:{int(user.joined_at.timestamp())}:R>"
-        if moderator:
-            detail += f"\n**Banned by:** {moderator.mention} (`{moderator}`)"
-        if reason:
-            detail += f"\n**Reason:** {reason[:500]}"
 
-        components = [
-            discord.ui.TextDisplay(content="## Member Banned"),
-            discord.ui.Section(
-                discord.ui.TextDisplay(content=detail),
-                accessory=discord.ui.Thumbnail(
-                    media=discord.UnfurledMediaItem(url=user.display_avatar.url)
+        async def build_default_view():
+            detail = (
+                f"**User:** {user.mention} (`{user}` - ID: `{user.id}`)\n"
+                f"**Account Created:** <t:{int(user.created_at.timestamp())}:R>"
+            )
+            if isinstance(user, discord.Member) and user.joined_at:
+                detail += f"\n**Joined:** <t:{int(user.joined_at.timestamp())}:R>"
+            if moderator:
+                detail += f"\n**Banned by:** {moderator.mention} (`{moderator}`)"
+            if reason:
+                detail += f"\n**Reason:** {reason[:500]}"
+
+            components = [
+                discord.ui.TextDisplay(content="## Member Banned"),
+                discord.ui.Section(
+                    discord.ui.TextDisplay(content=detail),
+                    accessory=discord.ui.Thumbnail(
+                        media=discord.UnfurledMediaItem(url=user.display_avatar.url)
+                    ),
                 ),
-            ),
-            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
-        ]
+                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+            ]
 
-        container = discord.ui.Container(
-            *components,
-            accent_color=discord.Color.red(),
-        )
-        view = LogView(container)
+            container = discord.ui.Container(
+                *components,
+                accent_color=discord.Color.red(),
+            )
+            return LogView(container)
 
         try:
             rules = await self.db.fetch(
@@ -1384,21 +1784,18 @@ class Moderation(commands.Cog):
                 "moderation",
             )
 
-            already_sent: set[int] = set()
+            ctx_data = {
+                "user": user,
+                "guild": guild,
+                "moderator": moderator,
+                "reason": reason,
+                "banned_at": ts,
+                "event": "member_ban",
+            }
 
-            for rule in rules:
-                log_channel_id = rule["log_channel_id"]
-                if log_channel_id in already_sent:
-                    continue
-
-                log_channel = self.bot.get_channel(log_channel_id)
-                if log_channel and isinstance(log_channel, discord.TextChannel):
-                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
-                        try:
-                            await log_channel.send(view=view)
-                            already_sent.add(log_channel_id)
-                        except discord.HTTPException:
-                            pass
+            await self._send_log(
+                rules, "moderation", ctx_data, default_view_builder=build_default_view
+            )
         except Exception:
             pass
 
@@ -1408,31 +1805,33 @@ class Moderation(commands.Cog):
             guild, user, discord.AuditLogAction.unban
         )
         ts = discord.utils.utcnow()
-        detail = (
-            f"**User:** {user.mention} (`{user}` - ID: `{user.id}`)\n"
-            f"**Account Created:** <t:{int(user.created_at.timestamp())}:R>"
-        )
-        if moderator:
-            detail += f"\n**Unbanned by:** {moderator.mention} (`{moderator}`)"
-        if reason:
-            detail += f"\n**Reason:** {reason[:500]}"
 
-        components = [
-            discord.ui.TextDisplay(content="## Member Unbanned"),
-            discord.ui.Section(
-                discord.ui.TextDisplay(content=detail),
-                accessory=discord.ui.Thumbnail(
-                    media=discord.UnfurledMediaItem(url=user.display_avatar.url)
+        async def build_default_view():
+            detail = (
+                f"**User:** {user.mention} (`{user}` - ID: `{user.id}`)\n"
+                f"**Account Created:** <t:{int(user.created_at.timestamp())}:R>"
+            )
+            if moderator:
+                detail += f"\n**Unbanned by:** {moderator.mention} (`{moderator}`)"
+            if reason:
+                detail += f"\n**Reason:** {reason[:500]}"
+
+            components = [
+                discord.ui.TextDisplay(content="## Member Unbanned"),
+                discord.ui.Section(
+                    discord.ui.TextDisplay(content=detail),
+                    accessory=discord.ui.Thumbnail(
+                        media=discord.UnfurledMediaItem(url=user.display_avatar.url)
+                    ),
                 ),
-            ),
-            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
-        ]
+                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+            ]
 
-        container = discord.ui.Container(
-            *components,
-            accent_color=discord.Color.green(),
-        )
-        view = LogView(container)
+            container = discord.ui.Container(
+                *components,
+                accent_color=discord.Color.green(),
+            )
+            return LogView(container)
 
         try:
             rules = await self.db.fetch(
@@ -1441,21 +1840,18 @@ class Moderation(commands.Cog):
                 "moderation",
             )
 
-            already_sent: set[int] = set()
+            ctx_data = {
+                "user": user,
+                "guild": guild,
+                "moderator": moderator,
+                "reason": reason,
+                "unbanned_at": ts,
+                "event": "member_unban",
+            }
 
-            for rule in rules:
-                log_channel_id = rule["log_channel_id"]
-                if log_channel_id in already_sent:
-                    continue
-
-                log_channel = self.bot.get_channel(log_channel_id)
-                if log_channel and isinstance(log_channel, discord.TextChannel):
-                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
-                        try:
-                            await log_channel.send(view=view)
-                            already_sent.add(log_channel_id)
-                        except discord.HTTPException:
-                            pass
+            await self._send_log(
+                rules, "moderation", ctx_data, default_view_builder=build_default_view
+            )
         except Exception:
             pass
 
@@ -1465,27 +1861,29 @@ class Moderation(commands.Cog):
             channel.guild, channel, discord.AuditLogAction.channel_create
         )
         ts = discord.utils.utcnow()
-        detail = (
-            f"**Channel:** {channel.mention}\n"
-            f"**Type:** {channel.type.name}\n"
-            f"**ID:** `{channel.id}`"
-        )
-        if moderator:
-            detail += f"\n**Created by:** {moderator.mention} (`{moderator}`)"
-        if reason:
-            detail += f"\n**Reason:** {reason[:400]}"
 
-        components = [
-            discord.ui.TextDisplay(content="## Channel Created"),
-            discord.ui.TextDisplay(content=detail),
-            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
-        ]
+        async def build_default_view():
+            detail = (
+                f"**Channel:** {channel.mention}\n"
+                f"**Type:** {channel.type.name}\n"
+                f"**ID:** `{channel.id}`"
+            )
+            if moderator:
+                detail += f"\n**Created by:** {moderator.mention} (`{moderator}`)"
+            if reason:
+                detail += f"\n**Reason:** {reason[:400]}"
 
-        container = discord.ui.Container(
-            *components,
-            accent_color=discord.Color.green(),
-        )
-        view = LogView(container)
+            components = [
+                discord.ui.TextDisplay(content="## Channel Created"),
+                discord.ui.TextDisplay(content=detail),
+                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+            ]
+
+            container = discord.ui.Container(
+                *components,
+                accent_color=discord.Color.green(),
+            )
+            return LogView(container)
 
         try:
             rules = await self.db.fetch(
@@ -1494,21 +1892,18 @@ class Moderation(commands.Cog):
                 "channel",
             )
 
-            already_sent: set[int] = set()
+            ctx_data = {
+                "channel": channel,
+                "guild": channel.guild,
+                "moderator": moderator,
+                "reason": reason,
+                "created_at": ts,
+                "event": "channel_create",
+            }
 
-            for rule in rules:
-                log_channel_id = rule["log_channel_id"]
-                if log_channel_id in already_sent:
-                    continue
-
-                log_channel = self.bot.get_channel(log_channel_id)
-                if log_channel and isinstance(log_channel, discord.TextChannel):
-                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
-                        try:
-                            await log_channel.send(view=view)
-                            already_sent.add(log_channel_id)
-                        except discord.HTTPException:
-                            pass
+            await self._send_log(
+                rules, "channel", ctx_data, default_view_builder=build_default_view
+            )
         except Exception:
             pass
 
@@ -1518,27 +1913,29 @@ class Moderation(commands.Cog):
             channel.guild, channel, discord.AuditLogAction.channel_delete
         )
         ts = discord.utils.utcnow()
-        detail = (
-            f"**Channel:** #{channel.name}\n"
-            f"**Type:** {channel.type.name}\n"
-            f"**ID:** `{channel.id}`"
-        )
-        if moderator:
-            detail += f"\n**Deleted by:** {moderator.mention} (`{moderator}`)"
-        if reason:
-            detail += f"\n**Reason:** {reason[:400]}"
 
-        components = [
-            discord.ui.TextDisplay(content="## Channel Deleted"),
-            discord.ui.TextDisplay(content=detail),
-            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
-        ]
+        async def build_default_view():
+            detail = (
+                f"**Channel:** #{channel.name}\n"
+                f"**Type:** {channel.type.name}\n"
+                f"**ID:** `{channel.id}`"
+            )
+            if moderator:
+                detail += f"\n**Deleted by:** {moderator.mention} (`{moderator}`)"
+            if reason:
+                detail += f"\n**Reason:** {reason[:400]}"
 
-        container = discord.ui.Container(
-            *components,
-            accent_color=discord.Color.red(),
-        )
-        view = LogView(container)
+            components = [
+                discord.ui.TextDisplay(content="## Channel Deleted"),
+                discord.ui.TextDisplay(content=detail),
+                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+            ]
+
+            container = discord.ui.Container(
+                *components,
+                accent_color=discord.Color.red(),
+            )
+            return LogView(container)
 
         try:
             rules = await self.db.fetch(
@@ -1547,21 +1944,18 @@ class Moderation(commands.Cog):
                 "channel",
             )
 
-            already_sent: set[int] = set()
+            ctx_data = {
+                "channel": channel,
+                "guild": channel.guild,
+                "moderator": moderator,
+                "reason": reason,
+                "deleted_at": ts,
+                "event": "channel_delete",
+            }
 
-            for rule in rules:
-                log_channel_id = rule["log_channel_id"]
-                if log_channel_id in already_sent:
-                    continue
-
-                log_channel = self.bot.get_channel(log_channel_id)
-                if log_channel and isinstance(log_channel, discord.TextChannel):
-                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
-                        try:
-                            await log_channel.send(view=view)
-                            already_sent.add(log_channel_id)
-                        except discord.HTTPException:
-                            pass
+            await self._send_log(
+                rules, "channel", ctx_data, default_view_builder=build_default_view
+            )
         except Exception:
             pass
 
@@ -1574,27 +1968,29 @@ class Moderation(commands.Cog):
                 after.guild, after, discord.AuditLogAction.channel_update
             )
             ts = discord.utils.utcnow()
-            detail = (
-                f"**Channel:** {after.mention} - ID: `{after.id}`\n"
-                f"**Before:** {before.name}\n"
-                f"**After:** {after.name}"
-            )
-            if moderator:
-                detail += f"\n**Updated by:** {moderator.mention} (`{moderator}`)"
-            if reason:
-                detail += f"\n**Reason:** {reason[:400]}"
 
-            components = [
-                discord.ui.TextDisplay(content="## Channel Updated"),
-                discord.ui.TextDisplay(content=detail),
-                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
-            ]
+            async def build_default_view():
+                detail = (
+                    f"**Channel:** {after.mention} - ID: `{after.id}`\n"
+                    f"**Before:** {before.name}\n"
+                    f"**After:** {after.name}"
+                )
+                if moderator:
+                    detail += f"\n**Updated by:** {moderator.mention} (`{moderator}`)"
+                if reason:
+                    detail += f"\n**Reason:** {reason[:400]}"
 
-            container = discord.ui.Container(
-                *components,
-                accent_color=discord.Color.blue(),
-            )
-            view = LogView(container)
+                components = [
+                    discord.ui.TextDisplay(content="## Channel Updated"),
+                    discord.ui.TextDisplay(content=detail),
+                    discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+                ]
+
+                container = discord.ui.Container(
+                    *components,
+                    accent_color=discord.Color.blue(),
+                )
+                return LogView(container)
 
             try:
                 rules = await self.db.fetch(
@@ -1603,23 +1999,19 @@ class Moderation(commands.Cog):
                     "channel",
                 )
 
-                already_sent: set[int] = set()
+                ctx_data = {
+                    "before_channel": before,
+                    "after_channel": after,
+                    "guild": after.guild,
+                    "moderator": moderator,
+                    "reason": reason,
+                    "updated_at": ts,
+                    "event": "channel_update",
+                }
 
-                for rule in rules:
-                    log_channel_id = rule["log_channel_id"]
-                    if log_channel_id in already_sent:
-                        continue
-
-                    log_channel = self.bot.get_channel(log_channel_id)
-                    if log_channel and isinstance(log_channel, discord.TextChannel):
-                        if log_channel.permissions_for(
-                            log_channel.guild.me
-                        ).send_messages:
-                            try:
-                                await log_channel.send(view=view)
-                                already_sent.add(log_channel_id)
-                            except discord.HTTPException:
-                                pass
+                await self._send_log(
+                    rules, "channel", ctx_data, default_view_builder=build_default_view
+                )
             except Exception:
                 pass
 
@@ -1630,28 +2022,34 @@ class Moderation(commands.Cog):
         )
         ts = discord.utils.utcnow()
         perms = [perm for perm, value in role.permissions if value]
-        detail = f"**Role:** {role.mention} - ID: `{role.id}`\n**Color:** {role.color}"
-        if moderator:
-            detail += f"\n**Created by:** {moderator.mention} (`{moderator}`)"
-        if reason:
-            detail += f"\n**Reason:** {reason[:400]}"
-        if perms:
-            perms_str = ", ".join(perm.replace("_", " ").title() for perm in perms[:10])
-            if len(perms) > 10:
-                perms_str += f" and {len(perms) - 10} more"
-            detail += f"\n**Permissions:** {perms_str}"
 
-        components = [
-            discord.ui.TextDisplay(content="## Role Created"),
-            discord.ui.TextDisplay(content=detail),
-            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
-        ]
+        async def build_default_view():
+            detail = (
+                f"**Role:** {role.mention} - ID: `{role.id}`\n**Color:** {role.color}"
+            )
+            if moderator:
+                detail += f"\n**Created by:** {moderator.mention} (`{moderator}`)"
+            if reason:
+                detail += f"\n**Reason:** {reason[:400]}"
+            if perms:
+                perms_str = ", ".join(
+                    perm.replace("_", " ").title() for perm in perms[:10]
+                )
+                if len(perms) > 10:
+                    perms_str += f" and {len(perms) - 10} more"
+                detail += f"\n**Permissions:** {perms_str}"
 
-        container = discord.ui.Container(
-            *components,
-            accent_color=discord.Color.green(),
-        )
-        view = LogView(container)
+            components = [
+                discord.ui.TextDisplay(content="## Role Created"),
+                discord.ui.TextDisplay(content=detail),
+                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+            ]
+
+            container = discord.ui.Container(
+                *components,
+                accent_color=discord.Color.green(),
+            )
+            return LogView(container)
 
         try:
             rules = await self.db.fetch(
@@ -1660,21 +2058,19 @@ class Moderation(commands.Cog):
                 "role",
             )
 
-            already_sent: set[int] = set()
+            ctx_data = {
+                "role": role,
+                "guild": role.guild,
+                "moderator": moderator,
+                "reason": reason,
+                "permissions": perms,
+                "created_at": ts,
+                "event": "role_create",
+            }
 
-            for rule in rules:
-                log_channel_id = rule["log_channel_id"]
-                if log_channel_id in already_sent:
-                    continue
-
-                log_channel = self.bot.get_channel(log_channel_id)
-                if log_channel and isinstance(log_channel, discord.TextChannel):
-                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
-                        try:
-                            await log_channel.send(view=view)
-                            already_sent.add(log_channel_id)
-                        except discord.HTTPException:
-                            pass
+            await self._send_log(
+                rules, "role", ctx_data, default_view_builder=build_default_view
+            )
         except Exception:
             pass
 
@@ -1684,23 +2080,25 @@ class Moderation(commands.Cog):
             role.guild, role, discord.AuditLogAction.role_delete
         )
         ts = discord.utils.utcnow()
-        detail = f"**Role:** {role.name} - ID: `{role.id}`\n**Color:** {role.color}"
-        if moderator:
-            detail += f"\n**Deleted by:** {moderator.mention} (`{moderator}`)"
-        if reason:
-            detail += f"\n**Reason:** {reason[:400]}"
 
-        components = [
-            discord.ui.TextDisplay(content="## Role Deleted"),
-            discord.ui.TextDisplay(content=detail),
-            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
-        ]
+        async def build_default_view():
+            detail = f"**Role:** {role.name} - ID: `{role.id}`\n**Color:** {role.color}"
+            if moderator:
+                detail += f"\n**Deleted by:** {moderator.mention} (`{moderator}`)"
+            if reason:
+                detail += f"\n**Reason:** {reason[:400]}"
 
-        container = discord.ui.Container(
-            *components,
-            accent_color=discord.Color.red(),
-        )
-        view = LogView(container)
+            components = [
+                discord.ui.TextDisplay(content="## Role Deleted"),
+                discord.ui.TextDisplay(content=detail),
+                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+            ]
+
+            container = discord.ui.Container(
+                *components,
+                accent_color=discord.Color.red(),
+            )
+            return LogView(container)
 
         try:
             rules = await self.db.fetch(
@@ -1709,21 +2107,18 @@ class Moderation(commands.Cog):
                 "role",
             )
 
-            already_sent: set[int] = set()
+            ctx_data = {
+                "role": role,
+                "guild": role.guild,
+                "moderator": moderator,
+                "reason": reason,
+                "deleted_at": ts,
+                "event": "role_delete",
+            }
 
-            for rule in rules:
-                log_channel_id = rule["log_channel_id"]
-                if log_channel_id in already_sent:
-                    continue
-
-                log_channel = self.bot.get_channel(log_channel_id)
-                if log_channel and isinstance(log_channel, discord.TextChannel):
-                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
-                        try:
-                            await log_channel.send(view=view)
-                            already_sent.add(log_channel_id)
-                        except discord.HTTPException:
-                            pass
+            await self._send_log(
+                rules, "role", ctx_data, default_view_builder=build_default_view
+            )
         except Exception:
             pass
 
@@ -1763,23 +2158,27 @@ class Moderation(commands.Cog):
             after.guild, after, discord.AuditLogAction.role_update
         )
         ts = discord.utils.utcnow()
-        detail = f"**Role:** {after.mention} - ID: `{after.id}`\n" + "\n".join(changes)
-        if moderator:
-            detail += f"\n**Updated by:** {moderator.mention} (`{moderator}`)"
-        if reason:
-            detail += f"\n**Reason:** {reason[:400]}"
 
-        components = [
-            discord.ui.TextDisplay(content="## Role Updated"),
-            discord.ui.TextDisplay(content=detail),
-            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
-        ]
+        async def build_default_view():
+            detail = f"**Role:** {after.mention} - ID: `{after.id}`\n" + "\n".join(
+                changes
+            )
+            if moderator:
+                detail += f"\n**Updated by:** {moderator.mention} (`{moderator}`)"
+            if reason:
+                detail += f"\n**Reason:** {reason[:400]}"
 
-        container = discord.ui.Container(
-            *components,
-            accent_color=discord.Color.blue(),
-        )
-        view = LogView(container)
+            components = [
+                discord.ui.TextDisplay(content="## Role Updated"),
+                discord.ui.TextDisplay(content=detail),
+                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>"),
+            ]
+
+            container = discord.ui.Container(
+                *components,
+                accent_color=discord.Color.blue(),
+            )
+            return LogView(container)
 
         try:
             rules = await self.db.fetch(
@@ -1788,21 +2187,20 @@ class Moderation(commands.Cog):
                 "role",
             )
 
-            already_sent: set[int] = set()
+            ctx_data = {
+                "before_role": before,
+                "after_role": after,
+                "guild": after.guild,
+                "moderator": moderator,
+                "reason": reason,
+                "changes": changes,
+                "updated_at": ts,
+                "event": "role_update",
+            }
 
-            for rule in rules:
-                log_channel_id = rule["log_channel_id"]
-                if log_channel_id in already_sent:
-                    continue
-
-                log_channel = self.bot.get_channel(log_channel_id)
-                if log_channel and isinstance(log_channel, discord.TextChannel):
-                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
-                        try:
-                            await log_channel.send(view=view)
-                            already_sent.add(log_channel_id)
-                        except discord.HTTPException:
-                            pass
+            await self._send_log(
+                rules, "role", ctx_data, default_view_builder=build_default_view
+            )
         except Exception:
             pass
 
@@ -1816,7 +2214,7 @@ class Moderation(commands.Cog):
         ts = discord.utils.utcnow()
         member_str = f"**Member:** {member.mention} (`{member}` - ID: `{member.id}`)"
 
-        def _make_voice_components(title: str, color: discord.Color, detail: str):
+        def make_default_components(title: str, color: discord.Color, detail: str):
             return [
                 discord.ui.TextDisplay(content=f"## {title}"),
                 discord.ui.Section(
@@ -1829,15 +2227,17 @@ class Moderation(commands.Cog):
             ]
 
         if not before.channel and after.channel:
-            detail = f"{member_str}\n**Channel:** {after.channel.mention}"
-            components = _make_voice_components(
-                "Voice Channel Joined", discord.Color.green(), detail
-            )
-            container = discord.ui.Container(
-                *components,
-                accent_color=discord.Color.green(),
-            )
-            view = LogView(container)
+
+            async def build_default_view():
+                detail = f"{member_str}\n**Channel:** {after.channel.mention}"
+                components = make_default_components(
+                    "Voice Channel Joined", discord.Color.green(), detail
+                )
+                container = discord.ui.Container(
+                    *components,
+                    accent_color=discord.Color.green(),
+                )
+                return LogView(container)
 
             try:
                 rules = await self.db.fetch(
@@ -1846,47 +2246,33 @@ class Moderation(commands.Cog):
                     "voice",
                 )
 
-                already_sent: set[int] = set()
+                ctx_data = {
+                    "member": member,
+                    "guild": member.guild,
+                    "before_channel": before.channel,
+                    "after_channel": after.channel,
+                    "joined_at": ts,
+                    "event": "voice_join",
+                }
 
-                for rule in rules:
-                    if (
-                        rule["exclude_channel_ids"]
-                        and after.channel.id in rule["exclude_channel_ids"]
-                    ):
-                        continue
-                    if (
-                        rule["include_channel_ids"]
-                        and after.channel.id not in rule["include_channel_ids"]
-                    ):
-                        continue
-
-                    log_channel_id = rule["log_channel_id"]
-                    if log_channel_id in already_sent:
-                        continue
-
-                    log_channel = self.bot.get_channel(log_channel_id)
-                    if log_channel and isinstance(log_channel, discord.TextChannel):
-                        if log_channel.permissions_for(
-                            log_channel.guild.me
-                        ).send_messages:
-                            try:
-                                await log_channel.send(view=view)
-                                already_sent.add(log_channel_id)
-                            except discord.HTTPException:
-                                pass
+                await self._send_log(
+                    rules, "voice", ctx_data, default_view_builder=build_default_view
+                )
             except Exception:
                 pass
 
         elif before.channel and not after.channel:
-            detail = f"{member_str}\n**Channel:** {before.channel.mention}"
-            components = _make_voice_components(
-                "Voice Channel Left", discord.Color.red(), detail
-            )
-            container = discord.ui.Container(
-                *components,
-                accent_color=discord.Color.red(),
-            )
-            view = LogView(container)
+
+            async def build_default_view():
+                detail = f"{member_str}\n**Channel:** {before.channel.mention}"
+                components = make_default_components(
+                    "Voice Channel Left", discord.Color.red(), detail
+                )
+                container = discord.ui.Container(
+                    *components,
+                    accent_color=discord.Color.red(),
+                )
+                return LogView(container)
 
             try:
                 rules = await self.db.fetch(
@@ -1895,47 +2281,33 @@ class Moderation(commands.Cog):
                     "voice",
                 )
 
-                already_sent: set[int] = set()
+                ctx_data = {
+                    "member": member,
+                    "guild": member.guild,
+                    "before_channel": before.channel,
+                    "after_channel": after.channel,
+                    "left_at": ts,
+                    "event": "voice_leave",
+                }
 
-                for rule in rules:
-                    if (
-                        rule["exclude_channel_ids"]
-                        and before.channel.id in rule["exclude_channel_ids"]
-                    ):
-                        continue
-                    if (
-                        rule["include_channel_ids"]
-                        and before.channel.id not in rule["include_channel_ids"]
-                    ):
-                        continue
-
-                    log_channel_id = rule["log_channel_id"]
-                    if log_channel_id in already_sent:
-                        continue
-
-                    log_channel = self.bot.get_channel(log_channel_id)
-                    if log_channel and isinstance(log_channel, discord.TextChannel):
-                        if log_channel.permissions_for(
-                            log_channel.guild.me
-                        ).send_messages:
-                            try:
-                                await log_channel.send(view=view)
-                                already_sent.add(log_channel_id)
-                            except discord.HTTPException:
-                                pass
+                await self._send_log(
+                    rules, "voice", ctx_data, default_view_builder=build_default_view
+                )
             except Exception:
                 pass
 
         elif before.channel and after.channel and before.channel != after.channel:
-            detail = f"{member_str}\n**From:** {before.channel.mention} -> **To:** {after.channel.mention}"
-            components = _make_voice_components(
-                "Voice Channel Moved", discord.Color.blue(), detail
-            )
-            container = discord.ui.Container(
-                *components,
-                accent_color=discord.Color.blue(),
-            )
-            view = LogView(container)
+
+            async def build_default_view():
+                detail = f"{member_str}\n**From:** {before.channel.mention} -> **To:** {after.channel.mention}"
+                components = make_default_components(
+                    "Voice Channel Moved", discord.Color.blue(), detail
+                )
+                container = discord.ui.Container(
+                    *components,
+                    accent_color=discord.Color.blue(),
+                )
+                return LogView(container)
 
             try:
                 rules = await self.db.fetch(
@@ -1944,34 +2316,18 @@ class Moderation(commands.Cog):
                     "voice",
                 )
 
-                already_sent: set[int] = set()
+                ctx_data = {
+                    "member": member,
+                    "guild": member.guild,
+                    "before_channel": before.channel,
+                    "after_channel": after.channel,
+                    "moved_at": ts,
+                    "event": "voice_move",
+                }
 
-                for rule in rules:
-                    if (
-                        rule["exclude_channel_ids"]
-                        and after.channel.id in rule["exclude_channel_ids"]
-                    ):
-                        continue
-                    if (
-                        rule["include_channel_ids"]
-                        and after.channel.id not in rule["include_channel_ids"]
-                    ):
-                        continue
-
-                    log_channel_id = rule["log_channel_id"]
-                    if log_channel_id in already_sent:
-                        continue
-
-                    log_channel = self.bot.get_channel(log_channel_id)
-                    if log_channel and isinstance(log_channel, discord.TextChannel):
-                        if log_channel.permissions_for(
-                            log_channel.guild.me
-                        ).send_messages:
-                            try:
-                                await log_channel.send(view=view)
-                                already_sent.add(log_channel_id)
-                            except discord.HTTPException:
-                                pass
+                await self._send_log(
+                    rules, "voice", ctx_data, default_view_builder=build_default_view
+                )
             except Exception:
                 pass
 
@@ -2019,22 +2375,24 @@ class Moderation(commands.Cog):
                 (None, None),
             )
             channel_ref = after.channel.mention if after.channel else "*Unknown*"
-            detail = f"{member_str}\n**Channel:** {channel_ref}\n" + "\n".join(changes)
-            if final_moderator:
-                detail += (
-                    f"\n**Action by:** {final_moderator.mention} (`{final_moderator}`)"
-                )
-            if final_reason:
-                detail += f"\n**Reason:** {final_reason[:400]}"
 
-            components = _make_voice_components(
-                "Voice State Updated", discord.Color.orange(), detail
-            )
-            container = discord.ui.Container(
-                *components,
-                accent_color=discord.Color.orange(),
-            )
-            view = LogView(container)
+            async def build_default_view():
+                detail = f"{member_str}\n**Channel:** {channel_ref}\n" + "\n".join(
+                    changes
+                )
+                if final_moderator:
+                    detail += f"\n**Action by:** {final_moderator.mention} (`{final_moderator}`)"
+                if final_reason:
+                    detail += f"\n**Reason:** {final_reason[:400]}"
+
+                components = make_default_components(
+                    "Voice State Updated", discord.Color.orange(), detail
+                )
+                container = discord.ui.Container(
+                    *components,
+                    accent_color=discord.Color.orange(),
+                )
+                return LogView(container)
 
             try:
                 rules = await self.db.fetch(
@@ -2043,36 +2401,21 @@ class Moderation(commands.Cog):
                     "voice",
                 )
 
-                already_sent: set[int] = set()
+                ctx_data = {
+                    "member": member,
+                    "guild": member.guild,
+                    "before_state": before,
+                    "after_state": after,
+                    "moderator": final_moderator,
+                    "reason": final_reason,
+                    "changes": changes,
+                    "updated_at": ts,
+                    "event": "voice_state_update",
+                }
 
-                for rule in rules:
-                    channel_check = after.channel.id if after.channel else None
-                    if channel_check:
-                        if (
-                            rule["exclude_channel_ids"]
-                            and channel_check in rule["exclude_channel_ids"]
-                        ):
-                            continue
-                        if (
-                            rule["include_channel_ids"]
-                            and channel_check not in rule["include_channel_ids"]
-                        ):
-                            continue
-
-                    log_channel_id = rule["log_channel_id"]
-                    if log_channel_id in already_sent:
-                        continue
-
-                    log_channel = self.bot.get_channel(log_channel_id)
-                    if log_channel and isinstance(log_channel, discord.TextChannel):
-                        if log_channel.permissions_for(
-                            log_channel.guild.me
-                        ).send_messages:
-                            try:
-                                await log_channel.send(view=view)
-                                already_sent.add(log_channel_id)
-                            except discord.HTTPException:
-                                pass
+                await self._send_log(
+                    rules, "voice", ctx_data, default_view_builder=build_default_view
+                )
             except Exception:
                 pass
 
@@ -2151,41 +2494,42 @@ class Moderation(commands.Cog):
         )
         ts = discord.utils.utcnow()
 
-        components = [
-            discord.ui.TextDisplay(content="## Server Updated"),
-        ]
+        async def build_default_view():
+            components = [
+                discord.ui.TextDisplay(content="## Server Updated"),
+            ]
 
-        changes_text = "\n".join(changes)
-        if after.icon:
-            components.append(
-                discord.ui.Section(
-                    discord.ui.TextDisplay(content=changes_text),
-                    accessory=discord.ui.Thumbnail(
-                        media=discord.UnfurledMediaItem(url=after.icon.url)
-                    ),
+            changes_text = "\n".join(changes)
+            if after.icon:
+                components.append(
+                    discord.ui.Section(
+                        discord.ui.TextDisplay(content=changes_text),
+                        accessory=discord.ui.Thumbnail(
+                            media=discord.UnfurledMediaItem(url=after.icon.url)
+                        ),
+                    )
                 )
+            else:
+                components.append(discord.ui.TextDisplay(content=changes_text))
+
+            components.append(discord.ui.Separator())
+
+            footer = f"Server ID: `{after.id}`"
+            if moderator:
+                footer += f" - Updated by {moderator.mention} (`{moderator}`)"
+            if reason:
+                footer += f"\n**Reason:** {reason[:300]}"
+
+            components.append(discord.ui.TextDisplay(content=footer))
+            components.append(
+                discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>")
             )
-        else:
-            components.append(discord.ui.TextDisplay(content=changes_text))
 
-        components.append(discord.ui.Separator())
-
-        footer = f"Server ID: `{after.id}`"
-        if moderator:
-            footer += f" - Updated by {moderator.mention} (`{moderator}`)"
-        if reason:
-            footer += f"\n**Reason:** {reason[:300]}"
-
-        components.append(discord.ui.TextDisplay(content=footer))
-        components.append(
-            discord.ui.TextDisplay(content=f"-# <t:{int(ts.timestamp())}:f>")
-        )
-
-        container = discord.ui.Container(
-            *components,
-            accent_color=discord.Color.blue(),
-        )
-        view = LogView(container)
+            container = discord.ui.Container(
+                *components,
+                accent_color=discord.Color.blue(),
+            )
+            return LogView(container)
 
         try:
             rules = await self.db.fetch(
@@ -2194,21 +2538,19 @@ class Moderation(commands.Cog):
                 "guild",
             )
 
-            already_sent: set[int] = set()
+            ctx_data = {
+                "before_guild": before,
+                "after_guild": after,
+                "moderator": moderator,
+                "reason": reason,
+                "changes": changes,
+                "updated_at": ts,
+                "event": "guild_update",
+            }
 
-            for rule in rules:
-                log_channel_id = rule["log_channel_id"]
-                if log_channel_id in already_sent:
-                    continue
-
-                log_channel = self.bot.get_channel(log_channel_id)
-                if log_channel and isinstance(log_channel, discord.TextChannel):
-                    if log_channel.permissions_for(log_channel.guild.me).send_messages:
-                        try:
-                            await log_channel.send(view=view)
-                            already_sent.add(log_channel_id)
-                        except discord.HTTPException:
-                            pass
+            await self._send_log(
+                rules, "guild", ctx_data, default_view_builder=build_default_view
+            )
         except Exception:
             pass
 
@@ -2239,11 +2581,38 @@ class Moderation(commands.Cog):
             ):
                 try:
                     await message.delete()
-                    await message.channel.send(
-                        f"{message.author.mention}, your message was deleted due to slowmode. Please wait {slowmode['delay_seconds']} seconds between messages.",
-                        delete_after=10,
-                        allowed_mentions=discord.AllowedMentions(users=True),
-                    )
+
+                    if slowmode.get("custom_message"):
+                        ctx_data = {
+                            "author": message.author,
+                            "guild": message.guild,
+                            "channel": message.channel,
+                            "slowmode_delay": slowmode["delay_seconds"],
+                            "slowmode_rule_id": slowmode["slowmode_id"],
+                            "message": message,
+                        }
+                        text, embeds, view, files = await self._evaluate_tagscript(
+                            slowmode["custom_message"], ctx_data
+                        )
+                        kwargs = {}
+                        if text:
+                            kwargs["content"] = text[:2000]
+                        if embeds:
+                            kwargs["embeds"] = embeds[:10]
+                        if view:
+                            kwargs["view"] = view
+                        if files:
+                            kwargs["files"] = files[:10]
+                        await message.channel.send(
+                            delete_after=10,
+                            **kwargs,
+                        )
+                    else:
+                        await message.channel.send(
+                            f"{message.author.mention}, your message was deleted due to slowmode. Please wait {slowmode['delay_seconds']} seconds between messages.",
+                            delete_after=10,
+                            allowed_mentions=discord.AllowedMentions(users=True),
+                        )
                 except discord.Forbidden:
                     pass
                 return
@@ -2314,31 +2683,57 @@ class Moderation(commands.Cog):
     async def handle_filter_trigger(self, filter: dict, message: discord.Message):
         try:
             await message.delete()
-            if filter["custom_message"]:
-                try:
-                    await message.author.send(filter["custom_message"])
-                except discord.Forbidden:
-                    pass
+
+            if filter.get("custom_message"):
+                ctx_data = {
+                    "author": message.author,
+                    "guild": message.guild,
+                    "channel": message.channel,
+                    "message": message,
+                    "filter_type": filter["filter_type"],
+                    "pattern": filter["pattern"],
+                    "action": filter["action"],
+                    "filter_id": filter.get("filter_id"),
+                }
+                text, embeds, view, files = await self._evaluate_tagscript(
+                    filter["custom_message"], ctx_data
+                )
+                kwargs = {}
+                if text:
+                    kwargs["content"] = text[:2000]
+                if embeds:
+                    kwargs["embeds"] = embeds[:10]
+                if view:
+                    kwargs["view"] = view
+                if files:
+                    kwargs["files"] = files[:10]
+                await message.channel.send(
+                    delete_after=10,
+                    **kwargs,
+                )
+
             if filter["action"] == "delete":
                 pass
             elif filter["action"] == "warn":
-                await message.channel.send(
-                    f"{message.author.mention}, your message was deleted because it was violating the chat filter.",
-                    delete_after=10,
-                    allowed_mentions=discord.AllowedMentions(users=True),
-                )
+                if not filter.get("custom_message"):
+                    await message.channel.send(
+                        f"{message.author.mention}, your message was deleted because it was violating the chat filter.",
+                        delete_after=10,
+                        allowed_mentions=discord.AllowedMentions(users=True),
+                    )
             elif filter["action"] == "mute":
                 try:
-                    duration_minutes = filter.get("duration_minutes", 60)
+                    duration_minutes = filter.get("timeout_minutes", 60)
                     duration = timedelta(minutes=duration_minutes)
                     await message.author.timeout(
                         duration, reason="Violated chat filter."
                     )
-                    await message.channel.send(
-                        f"{message.author.mention} has been timed out for {duration_minutes} minutes for violating the chat filter.",
-                        delete_after=10,
-                        allowed_mentions=discord.AllowedMentions(users=True),
-                    )
+                    if not filter.get("custom_message"):
+                        await message.channel.send(
+                            f"{message.author.mention} has been timed out for {duration_minutes} minutes for violating the chat filter.",
+                            delete_after=10,
+                            allowed_mentions=discord.AllowedMentions(users=True),
+                        )
                 except discord.Forbidden:
                     pass
             elif filter["action"] == "kick":
@@ -2371,7 +2766,7 @@ class Moderation(commands.Cog):
         filter_type="Type of filter.",
         pattern="Pattern to match. (regex pattern, comma-separated words, or domain list)",
         action="Action to take when triggered.",
-        custom_message="Optional DM.",
+        custom_message="Custom message sent in channel when triggered. (supports TagScript.)",
         timeout_minutes="Timeout duration for mute action. (1-40320 minutes)",
         delete_days="Days of messages to delete for ban action. (0-7)",
     )
@@ -2557,6 +2952,7 @@ class Moderation(commands.Cog):
                     f"**Target:** {target}\n"
                     f"**Pattern:** `{pattern_display}`\n"
                     f"**Added:** <t:{int(r['created_at'].timestamp())}:R>"
+                    + ("\n**Custom Message:** Yes" if r.get("custom_message") else "")
                 ),
                 inline=False,
             )
@@ -2659,6 +3055,7 @@ class Moderation(commands.Cog):
         target="Type of target.",
         target_id="ID or mention of the target. (required for channel, user, role)",
         delay="Slowmode delay in seconds. (0 to disable)",
+        custom_message="Custom message sent when slowmode is triggered. (supports TagScript.)",
     )
     async def slowmode_add(
         self,
@@ -2666,6 +3063,7 @@ class Moderation(commands.Cog):
         target: Literal["server", "channel", "user", "role"],
         target_id: Optional[str] = None,
         delay: int = 0,
+        custom_message: Optional[str] = None,
     ):
         await ctx.typing()
 
@@ -2694,7 +3092,7 @@ class Moderation(commands.Cog):
                 await ctx.send(f"Invalid role: {target_id}", ephemeral=True)
                 return
 
-        await self._set_slowmode(ctx, target, resolved_target_id, delay)
+        await self._set_slowmode(ctx, target, resolved_target_id, delay, custom_message)
 
     @slowmode_group.command(
         name="list",
@@ -2738,6 +3136,7 @@ class Moderation(commands.Cog):
                     f"**Target:** {target}\n"
                     f"**Delay:** {r['delay_seconds']} second(s)\n"
                     f"**Added by:** <@{r['added_by']}>"
+                    + ("\n**Custom Message:** Yes" if r.get("custom_message") else "")
                 ),
                 inline=False,
             )
@@ -2783,6 +3182,7 @@ class Moderation(commands.Cog):
         target_type: str,
         target_id: Optional[int],
         delay: int,
+        custom_message: Optional[str] = None,
     ):
         await ctx.typing()
         if delay < 0:
@@ -2807,13 +3207,14 @@ class Moderation(commands.Cog):
                 await self.db.execute(
                     """
                     UPDATE manual_slowmodes
-                    SET delay_seconds = $1, enabled = $2, added_by = $3, added_at = NOW()
-                    WHERE guild_id = $4 AND channel_id = $5 AND user_id = $6 AND role_id = $7
+                    SET delay_seconds = $1, enabled = $2, added_by = $3, added_at = NOW(), custom_message = $5
+                    WHERE guild_id = $4 AND channel_id = $6 AND user_id = $7 AND role_id = $8
                     """,
                     delay,
                     enabled,
                     ctx.author.id,
                     ctx.guild.id,
+                    custom_message,
                     channel_id,
                     user_id,
                     role_id,
@@ -2825,9 +3226,9 @@ class Moderation(commands.Cog):
                     """
                     INSERT INTO manual_slowmodes (
                         slowmode_id, guild_id, channel_id, user_id, role_id,
-                        delay_seconds, enabled, added_by, added_at
+                        delay_seconds, enabled, added_by, added_at, custom_message
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9)
                     """,
                     slowmode_id,
                     ctx.guild.id,
@@ -2837,6 +3238,7 @@ class Moderation(commands.Cog):
                     delay,
                     enabled,
                     ctx.author.id,
+                    custom_message,
                 )
 
             self.slowmode_cache.clear()
@@ -2848,7 +3250,10 @@ class Moderation(commands.Cog):
                 "role": f"<@&{target_id}>",
             }[target_type]
             status = f"set to {delay}s" if enabled else "disabled"
-            await ctx.send(f"{target_name} slowmode {status}.")
+            response = f"{target_name} slowmode {status}."
+            if custom_message:
+                response += f"\nCustom message: {custom_message[:100]}"
+            await ctx.send(response)
         except Exception as e:
             await ctx.send(f"Setting manual slowmode failed: {str(e)}", ephemeral=True)
 

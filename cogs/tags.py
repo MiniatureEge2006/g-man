@@ -4846,7 +4846,7 @@ class MediaProcessor:
 class TagFormatter:
     def __init__(self):
         self.functions: Dict[str, Callable] = {}
-        self._component_tags = {"embed", "button", "select"}
+        self._component_tags = {"embed", "button", "select", "component", "cv2"}
 
     def register(self, name: str):
         def decorator(func: Callable):
@@ -5612,9 +5612,13 @@ class Tags(commands.Cog):
                     - `{args:0,2,4}` uses **commas** to select multiple specific indices (returns args at indexes 0, 2, and 4).
                     - `{args:0:2:4}` uses **colons** for slice notation (start:stop:step) (returns args from index 0 to 2 with step 4).
                     - Make sure to not confuse them together.
+                * Supported settings:
+                    - ARGS_QUOTE_MODE
             """
             try:
                 args_string = kwargs.get("args", "")
+                tag_settings = kwargs.get("_tag_settings", {})
+                quote_mode = tag_settings.get("ARGS_QUOTE_MODE", "strip").lower()
                 args_list = []
                 current_arg = []
                 in_quotes = False
@@ -5630,8 +5634,12 @@ class Tags(commands.Cog):
                     elif char in ('"', "'") and not in_quotes:
                         in_quotes = True
                         quote_char = char
+                        if quote_mode == "keep":
+                            current_arg.append(char)
                     elif char == quote_char and in_quotes:
                         in_quotes = False
+                        if quote_mode == "keep":
+                            current_arg.append(char)
                         quote_char = None
                     elif char.isspace() and not in_quotes:
                         if current_arg:
@@ -7915,6 +7923,32 @@ class Tags(commands.Cog):
                 return ctx.guild.banner.url
             return None
 
+        @self.formatter.register("context")
+        @self.formatter.register("ctx")
+        async def _context(ctx, key, **kwargs):
+            """
+            ### {context:key}
+                * Returns the value of the given context key from the extra kwargs. This is mainly intended for the moderation commands and is not for regular use.
+                * Example 1: `{context:moderator}` -> "MiniatureEge2006"
+                * Example 2: `{context:reason}` -> "Violated chat filter"
+            """
+            key = key.strip()
+            if not key:
+                return ""
+            value = kwargs.get(key)
+            if value is None:
+                return ""
+
+            if isinstance(value, (discord.User, discord.Member)):
+                return str(value)
+            if isinstance(value, discord.abc.GuildChannel):
+                return value.name
+            if isinstance(value, discord.Role):
+                return value.name
+            if isinstance(value, datetime):
+                return value.isoformat()
+            return str(value)
+
         @self.formatter.register("component")
         @self.formatter.register("componentjson")
         @self.formatter.register("json.component")
@@ -8156,6 +8190,11 @@ class Tags(commands.Cog):
                                     spacing = discord.SeparatorSpacing.small
                                 elif spacing == "large":
                                     spacing = discord.SeparatorSpacing.large
+                            elif isinstance(spacing, int):
+                                if spacing == 1:
+                                    spacing = discord.SeparatorSpacing.small
+                                elif spacing == 2:
+                                    spacing = discord.SeparatorSpacing.large
                             if spacing is None:
                                 spacing = discord.SeparatorSpacing.small
                             separator = discord.ui.Separator(
@@ -8214,36 +8253,36 @@ class Tags(commands.Cog):
                     args_str, ctx, **kwargs
                 )
                 embed_data = json.loads(processed_content)
-                resolved_data = await resolve_json_tags(ctx, embed_data)
+                resolved_data = await resolve_json_tags(ctx, embed_data, **kwargs)
                 embed = DiscordGenerator._build_embed(**resolved_data)
                 return ("", [embed], None, [])
             except json.JSONDecodeError as e:
                 return (f"[embed error: {str(e)}]", [], None, [])
 
-        async def parse_component_input(ctx, input_str: str):
+        async def parse_component_input(ctx, input_str: str, **kwargs):
             try:
                 data = json.loads(input_str.strip())
-                return await resolve_json_tags(ctx, data)
+                return await resolve_json_tags(ctx, data, **kwargs)
             except json.JSONDecodeError:
                 raise ValueError("Component input must be valid JSON")
 
-        async def resolve_json_tags(ctx, data):
+        async def resolve_json_tags(ctx, data, **kwargs):
             if isinstance(data, dict):
                 new_data = {}
                 for k, v in data.items():
                     if k in ("custom_id", "command", "tag"):
                         new_data[k] = v
                     else:
-                        new_data[k] = await resolve_json_tags(ctx, v)
+                        new_data[k] = await resolve_json_tags(ctx, v, **kwargs)
                 return new_data
             elif isinstance(data, list):
                 result = []
                 for item in data:
-                    resolved = await resolve_json_tags(ctx, item)
+                    resolved = await resolve_json_tags(ctx, item, **kwargs)
                     result.append(resolved)
                 return result
             elif isinstance(data, str):
-                processed, _, _, _ = await self.formatter.format(data, ctx)
+                processed, _, _, _ = await self.formatter.format(data, ctx, **kwargs)
                 return processed
             return data
 
@@ -8259,7 +8298,7 @@ class Tags(commands.Cog):
                 * Example 3: `{button:{"label":"Tag!","tag":"test hi"}}`
             """
             try:
-                params = await parse_component_input(ctx, args_str)
+                params = await parse_component_input(ctx, args_str, **kwargs)
 
                 if "command" in params:
                     cmd = params.pop("command").strip()
@@ -8289,7 +8328,7 @@ class Tags(commands.Cog):
                 * Example: `{select:{"placeholder": "Choose","min": 1,"options": [{"label":"A","tag":"test hi"},{"label":"B","command":"ping"}]}}`
             """
             try:
-                data = await parse_component_input(ctx, args_str)
+                data = await parse_component_input(ctx, args_str, **kwargs)
 
                 if "options" in data:
                     for opt in data["options"]:

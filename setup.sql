@@ -191,6 +191,7 @@ CREATE TABLE IF NOT EXISTS manual_slowmodes (
     enabled BOOLEAN DEFAULT TRUE,
     added_by BIGINT,
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    custom_message TEXT,
     UNIQUE (guild_id, slowmode_id),
     CONSTRAINT uq_manual_slowmode_target
         UNIQUE (guild_id, channel_id, user_id, role_id),
@@ -220,6 +221,7 @@ CREATE TABLE IF NOT EXISTS logging_rules (
     exclude_channel_ids BIGINT[],
     added_by BIGINT NOT NULL,
     created_at TIMESTAMP DEFAULT NOW(),
+    template TEXT,
     UNIQUE(guild_id, log_channel_id, event_category)
 );
 
