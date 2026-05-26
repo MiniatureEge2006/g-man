@@ -5353,36 +5353,52 @@ class Tags(commands.Cog):
                     - G_AI_SHOW_THINKING
                     - G_AI_WEB_SEARCH
                     - G_AI_DEBUG
+                    - G_AI_MEDIA
                     - G_AI_MEDIA_URL
-                * Example: `{ai:hello}`
+                    - G_AI_SHARED
+                * Examples:
+                    - {ai:hello}
+                    - {settings:G_AI_THINKING|true} {ai:how many r letters are there in strawberry?}
+                    - {settings:G_AI_SYSTEM_PROMPT|You are an assistant to {user}.} {ai:hi}
             """
             try:
-                ai = ctx.bot.get_cog("AI")
-                if not ai:
+                ai_cog = ctx.bot.get_cog("AI")
+                if not ai_cog:
                     return "[AI error: AI cog not loaded]"
 
                 tag_settings = kwargs.get("_tag_settings", {})
+
+                shared_mode = tag_settings.get("G_AI_SHARED", "false").lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
+                media_flag = tag_settings.get("G_AI_MEDIA", "false").lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
+
                 system_prompt_override = tag_settings.get("G_AI_SYSTEM_PROMPT")
                 model_name = tag_settings.get("G_AI_MODEL")
-                think_mode = tag_settings.get("G_AI_THINKING") in (
+                think_mode = tag_settings.get("G_AI_THINKING", "false").lower() in (
                     "1",
                     "true",
                     "yes",
                     "on",
                 )
-                show_thinking = tag_settings.get("G_AI_SHOW_THINKING") in (
+                show_thinking = tag_settings.get(
+                    "G_AI_SHOW_THINKING", "false"
+                ).lower() in ("1", "true", "yes", "on")
+                web_mode = tag_settings.get("G_AI_WEB_SEARCH", "false").lower() in (
                     "1",
                     "true",
                     "yes",
                     "on",
                 )
-                web_mode = tag_settings.get("G_AI_WEB_SEARCH") in (
-                    "1",
-                    "true",
-                    "yes",
-                    "on",
-                )
-                debug_mode = tag_settings.get("G_AI_DEBUG") in (
+                debug_mode = tag_settings.get("G_AI_DEBUG", "false").lower() in (
                     "1",
                     "true",
                     "yes",
@@ -5390,8 +5406,35 @@ class Tags(commands.Cog):
                 )
                 media_url = tag_settings.get("G_AI_MEDIA_URL")
 
+                reply_prefix = ""
+                if hasattr(ctx, "message") and ctx.message and ctx.message.reference:
+                    try:
+                        ref_msg = await ctx.channel.fetch_message(
+                            ctx.message.reference.message_id
+                        )
+                        ref_author = (
+                            ref_msg.author.display_name
+                            if hasattr(ref_msg.author, "display_name")
+                            else ref_msg.author.name
+                        )
+                        ref_content = ref_msg.content or "[Media/No text available]"
+                        reply_prefix = f'Replying to {ref_author}: "{ref_content}"\n\n'
+                    except Exception:
+                        pass
+
+                author_name = (
+                    ctx.author.display_name
+                    if hasattr(ctx.author, "display_name")
+                    else ctx.author.name
+                )
+                if shared_mode:
+                    prompt = f"[{author_name}]: {reply_prefix}{prompt}"
+                else:
+                    prompt = f"{reply_prefix}{prompt}"
+
                 image_parts = []
-                session = ai.session
+                session = ai_cog.session
+
                 if media_url:
                     try:
                         async with session.get(media_url) as resp:
@@ -5413,25 +5456,67 @@ class Tags(commands.Cog):
                     except Exception:
                         pass
 
+                if media_flag and ctx.message and ctx.message.attachments:
+                    for attachment in ctx.message.attachments:
+                        if (
+                            attachment.content_type
+                            and attachment.content_type.startswith("image/")
+                        ):
+                            try:
+                                async with session.get(attachment.url) as resp:
+                                    if resp.status == 200:
+                                        img_data = await resp.read()
+                                        b64_data = base64.b64encode(img_data).decode(
+                                            "utf-8"
+                                        )
+                                        image_parts.append(
+                                            {
+                                                "type": "image_url",
+                                                "image_url": {
+                                                    "url": f"data:{attachment.content_type};base64,{b64_data}"
+                                                },
+                                            }
+                                        )
+                                        break
+                            except Exception:
+                                pass
+
                 if image_parts:
                     user_content = [{"type": "text", "text": prompt}] + image_parts
                 else:
                     user_content = prompt
 
-                conversation_key = ai.get_conversation(ctx)
-                user_history = await ai.get_conversation_history(conversation_key)
+                if shared_mode:
+                    conversation_key = (
+                        (ctx.guild.id, ctx.channel.id)
+                        if ctx.guild
+                        else (ctx.channel.id,)
+                    )
+                else:
+                    conversation_key = ai_cog.get_conversation(ctx)
 
-                messages = [
-                    {
-                        "role": "system",
-                        "content": system_prompt_override
-                        if system_prompt_override
-                        else await ai.create_system_prompt(ctx, prompt),
-                    }
+                user_history = await ai_cog.get_conversation_history(conversation_key)
+                system_prompt = (
+                    system_prompt_override
+                    if system_prompt_override
+                    else await ai_cog.create_system_prompt(ctx, prompt)
+                )
+
+                if not user_history or user_history[0].get("role") != "system":
+                    user_history.insert(0, {"role": "system", "content": system_prompt})
+                else:
+                    user_history[0]["content"] = system_prompt
+
+                messages = [{"role": "system", "content": system_prompt}]
+
+                conversation_turns = [
+                    msg
+                    for msg in user_history[1:]
+                    if msg.get("role") in ("user", "assistant")
                 ]
-
-                messages.extend(user_history)
+                messages.extend(conversation_turns)
                 messages.append({"role": "user", "content": user_content})
+
                 base_url = bot_info.data.get("llama_base_url", "http://localhost:8080")
                 api_key = bot_info.data.get("llama_api_key")
 
@@ -5503,9 +5588,9 @@ class Tags(commands.Cog):
 
                             result = ""
                             if tool_name == "web_search":
-                                result = await ai._web_search(args.get("query", ""))
+                                result = await ai_cog._web_search(args.get("query", ""))
                             elif tool_name == "web_fetch":
-                                result = await ai._web_fetch(args.get("url", ""))
+                                result = await ai_cog._web_fetch(args.get("url", ""))
                             else:
                                 result = f"Tool {tool_name} not found"
 
@@ -5553,7 +5638,7 @@ class Tags(commands.Cog):
 
                 user_history.append({"role": "user", "content": user_content})
                 user_history.append({"role": "assistant", "content": final_content})
-                await ai.save_conversation_history(conversation_key, user_history)
+                await ai_cog.save_conversation_history(conversation_key, user_history)
 
                 return display_content
 

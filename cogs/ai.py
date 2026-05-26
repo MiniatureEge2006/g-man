@@ -250,6 +250,36 @@ class AI(commands.Cog):
                 media_url = media_url_match.group(2)
                 prompt = re.sub(r"(^|\s)--media-url\s+\S+", " ", prompt).strip()
 
+            shared_mode = re.search(r"(^|\s)--shared($|\s)", prompt) is not None
+            if shared_mode:
+                prompt = re.sub(r"(^|\s)--shared($|\s)", " ", prompt).strip()
+
+            reply_prefix = ""
+            if ctx.message.reference and ctx.message.reference.message_id:
+                try:
+                    ref_msg = await ctx.channel.fetch_message(
+                        ctx.message.reference.message_id
+                    )
+                    ref_author = (
+                        ref_msg.author.display_name
+                        if isinstance(ref_msg.author, discord.Member)
+                        else ref_msg.author.name
+                    )
+                    ref_content = ref_msg.content or "[Media/No text available]"
+                    reply_prefix = f'Replying to {ref_author}: "{ref_content}"\n\n'
+                except Exception:
+                    pass
+
+            author_name = (
+                ctx.author.display_name
+                if hasattr(ctx.author, "display_name")
+                else ctx.author.name
+            )
+            if shared_mode:
+                prompt = f"[{author_name}]: {reply_prefix}{prompt}"
+            else:
+                prompt = f"{reply_prefix}{prompt}"
+
             image_parts = []
             if media_flag and ctx.message.attachments:
                 for attachment in ctx.message.attachments:
@@ -301,12 +331,28 @@ class AI(commands.Cog):
             else:
                 user_content = prompt
 
-            conversation_key = self.get_conversation(ctx)
+            if shared_mode:
+                conversation_key = (
+                    (ctx.guild.id, ctx.channel.id) if ctx.guild else (ctx.channel.id,)
+                )
+            else:
+                conversation_key = self.get_conversation(ctx)
             user_history = await self.get_conversation_history(conversation_key)
             system_prompt = await self.create_system_prompt(ctx, prompt)
 
+            if not user_history or user_history[0].get("role") != "system":
+                user_history.insert(0, {"role": "system", "content": system_prompt})
+            else:
+                user_history[0]["content"] = system_prompt
+
+            conversation_turns = [
+                msg
+                for msg in user_history[1:]
+                if msg.get("role") in ("user", "assistant")
+            ]
+
             messages = [{"role": "system", "content": system_prompt}]
-            messages.extend(user_history)
+            messages.extend(conversation_turns)
             messages.append({"role": "user", "content": user_content})
 
             if stream_mode and not web_mode:
@@ -907,9 +953,18 @@ class AI(commands.Cog):
     )
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    async def exportchat(self, ctx: commands.Context):
+    @app_commands.describe(
+        shared="Export the shared channel-wide history instead of your personal history."
+    )
+    async def exportchat(self, ctx: commands.Context, shared: bool = False):
         await ctx.typing()
-        key = self.get_conversation(ctx)
+
+        if shared:
+            key = (ctx.guild.id, ctx.channel.id) if ctx.guild else (ctx.channel.id,)
+            filename = f"g-ai_shared_conversation_{ctx.guild.id if ctx.guild else 'dm'}_{ctx.channel.id}.json"
+        else:
+            key = self.get_conversation(ctx)
+            filename = f"g-ai_conversation_{ctx.author.id}.json"
 
         try:
             if self.db:
@@ -922,7 +977,9 @@ class AI(commands.Cog):
                 history = self.conversations.get(key, [])
 
             if not history:
-                await ctx.send("No conversation history to export.")
+                await ctx.send(
+                    f"No {'shared channel' if shared else 'active'} conversation history to export."
+                )
                 return
 
             buffer = io.BytesIO()
@@ -930,26 +987,28 @@ class AI(commands.Cog):
             buffer.seek(0)
 
             await ctx.send(
-                "Here is your conversation history:",
-                file=discord.File(
-                    buffer, filename=f"g-ai_conversation_{ctx.author.id}.json"
-                ),
+                f"Here is {'the shared channel' if shared else 'your'} conversation history: ",
+                file=discord.File(buffer, filename=filename),
             )
         except Exception as e:
             await ctx.send(f"Failed to export conversation: {e}")
 
     @commands.hybrid_command(
-        name="importchat", description="Import your conversation history with G-AI."
+        name="importchat", description="Import conversation history into G-AI."
     )
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    @app_commands.describe(attachment="The JSON file to import.")
-    async def importchat(self, ctx: commands.Context, attachment: discord.Attachment):
+    @app_commands.describe(
+        attachment="The JSON file to import.",
+        shared="Import to the shared channel-wide history instead of your personal history.",
+    )
+    async def importchat(
+        self,
+        ctx: commands.Context,
+        attachment: discord.Attachment,
+        shared: bool = False,
+    ):
         await ctx.typing()
-
-        if not attachment:
-            await ctx.send("Please attach a JSON file.")
-            return
 
         if not attachment.filename.lower().endswith(".json"):
             await ctx.send("File must be a JSON file (.json).")
@@ -967,7 +1026,10 @@ class AI(commands.Cog):
                 )
                 return
 
-            key = self.get_conversation(ctx)
+            if shared:
+                key = (ctx.guild.id, ctx.channel.id) if ctx.guild else (ctx.channel.id,)
+            else:
+                key = self.get_conversation(ctx)
 
             if self.db:
                 await self.db.execute(
@@ -976,14 +1038,16 @@ class AI(commands.Cog):
                     VALUES ($1, $2, NOW())
                     ON CONFLICT (conversation_key)
                     DO UPDATE SET history = EXCLUDED.history, last_updated = NOW()
-                """,
+                    """,
                     json.dumps(key),
                     json.dumps(history),
                 )
             else:
                 self.conversations[key] = history
 
-            await ctx.send("Conversation history imported successfully.")
+            await ctx.send(
+                f"Conversation history imported successfully to {'shared channel' if shared else 'your'} history."
+            )
 
         except json.JSONDecodeError:
             await ctx.send("Invalid JSON file.")
@@ -993,11 +1057,20 @@ class AI(commands.Cog):
     @commands.hybrid_command(
         name="resetai", description="Reset the conversation history of G-AI."
     )
+    @app_commands.describe(
+        shared="Whether it should reset a channel-wide history instead of your own."
+    )
     @app_commands.allowed_installs(guilds=True, users=True)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-    async def resetai(self, ctx: commands.Context):
+    async def resetai(self, ctx: commands.Context, shared: bool = False):
         await ctx.typing()
-        conversation_key = self.get_conversation(ctx)
+
+        if shared:
+            conversation_key = (
+                (ctx.guild.id, ctx.channel.id) if ctx.guild else (ctx.channel.id,)
+            )
+        else:
+            conversation_key = self.get_conversation(ctx)
 
         try:
             if self.db:
@@ -1005,21 +1078,30 @@ class AI(commands.Cog):
                     "DELETE FROM ai_conversations WHERE conversation_key = $1",
                     json.dumps(conversation_key),
                 )
-
                 if result != "DELETE 0":
-                    await ctx.send("Conversation history has been reset.")
+                    await ctx.send(
+                        f"{'Shared channel' if shared else 'Your'} conversation history has been reset."
+                    )
                 else:
                     if conversation_key in self.conversations:
                         del self.conversations[conversation_key]
-                        await ctx.send("Local conversation history has been reset.")
+                        await ctx.send(
+                            f"{'Shared channel' if shared else 'Your'} local conversation history has been reset."
+                        )
                     else:
-                        await ctx.send("No active conversation found to reset.")
+                        await ctx.send(
+                            f"No {'shared channel' if shared else 'active'} conversation found to reset."
+                        )
             else:
                 if conversation_key in self.conversations:
                     del self.conversations[conversation_key]
-                    await ctx.send("Local conversation history has been reset.")
+                    await ctx.send(
+                        f"{'Shared channel' if shared else 'Your'} local conversation history has been reset."
+                    )
                 else:
-                    await ctx.send("No active conversation found to reset.")
+                    await ctx.send(
+                        f"No {'shared channel' if shared else 'active'} conversation found to reset."
+                    )
 
         except Exception as e:
             await ctx.send(f"Failed to reset conversation: {e}")
