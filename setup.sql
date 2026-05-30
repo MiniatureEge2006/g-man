@@ -174,10 +174,42 @@ CREATE TABLE IF NOT EXISTS chat_filters (
     custom_message TEXT,
     timeout_minutes INTEGER DEFAULT 60,
     delete_seconds INTEGER,
+    delete_after INTEGER DEFAULT 10,
     added_by BIGINT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (guild_id, filter_id),
     UNIQUE (guild_id, filter_type, pattern, target_type, target_id)
+);
+
+CREATE TABLE IF NOT EXISTS chat_reactions (
+    id SERIAL PRIMARY KEY,
+    reaction_id INTEGER,
+    guild_id BIGINT NOT NULL,
+    trigger_type TEXT NOT NULL CHECK (trigger_type IN ('regex', 'word', 'link')),
+    pattern TEXT NOT NULL,
+    emoji TEXT NOT NULL,
+    target_type TEXT NOT NULL CHECK (target_type IN ('server', 'channel', 'user', 'role')),
+    target_id BIGINT,
+    added_by BIGINT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (guild_id, reaction_id),
+    UNIQUE (guild_id, trigger_type, pattern, target_type, target_id)
+);
+
+CREATE TABLE IF NOT EXISTS chat_replies (
+    id SERIAL PRIMARY KEY,
+    reply_id INTEGER,
+    guild_id BIGINT NOT NULL,
+    trigger_type TEXT NOT NULL CHECK (trigger_type IN ('regex', 'word', 'link')),
+    pattern TEXT NOT NULL,
+    response_message TEXT NOT NULL,
+    target_type TEXT NOT NULL CHECK (target_type IN ('server', 'channel', 'user', 'role')),
+    target_id BIGINT,
+    delete_after INTEGER DEFAULT 10,
+    added_by BIGINT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (guild_id, reply_id),
+    UNIQUE (guild_id, trigger_type, pattern, target_type, target_id)
 );
 
 CREATE TABLE IF NOT EXISTS manual_slowmodes (

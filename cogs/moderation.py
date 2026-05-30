@@ -25,6 +25,8 @@ class Moderation(commands.Cog):
         self.bot = bot
         self.filter_cache = {}
         self.slowmode_cache = {}
+        self.react_cache = {}
+        self.reply_cache = {}
         self.db = asyncpg.Pool
 
     async def _evaluate_tagscript(self, template: str, ctx_data: dict) -> tuple:
@@ -549,6 +551,840 @@ class Moderation(commands.Cog):
         result = await self.db.fetchval(query, guild_id)
         return result if result else 1
 
+    async def get_next_reaction_id(self, guild_id: int) -> int:
+        q = """
+            SELECT COALESCE(
+                (SELECT r1.reaction_id + 1
+                FROM chat_reactions r1
+                WHERE r1.guild_id = $1
+                AND NOT EXISTS (
+                    SELECT 1 FROM chat_reactions r2
+                    WHERE r2.guild_id = $1
+                    AND r2.reaction_id = r1.reaction_id + 1
+                ) ORDER BY r1.reaction_id
+                LIMIT 1), 1)
+                """
+        return await self.db.fetchval(q, guild_id) or 1
+
+    async def get_next_reply_id(self, guild_id: int) -> int:
+        q = """
+        SELECT COALESCE(
+            (SELECT r1.reply_id + 1
+            FROM chat_replies r1
+            WHERE r1.guild_id = $1 AND NOT EXISTS (
+                SELECT 1 FROM chat_replies r2
+                WHERE r2.guild_id = $1
+                AND r2.reply_id = r1.reply_id + 1
+            ) ORDER BY r1.reply_id
+            LIMIT 1), 1)
+            """
+        return await self.db.fetchval(q, guild_id) or 1
+
+    async def get_reactions_for_context(self, guild_id, channel_id, user_id, role_ids):
+        k = (guild_id, channel_id, user_id, tuple(sorted(role_ids)))
+        if k in self.react_cache:
+            return self.react_cache[k]
+        r = await self.db.fetch(
+            """
+            SELECT * FROM chat_reactions
+            WHERE guild_id = $1 AND (
+                target_type = 'server' OR
+                (target_type = 'channel' AND target_id = $2) OR
+                (target_type = 'user' AND target_id = $3) OR
+                (target_type = 'role' AND target_id = ANY($4::bigint[]))
+                )
+            """,
+            guild_id,
+            channel_id,
+            user_id,
+            role_ids,
+        )
+        self.react_cache[k] = r
+        return r
+
+    async def get_replies_for_context(self, guild_id, channel_id, user_id, role_ids):
+        k = (guild_id, channel_id, user_id, tuple(sorted(role_ids)))
+        if k in self.reply_cache:
+            return self.reply_cache[k]
+        r = await self.db.fetch(
+            """
+            SELECT * FROM chat_replies
+            WHERE guild_id = $1 AND (
+                target_type = 'server' OR
+                (target_type = 'channel' AND target_id = $2) OR
+                (target_type = 'user' AND target_id = $3) OR
+                (target_type = 'role' AND target_id = ANY($4::bigint[]))
+                )
+            """,
+            guild_id,
+            channel_id,
+            user_id,
+            role_ids,
+        )
+        self.reply_cache[k] = r
+        return r
+
+    async def handle_filter_trigger(self, filter: dict, message: discord.Message):
+        try:
+            await message.delete()
+
+            del_after = filter.get("delete_after", 10)
+            delete_kwarg = {"delete_after": del_after} if del_after > 0 else {}
+
+            if filter.get("custom_message"):
+                ctx_data = {
+                    "author": message.author,
+                    "guild": message.guild,
+                    "channel": message.channel,
+                    "message": message,
+                    "filter_type": filter["filter_type"],
+                    "pattern": filter["pattern"],
+                    "action": filter["action"],
+                    "filter_id": filter.get("filter_id"),
+                }
+                text, embeds, view, files = await self._evaluate_tagscript(
+                    filter["custom_message"], ctx_data
+                )
+                kwargs = {}
+                if text:
+                    kwargs["content"] = text[:2000]
+                if embeds:
+                    kwargs["embeds"] = embeds[:10]
+                if view:
+                    kwargs["view"] = view
+                if files:
+                    kwargs["files"] = files[:10]
+
+                kwargs.update(delete_kwarg)
+                await message.channel.send(**kwargs)
+
+            if filter["action"] == "delete":
+                pass
+            elif filter["action"] == "warn":
+                if not filter.get("custom_message"):
+                    warn_kw = {
+                        **delete_kwarg,
+                        "allowed_mentions": discord.AllowedMentions(users=True),
+                    }
+                    await message.channel.send(
+                        f"{message.author.mention}, your message was deleted because it was violating the chat filter.",
+                        **warn_kw,
+                    )
+            elif filter["action"] == "mute":
+                try:
+                    duration_minutes = filter.get("timeout_minutes", 60)
+                    duration = timedelta(minutes=duration_minutes)
+                    await message.author.timeout(
+                        duration, reason="Violated chat filter."
+                    )
+                    if not filter.get("custom_message"):
+                        mute_kw = {
+                            **delete_kwarg,
+                            "allowed_mentions": discord.AllowedMentions(users=True),
+                        }
+                        await message.channel.send(
+                            f"{message.author.mention} has been timed out for {duration_minutes} minutes for violating the chat filter.",
+                            **mute_kw,
+                        )
+                except discord.Forbidden:
+                    pass
+            elif filter["action"] == "kick":
+                try:
+                    await message.author.kick(reason="Violated the chat filter.")
+                except discord.Forbidden:
+                    pass
+            elif filter["action"] == "ban":
+                try:
+                    await message.author.ban(
+                        reason="Violated the chat filter.",
+                        delete_message_seconds=filter.get("delete_seconds", 0),
+                    )
+                except discord.Forbidden:
+                    pass
+        except discord.Forbidden:
+            pass
+
+    async def handle_react_trigger(self, reaction: dict, message: discord.Message):
+        try:
+            await message.add_reaction(reaction["emoji"])
+        except discord.HTTPException:
+            pass
+
+    async def handle_reply_trigger(self, reply: dict, message: discord.Message):
+        try:
+            ctx_data = {
+                "author": message.author,
+                "guild": message.guild,
+                "channel": message.channel,
+                "message": message,
+                "trigger_type": reply["trigger_type"],
+                "pattern": reply["pattern"],
+                "reply_id": reply.get("reply_id"),
+            }
+            text, embeds, view, files = await self._evaluate_tagscript(
+                reply["response_message"], ctx_data
+            )
+            kwargs = {}
+            if text:
+                kwargs["content"] = text[:2000]
+            if embeds:
+                kwargs["embeds"] = embeds[:10]
+            if view:
+                kwargs["view"] = view
+            if files:
+                kwargs["files"] = files[:10]
+
+            if kwargs:
+                send_kwargs = {**kwargs, "reference": message, "mention_author": False}
+                del_after = reply.get("delete_after", 10)
+                if del_after > 0:
+                    send_kwargs["delete_after"] = del_after
+                await message.channel.send(**send_kwargs)
+        except discord.HTTPException:
+            pass
+
+    @commands.hybrid_group(
+        name="chat",
+        description="Manage automated chat actions (filters, reactions, replies).",
+    )
+    @app_commands.allowed_installs(guilds=True, users=False)
+    @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
+    async def chat_group(self, ctx: commands.Context):
+        pass
+
+    @chat_group.group(name="filter", description="Manage chat filter rules.")
+    async def filter_group(self, ctx: commands.Context):
+        pass
+
+    @chat_group.group(name="react", description="Manage auto-reactions.")
+    async def react_group(self, ctx: commands.Context):
+        pass
+
+    @chat_group.group(name="reply", description="Manage auto-replies.")
+    async def reply_group(self, ctx: commands.Context):
+        pass
+
+    @filter_group.command(name="add", description="Add a chat filter rule.")
+    @commands.has_permissions(manage_messages=True)
+    @app_commands.describe(
+        target="What type to target.",
+        target_id="ID, name, or mention of the target. (for channel/user/role)",
+        filter_type="Type of filter.",
+        pattern="Pattern to match. (regex pattern, comma-separated words, or domain list)",
+        action="Action to take when triggered.",
+        custom_message="Custom message sent in channel when triggered. (supports TagScript.)",
+        timeout_minutes="Timeout duration for mute action. (1-40320 minutes)",
+        delete_days="Days of messages to delete for ban action. (0-7)",
+        delete_after="Seconds to auto-delete response. (0 = keep forever)",
+    )
+    async def filter_add(
+        self,
+        ctx: commands.Context,
+        target: Literal["server", "channel", "user", "role"],
+        target_id: Optional[str] = None,
+        filter_type: Literal["regex", "word", "link"] = "word",
+        pattern: Optional[str] = None,
+        action: Literal["delete", "warn", "mute", "kick", "ban"] = "delete",
+        custom_message: Optional[str] = None,
+        timeout_minutes: Optional[int] = 60,
+        delete_days: Optional[int] = 1,
+        delete_after: Optional[int] = 10,
+    ):
+        await ctx.typing()
+
+        resolved_target_id = None
+        target_name = "server-wide"
+        if pattern is None:
+            await ctx.send("A pattern for filtering is required.", ephemeral=True)
+            return
+        if target == "server":
+            resolved_target_id = None
+        elif target == "channel":
+            try:
+                channel = await commands.TextChannelConverter().convert(ctx, target_id)
+                resolved_target_id = channel.id
+                target_name = channel.mention
+            except Exception:
+                await ctx.send(f"Invalid channel: {target_id}", ephemeral=True)
+                return
+        elif target == "user":
+            try:
+                user = await commands.UserConverter().convert(ctx, target_id)
+                resolved_target_id = user.id
+                target_name = user.mention
+            except Exception:
+                await ctx.send(f"Invalid user: {target_id}", ephemeral=True)
+                return
+        elif target == "role":
+            try:
+                role = await commands.RoleConverter().convert(ctx, target_id)
+                resolved_target_id = role.id
+                target_name = role.mention
+            except Exception:
+                await ctx.send(f"Invalid role: {target_id}", ephemeral=True)
+                return
+
+        if action == "mute":
+            if timeout_minutes < 1:
+                await ctx.send("Timeout must be at least 1 minute.", ephemeral=True)
+                return
+            if timeout_minutes > 40320:
+                await ctx.send(
+                    "Timeout cannot exceed 28 days (40320 minutes).", ephemeral=True
+                )
+                return
+
+        if action == "ban":
+            if delete_days < 0 or delete_days > 7:
+                await ctx.send("Delete days must be between 0 and 7.", ephemeral=True)
+                return
+
+        delete_seconds = delete_days * 86400 if action == "ban" else None
+
+        if filter_type == "regex":
+            try:
+                re.compile(pattern)
+            except re.error as e:
+                await ctx.send(f"Invalid regex pattern: {str(e)}", ephemeral=True)
+                return
+
+        if filter_type in ("word", "link"):
+            words = [w.strip().lower() for w in pattern.split(",") if w.strip()]
+            if not words:
+                await ctx.send("No valid patterns provided.", ephemeral=True)
+                return
+            pattern = ",".join(words)
+
+        try:
+            filter_id = await self.get_next_filter_id(ctx.guild.id)
+
+            existing = await self.db.fetchrow(
+                """
+                SELECT filter_id FROM chat_filters
+                WHERE guild_id = $1 AND target_type = $2
+                AND (target_id = $3 OR (target_id IS NULL AND $3 IS NULL))
+                 AND filter_type = $4 AND pattern = $5
+                """,
+                ctx.guild.id,
+                target,
+                resolved_target_id,
+                filter_type,
+                pattern,
+            )
+
+            if existing:
+                await ctx.send(
+                    f"A similar filter already exists (ID: {existing['filter_id']}).",
+                    ephemeral=True,
+                )
+                return
+
+            await self.db.execute(
+                """
+                INSERT INTO chat_filters (
+                    filter_id, guild_id, target_type, target_id, filter_type, pattern, action,
+                    custom_message, timeout_minutes, delete_seconds, delete_after, added_by, created_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+                """,
+                filter_id,
+                ctx.guild.id,
+                target,
+                resolved_target_id,
+                filter_type,
+                pattern,
+                action,
+                custom_message,
+                timeout_minutes if action == "mute" else None,
+                delete_seconds,
+                delete_after,
+                ctx.author.id,
+            )
+
+            self.filter_cache.clear()
+
+            response = f"Added **{filter_type}** filter for {target_name} -> `{action}`"
+            if action == "mute":
+                response += f" ({timeout_minutes}m)"
+            elif action == "ban":
+                response += f" (delete {delete_days}d)"
+            response += f"\nAuto-delete response: {'Disabled' if delete_after == 0 else f'{delete_after}s'}"
+            if custom_message:
+                response += f"\nCustom message: {custom_message[:100]}"
+
+            await ctx.send(response)
+
+        except Exception as e:
+            await ctx.send(f"Failed to add filter: {str(e)}")
+
+    @filter_group.command(
+        name="list", description="List all chat filters.", aliases=["ls"]
+    )
+    @commands.has_permissions(manage_messages=True)
+    async def filter_list(self, ctx: commands.Context):
+        await ctx.typing()
+
+        rows = await self.db.fetch(
+            """
+            SELECT f.*, COUNT(*) OVER() as total
+            FROM chat_filters f
+            WHERE guild_id = $1
+            ORDER BY target_type, created_at DESC
+            """,
+            ctx.guild.id,
+        )
+
+        if not rows:
+            await ctx.send("No chat filters were set up.", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title=f"Chat Filters ({len(rows)})", color=discord.Color.blurple()
+        )
+
+        for r in rows:
+            if r["target_type"] == "server":
+                target = "Server-wide"
+            elif r["target_type"] == "channel":
+                target = f"{ctx.guild.get_channel(r['target_id']).mention or f'Channel:{r["target_id"]}'}"
+            elif r["target_type"] == "user":
+                target = f"{ctx.guild.get_member(r['target_id']).mention or f'User:{r["target_id"]}'}"
+            else:
+                target = f"{ctx.guild.get_role(r['target_id']).mention or f'Role:{r["target_id"]}'}"
+
+            pattern_display = r["pattern"][:50] + (
+                "..." if len(r["pattern"]) > 50 else ""
+            )
+            del_status = (
+                "Keep Forever"
+                if r.get("delete_after") == 0
+                else f"Delete after {r.get('delete_after', 10)}s"
+            )
+
+            embed.add_field(
+                name=f"`#{r['filter_id']}` {r['filter_type']} -> {r['action']}",
+                value=(
+                    f"**Target:** {target}\n"
+                    f"**Pattern:** `{pattern_display}`\n"
+                    f"**Auto-Delete:** {del_status}\n"
+                    f"**Added:** <t:{int(r['created_at'].timestamp())}:R>"
+                    + ("\n**Custom Message:** Yes" if r.get("custom_message") else "")
+                ),
+                inline=False,
+            )
+
+        await ctx.send(embed=embed)
+
+    @filter_group.command(
+        name="remove", description="Remove a filter by ID.", aliases=["rm"]
+    )
+    @commands.has_permissions(manage_messages=True)
+    @app_commands.describe(filter_id="The filter rule ID to remove.")
+    async def filter_remove(self, ctx: commands.Context, filter_id: int):
+        await ctx.typing()
+
+        result = await self.db.fetchrow(
+            "DELETE FROM chat_filters WHERE guild_id = $1 AND filter_id = $2 RETURNING filter_type, target_type",
+            ctx.guild.id,
+            filter_id,
+        )
+
+        if result:
+            self.filter_cache.clear()
+            await ctx.send(
+                f"Removed filter `#{filter_id}` ({result['filter_type']} -> {result['target_type']})."
+            )
+        else:
+            await ctx.send(f"No filter found with ID `{filter_id}`.", ephemeral=True)
+
+    @filter_group.command(name="clear", description="Remove all filters for a target.")
+    @commands.has_permissions(manage_messages=True)
+    @app_commands.describe(
+        target="Target type to clear filters from.",
+        target_id="ID, name, or mention of the target. (for channel/user/role)",
+    )
+    async def filter_clear(
+        self,
+        ctx: commands.Context,
+        target: Literal["server", "channel", "user", "role"],
+        target_id: Optional[str] = None,
+    ):
+        await ctx.typing()
+
+        resolved_target_id = None
+        if target == "channel" and target_id:
+            try:
+                channel = await commands.TextChannelConverter().convert(ctx, target_id)
+                resolved_target_id = channel.id
+            except Exception:
+                await ctx.send(f"Invalid channel: {target_id}", ephemeral=True)
+                return
+        elif target == "user" and target_id:
+            try:
+                user = await commands.UserConverter().convert(ctx, target_id)
+                resolved_target_id = user.id
+            except Exception:
+                await ctx.send(f"Invalid user: {target_id}", ephemeral=True)
+                return
+        elif target == "role" and target_id:
+            try:
+                role = await commands.RoleConverter().convert(ctx, target_id)
+                resolved_target_id = role.id
+            except Exception:
+                await ctx.send(f"Invalid role: {target_id}", ephemeral=True)
+                return
+
+        result = await self.db.execute(
+            """
+            DELETE FROM chat_filters
+            WHERE guild_id = $1 AND target_type = $2
+            AND (target_id = $3 OR (target_id IS NULL AND $3 IS NULL))
+            """,
+            ctx.guild.id,
+            target,
+            resolved_target_id,
+        )
+
+        count = int(result.split()[1]) if result.startswith("DELETE") else 0
+
+        if count > 0:
+            self.filter_cache.clear()
+            await ctx.send(f"Removed {count} filter(s) from {target} target.")
+        else:
+            await ctx.send(
+                f"No filters found for that {target} target.", ephemeral=True
+            )
+
+    @react_group.command(name="add", description="Add an auto-reaction rule.")
+    @commands.has_permissions(manage_messages=True)
+    @app_commands.describe(
+        target="What type to target.",
+        target_id="ID, name, or mention of the target. (for channel/user/role)",
+        trigger_type="Trigger type.",
+        pattern="Pattern to match.",
+        emoji="Emoji to react with. (unicode or <:name:id>)",
+    )
+    async def react_add(
+        self,
+        ctx,
+        target: Literal["server", "channel", "user", "role"],
+        target_id: Optional[str] = None,
+        trigger_type: Literal["regex", "word", "link"] = "word",
+        pattern: Optional[str] = None,
+        emoji: str = "👍",
+    ):
+        await ctx.typing()
+        if not pattern:
+            return await ctx.send("Pattern required.", ephemeral=True)
+        resolved_target_id, target_name = None, "server-wide"
+        if target == "server":
+            pass
+        elif target == "channel":
+            try:
+                ch = await commands.TextChannelConverter().convert(ctx, target_id)
+                resolved_target_id = ch.id
+                target_name = ch.mention
+            except Exception:
+                return await ctx.send(f"Invalid channel: {target_id}", ephemeral=True)
+        elif target == "user":
+            try:
+                u = await commands.UserConverter().convert(ctx, target_id)
+                resolved_target_id = u.id
+                target_name = u.mention
+            except Exception:
+                return await ctx.send(f"Invalid user: {target_id}", ephemeral=True)
+        elif target == "role":
+            try:
+                r = await commands.RoleConverter().convert(ctx, target_id)
+                resolved_target_id = r.id
+                target_name = r.mention
+            except Exception:
+                return await ctx.send(f"Invalid role: {target_id}", ephemeral=True)
+
+        if trigger_type in ("word", "link"):
+            pattern = ",".join(
+                w.strip().lower() for w in pattern.split(",") if w.strip()
+            )
+        rid = await self.get_next_reaction_id(ctx.guild.id)
+        try:
+            await self.db.execute(
+                """INSERT INTO chat_reactions
+                    (reaction_id, guild_id, trigger_type, pattern, emoji, target_type, target_id, added_by)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                """,
+                rid,
+                ctx.guild.id,
+                trigger_type,
+                pattern,
+                emoji,
+                target,
+                resolved_target_id,
+                ctx.author.id,
+            )
+            self.react_cache.clear()
+            await ctx.send(f"Added react rule `#{rid}` for {target_name} -> `{emoji}`")
+        except Exception as e:
+            await ctx.send(f"Failed: {e}")
+
+    @react_group.command(
+        name="list", description="List auto-reaction rules.", aliases=["ls"]
+    )
+    @commands.has_permissions(manage_messages=True)
+    async def react_list(self, ctx):
+        await ctx.typing()
+        rows = await self.db.fetch(
+            "SELECT * FROM chat_reactions WHERE guild_id = $1 ORDER BY created_at DESC",
+            ctx.guild.id,
+        )
+        if not rows:
+            return await ctx.send("No react rules set.", ephemeral=True)
+        e = discord.Embed(
+            title=f"Auto-Reactions ({len(rows)})", color=discord.Color.gold()
+        )
+        for r in rows:
+            target = (
+                "Server-wide"
+                if r["target_type"] == "server"
+                else f"{ctx.guild.get_channel(r['target_id']).mention if r['target_type'] == 'channel' else ctx.guild.get_member(r['target_id']).mention if r['target_type'] == 'user' else ctx.guild.get_role(r['target_id']).mention}"
+            )
+            e.add_field(
+                name=f"`#{r['reaction_id']}` {r['trigger_type']} -> {r['emoji']}",
+                value=f"**Target:** {target}\n**Pattern:** `{r['pattern'][:40]}`",
+                inline=False,
+            )
+        await ctx.send(embed=e)
+
+    @react_group.command(
+        name="remove", description="Remove a react rule by ID.", aliases=["rm"]
+    )
+    @app_commands.describe(rule_id="The react rule ID to remove.")
+    @commands.has_permissions(manage_messages=True)
+    async def react_remove(self, ctx, rule_id: int):
+        await ctx.typing()
+        res = await self.db.fetchrow(
+            "DELETE FROM chat_reactions WHERE guild_id = $1 AND reaction_id = $2 RETURNING target_type",
+            ctx.guild.id,
+            rule_id,
+        )
+        if res:
+            self.react_cache.clear()
+            await ctx.send(f"Removed react rule `#{rule_id}` ({res['target_type']}).")
+        else:
+            await ctx.send(f"No rule `#{rule_id}` found.", ephemeral=True)
+
+    @react_group.command(
+        name="clear", description="Clear all react rules for a target."
+    )
+    @app_commands.describe(
+        target="What type to target.",
+        target_id="ID, name, or mention of the target. (for channel/user/role)",
+    )
+    @commands.has_permissions(manage_messages=True)
+    async def react_clear(
+        self,
+        ctx,
+        target: Literal["server", "channel", "user", "role"],
+        target_id: Optional[str] = None,
+    ):
+        await ctx.typing()
+        resolved = None
+        if target in ("channel", "user", "role") and target_id:
+            try:
+                conv = (
+                    commands.TextChannelConverter()
+                    if target == "channel"
+                    else commands.UserConverter()
+                    if target == "user"
+                    else commands.RoleConverter()
+                )
+                obj = await conv.convert(ctx, target_id)
+                resolved = obj.id
+            except Exception:
+                return await ctx.send(f"Invalid {target}: {target_id}", ephemeral=True)
+        res = await self.db.execute(
+            "DELETE FROM chat_reactions WHERE guild_id = $1 AND target_type = $2 AND (target_id = $3 OR (target_id IS NULL AND $3 IS NULL))",
+            ctx.guild.id,
+            target,
+            resolved,
+        )
+        cnt = int(res.split()[1]) if res.startswith("DELETE") else 0
+        if cnt > 0:
+            self.react_cache.clear()
+            await ctx.send(f"Cleared {cnt} react rule(s).")
+        else:
+            await ctx.send("No rules found.", ephemeral=True)
+
+    @reply_group.command(name="add", description="Add an auto-reply rule.")
+    @commands.has_permissions(manage_messages=True)
+    @app_commands.describe(
+        target="What type to target.",
+        target_id="ID, name, or mention of the target. (for channel/user/role)",
+        trigger_type="Trigger type.",
+        pattern="Pattern to match.",
+        response_message="Reply message. (supports TagScript.)",
+        delete_after="Seconds to auto-delete reply. (0 = keep forever)",
+    )
+    async def reply_add(
+        self,
+        ctx,
+        target: Literal["server", "channel", "user", "role"],
+        target_id: Optional[str] = None,
+        trigger_type: Literal["regex", "word", "link"] = "word",
+        pattern: Optional[str] = None,
+        response_message: Optional[str] = None,
+        delete_after: int = 10,
+    ):
+        await ctx.typing()
+        if not pattern or not response_message:
+            return await ctx.send(
+                "Pattern and response message required.", ephemeral=True
+            )
+        resolved_target_id, target_name = None, "server-wide"
+        if target == "server":
+            pass
+        elif target == "channel":
+            try:
+                ch = await commands.TextChannelConverter().convert(ctx, target_id)
+                resolved_target_id = ch.id
+                target_name = ch.mention
+            except Exception:
+                return await ctx.send(f"Invalid channel: {target_id}", ephemeral=True)
+        elif target == "user":
+            try:
+                u = await commands.UserConverter().convert(ctx, target_id)
+                resolved_target_id = u.id
+                target_name = u.mention
+            except Exception:
+                return await ctx.send(f"Invalid user: {target_id}", ephemeral=True)
+        elif target == "role":
+            try:
+                r = await commands.RoleConverter().convert(ctx, target_id)
+                resolved_target_id = r.id
+                target_name = r.mention
+            except Exception:
+                return await ctx.send(f"Invalid role: {target_id}", ephemeral=True)
+
+        if trigger_type in ("word", "link"):
+            pattern = ",".join(
+                w.strip().lower() for w in pattern.split(",") if w.strip()
+            )
+        rid = await self.get_next_reply_id(ctx.guild.id)
+        try:
+            await self.db.execute(
+                """INSERT INTO chat_replies
+                (reply_id, guild_id, trigger_type, pattern, response_message, target_type, target_id, delete_after, added_by)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                """,
+                rid,
+                ctx.guild.id,
+                trigger_type,
+                pattern,
+                response_message,
+                target,
+                resolved_target_id,
+                delete_after,
+                ctx.author.id,
+            )
+            self.reply_cache.clear()
+            await ctx.send(
+                f"Added reply rule `#{rid}` for {target_name}\nAuto-delete: {'Disabled' if delete_after == 0 else f'{delete_after}s'}"
+            )
+        except Exception as e:
+            await ctx.send(f"Failed: {e}")
+
+    @reply_group.command(
+        name="list", description="List auto-reply rules.", aliases=["ls"]
+    )
+    @commands.has_permissions(manage_messages=True)
+    async def reply_list(self, ctx):
+        await ctx.typing()
+        rows = await self.db.fetch(
+            "SELECT * FROM chat_replies WHERE guild_id = $1 ORDER BY created_at DESC",
+            ctx.guild.id,
+        )
+        if not rows:
+            return await ctx.send("No reply rules set.", ephemeral=True)
+        e = discord.Embed(
+            title=f"Auto-Replies ({len(rows)})", color=discord.Color.teal()
+        )
+        for r in rows:
+            target = (
+                "Server-wide"
+                if r["target_type"] == "server"
+                else f"{ctx.guild.get_channel(r['target_id']).mention if r['target_type'] == 'channel' else ctx.guild.get_member(r['target_id']).mention if r['target_type'] == 'user' else ctx.guild.get_role(r['target_id']).mention}"
+            )
+            del_status = (
+                "Keep Forever"
+                if r.get("delete_after") == 0
+                else f"{r['delete_after']}s"
+            )
+            e.add_field(
+                name=f"`#{r['reply_id']}` {r['trigger_type']}",
+                value=f"**Target:** {target}\n**Pattern:** `{r['pattern'][:40]}`\n**Reply:** `{r['response_message'][:30]}...`\n**Auto-Delete:** {del_status}",
+                inline=False,
+            )
+        await ctx.send(embed=e)
+
+    @reply_group.command(
+        name="remove", description="Remove a reply rule by ID.", aliases=["rm"]
+    )
+    @app_commands.describe(rule_id="The reply rule ID to remove.")
+    @commands.has_permissions(manage_messages=True)
+    async def reply_remove(self, ctx, rule_id: int):
+        await ctx.typing()
+        res = await self.db.fetchrow(
+            "DELETE FROM chat_replies WHERE guild_id = $1 AND reply_id = $2 RETURNING target_type",
+            ctx.guild.id,
+            rule_id,
+        )
+        if res:
+            self.reply_cache.clear()
+            await ctx.send(f"Removed reply rule `#{rule_id}` ({res['target_type']}).")
+        else:
+            await ctx.send(f"No rule `#{rule_id}` found.", ephemeral=True)
+
+    @reply_group.command(
+        name="clear", description="Clear all reply rules for a target."
+    )
+    @app_commands.describe(
+        target="What type to target.",
+        target_id="ID, name, or mention of the target. (for channel/user/role)",
+    )
+    @commands.has_permissions(manage_messages=True)
+    async def reply_clear(
+        self,
+        ctx,
+        target: Literal["server", "channel", "user", "role"],
+        target_id: Optional[str] = None,
+    ):
+        await ctx.typing()
+        resolved = None
+        if target in ("channel", "user", "role") and target_id:
+            try:
+                conv = (
+                    commands.TextChannelConverter()
+                    if target == "channel"
+                    else commands.UserConverter()
+                    if target == "user"
+                    else commands.RoleConverter()
+                )
+                obj = await conv.convert(ctx, target_id)
+                resolved = obj.id
+            except Exception:
+                return await ctx.send(f"Invalid {target}: {target_id}", ephemeral=True)
+        res = await self.db.execute(
+            "DELETE FROM chat_replies WHERE guild_id=$1 AND target_type=$2 AND (target_id=$3 OR (target_id IS NULL AND $3 IS NULL))",
+            ctx.guild.id,
+            target,
+            resolved,
+        )
+        cnt = int(res.split()[1]) if res.startswith("DELETE") else 0
+        if cnt > 0:
+            self.reply_cache.clear()
+            await ctx.send(f"Cleared {cnt} reply rule(s).")
+        else:
+            await ctx.send("No rules found.", ephemeral=True)
+
     @commands.hybrid_group(
         name="logger", description="Manage event logging for different channels."
     )
@@ -972,7 +1808,7 @@ class Moderation(commands.Cog):
                     text, embeds, view, files = await self._evaluate_tagscript(
                         rule["template"], ctx_data
                     )
-                    if text.startswith("[TagScript Error:"):
+                    if text.startswith("[TagScript Error: "):
                         await log_channel.send(text[:2000])
                         already_sent.add(log_channel_id)
                         continue
@@ -1226,7 +2062,7 @@ class Moderation(commands.Cog):
                     parts = [f"**{label}:** {len(embed_list)} embed(s)"]
                     for i, e in enumerate(embed_list[:3]):
                         if e.type == "rich":
-                            line = f"Embed {i + 1}:"
+                            line = f"Embed {i + 1}: "
                             if e.title:
                                 line += f" {e.title[:60]}"
                             if e.url:
@@ -2640,6 +3476,56 @@ class Moderation(commands.Cog):
                 except Exception:
                     pass
 
+        reactions = await self.get_reactions_for_context(
+            message.guild.id, message.channel.id, message.author.id, role_ids
+        )
+        if reactions:
+            for r in reactions:
+                try:
+                    match = False
+                    if r["trigger_type"] == "regex" and re.search(
+                        r["pattern"], message.content, re.IGNORECASE
+                    ):
+                        match = True
+                    elif r["trigger_type"] == "word" and any(
+                        w.lower() in message.content.lower()
+                        for w in r["pattern"].split(",")
+                    ):
+                        match = True
+                    elif r["trigger_type"] == "link" and self.check_forbidden_links(
+                        message.content, r["pattern"]
+                    ):
+                        match = True
+                    if match:
+                        await self.handle_react_trigger(r, message)
+                except Exception:
+                    pass
+
+        replies = await self.get_replies_for_context(
+            message.guild.id, message.channel.id, message.author.id, role_ids
+        )
+        if replies:
+            for r in replies:
+                try:
+                    match = False
+                    if r["trigger_type"] == "regex" and re.search(
+                        r["pattern"], message.content, re.IGNORECASE
+                    ):
+                        match = True
+                    elif r["trigger_type"] == "word" and any(
+                        w.lower() in message.content.lower()
+                        for w in r["pattern"].split(",")
+                    ):
+                        match = True
+                    elif r["trigger_type"] == "link" and self.check_forbidden_links(
+                        message.content, r["pattern"]
+                    ):
+                        match = True
+                    if match:
+                        await self.handle_reply_trigger(r, message)
+                except Exception:
+                    pass
+
     def check_forbidden_links(self, content: str, pattern: str) -> bool:
         forbidden = [d.strip().lower() for d in pattern.split(",") if d.strip()]
 
@@ -2660,7 +3546,7 @@ class Moderation(commands.Cog):
             clean = (
                 re.sub(r"[\[\](){}]", "", obs).replace("•", ".").replace(" dot ", ".")
             )
-            clean = re.sub(r"\s+", "", clean)
+            clean = re.sub(r"\s+", ".", clean)
             if "." in clean:
                 domains.append(clean)
 
@@ -2679,365 +3565,6 @@ class Moderation(commands.Cog):
                     return True
 
         return False
-
-    async def handle_filter_trigger(self, filter: dict, message: discord.Message):
-        try:
-            await message.delete()
-
-            if filter.get("custom_message"):
-                ctx_data = {
-                    "author": message.author,
-                    "guild": message.guild,
-                    "channel": message.channel,
-                    "message": message,
-                    "filter_type": filter["filter_type"],
-                    "pattern": filter["pattern"],
-                    "action": filter["action"],
-                    "filter_id": filter.get("filter_id"),
-                }
-                text, embeds, view, files = await self._evaluate_tagscript(
-                    filter["custom_message"], ctx_data
-                )
-                kwargs = {}
-                if text:
-                    kwargs["content"] = text[:2000]
-                if embeds:
-                    kwargs["embeds"] = embeds[:10]
-                if view:
-                    kwargs["view"] = view
-                if files:
-                    kwargs["files"] = files[:10]
-                await message.channel.send(
-                    delete_after=10,
-                    **kwargs,
-                )
-
-            if filter["action"] == "delete":
-                pass
-            elif filter["action"] == "warn":
-                if not filter.get("custom_message"):
-                    await message.channel.send(
-                        f"{message.author.mention}, your message was deleted because it was violating the chat filter.",
-                        delete_after=10,
-                        allowed_mentions=discord.AllowedMentions(users=True),
-                    )
-            elif filter["action"] == "mute":
-                try:
-                    duration_minutes = filter.get("timeout_minutes", 60)
-                    duration = timedelta(minutes=duration_minutes)
-                    await message.author.timeout(
-                        duration, reason="Violated chat filter."
-                    )
-                    if not filter.get("custom_message"):
-                        await message.channel.send(
-                            f"{message.author.mention} has been timed out for {duration_minutes} minutes for violating the chat filter.",
-                            delete_after=10,
-                            allowed_mentions=discord.AllowedMentions(users=True),
-                        )
-                except discord.Forbidden:
-                    pass
-            elif filter["action"] == "kick":
-                try:
-                    await message.author.kick(reason="Violated the chat filter.")
-                except discord.Forbidden:
-                    pass
-            elif filter["action"] == "ban":
-                try:
-                    await message.author.ban(
-                        reason="Violated the chat filter.",
-                        delete_message_seconds=filter.get("delete_seconds", 0),
-                    )
-                except discord.Forbidden:
-                    pass
-        except discord.Forbidden:
-            pass
-
-    @commands.hybrid_group(name="filter", description="Manage chat filter rules.")
-    @app_commands.allowed_installs(guilds=True, users=False)
-    @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
-    async def filter_group(self, ctx: commands.Context):
-        pass
-
-    @filter_group.command(name="add", description="Add a chat filter rule.")
-    @commands.has_permissions(manage_messages=True)
-    @app_commands.describe(
-        target="What type to target.",
-        target_id="ID or mention of the target. (for channel/user/role)",
-        filter_type="Type of filter.",
-        pattern="Pattern to match. (regex pattern, comma-separated words, or domain list)",
-        action="Action to take when triggered.",
-        custom_message="Custom message sent in channel when triggered. (supports TagScript.)",
-        timeout_minutes="Timeout duration for mute action. (1-40320 minutes)",
-        delete_days="Days of messages to delete for ban action. (0-7)",
-    )
-    async def filter_add(
-        self,
-        ctx: commands.Context,
-        target: Literal["server", "channel", "user", "role"],
-        target_id: Optional[str] = None,
-        filter_type: Literal["regex", "word", "link"] = "word",
-        pattern: Optional[str] = None,
-        action: Literal["delete", "warn", "mute", "kick", "ban"] = "delete",
-        custom_message: Optional[str] = None,
-        timeout_minutes: Optional[int] = 60,
-        delete_days: Optional[int] = 1,
-    ):
-        await ctx.typing()
-
-        resolved_target_id = None
-        target_name = "server-wide"
-        if pattern is None:
-            await ctx.send("A pattern for filtering is required.", ephemeral=True)
-            return
-        if target == "server":
-            resolved_target_id = None
-        elif target == "channel":
-            try:
-                channel = await commands.TextChannelConverter().convert(ctx, target_id)
-                resolved_target_id = channel.id
-                target_name = channel.mention
-            except Exception:
-                await ctx.send(f"Invalid channel: {target_id}", ephemeral=True)
-                return
-        elif target == "user":
-            try:
-                user = await commands.UserConverter().convert(ctx, target_id)
-                resolved_target_id = user.id
-                target_name = user.mention
-            except Exception:
-                await ctx.send(f"Invalid user: {target_id}", ephemeral=True)
-                return
-        elif target == "role":
-            try:
-                role = await commands.RoleConverter().convert(ctx, target_id)
-                resolved_target_id = role.id
-                target_name = role.mention
-            except Exception:
-                await ctx.send(f"Invalid role: {target_id}", ephemeral=True)
-                return
-
-        if action == "mute":
-            if timeout_minutes < 1:
-                await ctx.send("Timeout must be at least 1 minute.", ephemeral=True)
-                return
-            if timeout_minutes > 40320:
-                await ctx.send(
-                    "Timeout cannot exceed 28 days (40320 minutes).", ephemeral=True
-                )
-                return
-
-        if action == "ban":
-            if delete_days < 0 or delete_days > 7:
-                await ctx.send("Delete days must be between 0 and 7.", ephemeral=True)
-                return
-
-        delete_seconds = delete_days * 86400 if action == "ban" else None
-
-        if filter_type == "regex":
-            try:
-                re.compile(pattern)
-            except re.error as e:
-                await ctx.send(f"Invalid regex pattern: {str(e)}", ephemeral=True)
-                return
-
-        if filter_type in ("word", "link"):
-            words = [w.strip().lower() for w in pattern.split(",") if w.strip()]
-            if not words:
-                await ctx.send("No valid patterns provided.", ephemeral=True)
-                return
-            pattern = ",".join(words)
-
-        try:
-            filter_id = await self.get_next_filter_id(ctx.guild.id)
-
-            existing = await self.db.fetchrow(
-                """
-                SELECT filter_id FROM chat_filters
-                WHERE guild_id = $1 AND target_type = $2
-                AND (target_id = $3 OR (target_id IS NULL AND $3 IS NULL))
-                AND filter_type = $4 AND pattern = $5
-                """,
-                ctx.guild.id,
-                target,
-                resolved_target_id,
-                filter_type,
-                pattern,
-            )
-
-            if existing:
-                await ctx.send(
-                    f"A similar filter already exists (ID: {existing['filter_id']}).",
-                    ephemeral=True,
-                )
-                return
-
-            await self.db.execute(
-                """
-                INSERT INTO chat_filters (
-                    filter_id, guild_id, target_type, target_id, filter_type, pattern, action,
-                    custom_message, timeout_minutes, delete_seconds, added_by, created_at
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
-                """,
-                filter_id,
-                ctx.guild.id,
-                target,
-                resolved_target_id,
-                filter_type,
-                pattern,
-                action,
-                custom_message,
-                timeout_minutes if action == "mute" else None,
-                delete_seconds,
-                ctx.author.id,
-            )
-
-            self.filter_cache.clear()
-
-            response = f"Added **{filter_type}** filter for {target_name} -> `{action}`"
-            if action == "mute":
-                response += f" ({timeout_minutes}m)"
-            elif action == "ban":
-                response += f" (delete {delete_days}d)"
-            if custom_message:
-                response += f"\nCustom message: {custom_message[:100]}"
-
-            await ctx.send(response)
-
-        except Exception as e:
-            await ctx.send(f"Failed to add filter: {str(e)}")
-
-    @filter_group.command(
-        name="list", description="List all chat filters.", aliases=["ls"]
-    )
-    @commands.has_permissions(manage_messages=True)
-    async def filter_list(self, ctx: commands.Context):
-        await ctx.typing()
-
-        rows = await self.db.fetch(
-            """
-            SELECT f.*, COUNT(*) OVER() as total
-            FROM chat_filters f
-            WHERE guild_id = $1
-            ORDER BY target_type, created_at DESC
-            """,
-            ctx.guild.id,
-        )
-
-        if not rows:
-            await ctx.send("No chat filters were set up.", ephemeral=True)
-            return
-
-        embed = discord.Embed(
-            title=f"Chat Filters ({len(rows)})", color=discord.Color.blurple()
-        )
-
-        for r in rows:
-            if r["target_type"] == "server":
-                target = "Server-wide"
-            elif r["target_type"] == "channel":
-                target = f"{ctx.guild.get_channel(r['target_id']).mention or f'Channel:{r['target_id']}'}"
-            elif r["target_type"] == "user":
-                target = f"{ctx.guild.get_member(r['target_id']).mention or f'User:{r['target_id']}'}"
-            else:
-                target = f"{ctx.guild.get_role(r['target_id']).mention or f'Role:{r['target_id']}'}"
-
-            pattern_display = r["pattern"][:50] + (
-                "..." if len(r["pattern"]) > 50 else ""
-            )
-
-            embed.add_field(
-                name=f"`#{r['filter_id']}` {r['filter_type']} -> {r['action']}",
-                value=(
-                    f"**Target:** {target}\n"
-                    f"**Pattern:** `{pattern_display}`\n"
-                    f"**Added:** <t:{int(r['created_at'].timestamp())}:R>"
-                    + ("\n**Custom Message:** Yes" if r.get("custom_message") else "")
-                ),
-                inline=False,
-            )
-
-        await ctx.send(embed=embed)
-
-    @filter_group.command(
-        name="remove", description="Remove a filter by ID.", aliases=["rm"]
-    )
-    @commands.has_permissions(manage_messages=True)
-    @app_commands.describe(filter_id="The filter ID to remove.")
-    async def filter_remove(self, ctx: commands.Context, filter_id: int):
-        await ctx.typing()
-
-        result = await self.db.fetchrow(
-            "DELETE FROM chat_filters WHERE guild_id = $1 AND filter_id = $2 RETURNING filter_type, target_type",
-            ctx.guild.id,
-            filter_id,
-        )
-
-        if result:
-            self.filter_cache.clear()
-            await ctx.send(
-                f"Removed filter `#{filter_id}` ({result['filter_type']} -> {result['target_type']})."
-            )
-        else:
-            await ctx.send(f"No filter found with ID `{filter_id}`.", ephemeral=True)
-
-    @filter_group.command(name="clear", description="Remove all filters for a target.")
-    @commands.has_permissions(manage_messages=True)
-    @app_commands.describe(
-        target="Target type to clear filters from.",
-        target_id="ID or mention of the target. (for channel/user/role)",
-    )
-    async def filter_clear(
-        self,
-        ctx: commands.Context,
-        target: Literal["server", "channel", "user", "role"],
-        target_id: Optional[str] = None,
-    ):
-        await ctx.typing()
-
-        resolved_target_id = None
-        if target == "channel" and target_id:
-            try:
-                channel = await commands.TextChannelConverter().convert(ctx, target_id)
-                resolved_target_id = channel.id
-            except Exception:
-                await ctx.send(f"Invalid channel: {target_id}", ephemeral=True)
-                return
-        elif target == "user" and target_id:
-            try:
-                user = await commands.UserConverter().convert(ctx, target_id)
-                resolved_target_id = user.id
-            except Exception:
-                await ctx.send(f"Invalid user: {target_id}", ephemeral=True)
-                return
-        elif target == "role" and target_id:
-            try:
-                role = await commands.RoleConverter().convert(ctx, target_id)
-                resolved_target_id = role.id
-            except Exception:
-                await ctx.send(f"Invalid role: {target_id}", ephemeral=True)
-                return
-
-        result = await self.db.execute(
-            """
-            DELETE FROM chat_filters
-            WHERE guild_id = $1 AND target_type = $2
-            AND (target_id = $3 OR (target_id IS NULL AND $3 IS NULL))
-            """,
-            ctx.guild.id,
-            target,
-            resolved_target_id,
-        )
-
-        count = int(result.split()[1]) if result.startswith("DELETE") else 0
-
-        if count > 0:
-            self.filter_cache.clear()
-            await ctx.send(f"Removed {count} filter(s) from {target} target.")
-        else:
-            await ctx.send(
-                f"No filters found for that {target} target.", ephemeral=True
-            )
 
     @commands.hybrid_group(
         name="slowmode", description="Set manual slowmode on any target."
