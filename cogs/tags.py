@@ -570,6 +570,7 @@ class MediaProcessor:
                 "shadow_blur": {"required": False, "type": int},
                 "wrap_width": {"required": False, "type": int},
                 "line_spacing": {"required": False, "type": int},
+                "preserve_emoji_colors": {"default": True, "type": bool},
             },
             "caption": {
                 "input_key": {"required": True, "type": str},
@@ -587,6 +588,7 @@ class MediaProcessor:
                 "shadow_blur": {"default": 0, "type": int},
                 "wrap_width": {"required": False, "type": int},
                 "line_spacing": {"default": 5, "type": int},
+                "preserve_emoji_colors": {"default": True, "type": bool},
             },
             "audioputreplace": {
                 "input_key": {"required": True, "type": str},
@@ -900,7 +902,8 @@ class MediaProcessor:
         overlay_key: str = None,
         user_vars: dict = None,
         as_float: bool = False,
-    ):
+        dimension_type: str = "width",
+    ) -> Union[int, float]:
 
         expr = str(expr).strip()
 
@@ -961,10 +964,18 @@ class MediaProcessor:
 
         if expr.endswith("%"):
             try:
-                pct = float(expr[:-1])
-                base = vars.get("iw", 0) or vars.get("ih", 0)
-                val = base * pct / 100.0
-                return val if as_float else int(val)
+                pct = float(expr[:-1]) / 100.0
+                vars = await self._build_expr_vars(context_key, overlay_key, user_vars)
+
+                if dimension_type == "width":
+                    base = vars.get("iw", 0)
+                elif dimension_type == "height":
+                    base = vars.get("ih", 0)
+                else:
+                    base = vars.get("iw", vars.get("ih", 0))
+
+                val = base * pct
+                return float(val) if as_float else int(val)
             except Exception:
                 pass
 
@@ -980,13 +991,17 @@ class MediaProcessor:
         context_key: str = None,
         overlay_key: str = None,
         user_vars: dict = None,
+        dimension_type: str = "width",
     ) -> int:
-        return await self._resolve_expr(
+        result = await self._resolve_expr(
             dim_str,
             context_key=context_key,
             overlay_key=overlay_key,
             user_vars=user_vars,
+            as_float=False,
+            dimension_type=dimension_type,
         )
+        return result
 
     async def _resolve_timestamp(
         self,
@@ -999,6 +1014,13 @@ class MediaProcessor:
         s = str(time_val).strip()
         if re.match(r"^\d+:\d{2}:\d{2}(\.\d+)?$", s):
             return s
+        mm_ss_match = re.match(r"^(\d+):([0-5]?\d)(?:\.(\d+))?$", s)
+        if mm_ss_match:
+            minutes = int(mm_ss_match.group(1))
+            seconds = int(mm_ss_match.group(2))
+            fractional = mm_ss_match.group(3) or "0"
+            total_seconds = minutes * 60 + seconds + float(f"0.{fractional}")
+            return str(total_seconds)
         if s.endswith("%"):
             info = await self._get_full_media_info(input_key)
             try:
@@ -2764,8 +2786,12 @@ class MediaProcessor:
             return f"Error: {input_key} is not a video or image file."
         output_file = self._get_temp_path(input_path.suffix[1:])
 
-        width = await self._resolve_dimension(width_expr, input_key)
-        height = await self._resolve_dimension(height_expr, input_key)
+        width = await self._resolve_dimension(
+            width_expr, input_key, dimension_type="width"
+        )
+        height = await self._resolve_dimension(
+            height_expr, input_key, dimension_type="height"
+        )
 
         cmd = [
             "ffmpeg",
@@ -2805,8 +2831,12 @@ class MediaProcessor:
         input_key = kwargs["input_key"]
         x = kwargs["x"]
         y = kwargs["y"]
-        width = await self._resolve_dimension(kwargs["width"], context_key=input_key)
-        height = await self._resolve_dimension(kwargs["height"], context_key=input_key)
+        width = await self._resolve_dimension(
+            kwargs["width"], context_key=input_key, dimension_type="width"
+        )
+        height = await self._resolve_dimension(
+            kwargs["height"], context_key=input_key, dimension_type="height"
+        )
         output_key = kwargs["output_key"]
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
@@ -3303,6 +3333,83 @@ class MediaProcessor:
         except Exception as e:
             return await self._handle_error("text", e)
 
+    async def _fetch_discord_emoji(self, emoji_id: str, animated: bool = False):
+        try:
+            async with aiohttp.ClientSession() as session:
+                if animated:
+                    url = f"https://cdn.discordapp.com/emojis/{emoji_id}.gif"
+                    async with session.get(url) as resp:
+                        if resp.status == 200:
+                            emoji_data = await resp.read()
+                            emoji_img = await asyncio.to_thread(
+                                Image.open, BytesIO(emoji_data)
+                            )
+
+                            if getattr(emoji_img, "is_animated", False):
+                                emoji_img.seek(0)
+
+                            if emoji_img.mode != "RGBA":
+                                emoji_img = await asyncio.to_thread(
+                                    emoji_img.convert, "RGBA"
+                                )
+                            return emoji_img
+
+                url = f"https://cdn.discordapp.com/emojis/{emoji_id}.webp"
+                async with session.get(url) as resp:
+                    if resp.status == 200:
+                        emoji_data = await resp.read()
+                        emoji_img = await asyncio.to_thread(
+                            Image.open, BytesIO(emoji_data)
+                        )
+                        if emoji_img.mode != "RGBA":
+                            emoji_img = await asyncio.to_thread(
+                                emoji_img.convert, "RGBA"
+                            )
+                        return emoji_img
+
+                url = f"https://cdn.discordapp.com/emojis/{emoji_id}.png"
+                async with session.get(url) as resp:
+                    if resp.status == 200:
+                        emoji_data = await resp.read()
+                        emoji_img = await asyncio.to_thread(
+                            Image.open, BytesIO(emoji_data)
+                        )
+                        if emoji_img.mode != "RGBA":
+                            emoji_img = await asyncio.to_thread(
+                                emoji_img.convert, "RGBA"
+                            )
+                        return emoji_img
+
+        except Exception:
+            return None
+        return None
+
+    async def _download_twemoji(self, emoji_unicode: str):
+        try:
+            codepoints = []
+            for c in emoji_unicode:
+                if 0xFE00 <= ord(c) <= 0xFE0F:
+                    continue
+                codepoints.append(f"{ord(c):x}")
+
+            if not codepoints:
+                return None
+
+            codepoint = "-".join(codepoints)
+            url = f"https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/72x72/{codepoint}.png"
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as resp:
+                    if resp.status == 200:
+                        emoji_data = await resp.read()
+                        emoji_img = await asyncio.to_thread(
+                            Image.open, BytesIO(emoji_data)
+                        )
+                        return await asyncio.to_thread(emoji_img.convert, "RGBA")
+        except Exception:
+            return None
+        return None
+
     async def _text_impl(self, **kwargs) -> str:
         def get_text_size(font, text):
             bbox = font.getbbox(text)
@@ -3310,30 +3417,35 @@ class MediaProcessor:
             height = bbox[3] - bbox[1]
             return width, height
 
-        async def download_twemoji(emoji_unicode):
-            try:
-                codepoints = []
-                for c in emoji_unicode:
-                    if 0xFE00 <= ord(c) <= 0xFE0F or 0x1F3FB <= ord(c) <= 0x1F3FF:
+        def get_visual_width(text, font, font_size):
+            width = 0
+            i = 0
+            while i < len(text):
+                if text[i:].startswith("<") and ":" in text[i:]:
+                    m = re.match(r"<(a?):([^:]+):(\d+)>", text[i:])
+                    if m:
+                        width += font_size
+                        i += len(m.group(0))
                         continue
-                    codepoints.append(f"{ord(c):x}")
+                char = text[i]
+                width += font.getlength(char)
+                i += 1
+            return int(width)
 
-                if not codepoints:
-                    return None
-
-                codepoint = "-".join(codepoints)
-                url = f"https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/72x72/{codepoint}.png"
-
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(url) as resp:
-                        if resp.status == 200:
-                            emoji_data = await resp.read()
-                            emoji_img = await asyncio.to_thread(
-                                Image.open, BytesIO(emoji_data)
-                            )
-                            return await asyncio.to_thread(emoji_img.convert, "RGBA")
-            except Exception:
-                return None
+        def wrap_text(text, font, font_size, max_width):
+            words = text.split(" ")
+            lines = []
+            current_line = ""
+            for word in words:
+                test_line = current_line + word + " "
+                if get_visual_width(test_line, font, font_size) <= max_width:
+                    current_line = test_line
+                else:
+                    lines.append(current_line.rstrip())
+                    current_line = word + " "
+            if current_line:
+                lines.append(current_line.rstrip())
+            return lines
 
         try:
             input_key = kwargs["input_key"]
@@ -3344,6 +3456,7 @@ class MediaProcessor:
             color = kwargs["color"]
             output_key = kwargs["output_key"]
             font_name = kwargs["font"]
+            preserve_emoji_colors = kwargs.get("preserve_emoji_colors", True)
 
             outline_color = kwargs.get("outline_color", None)
             outline_width = kwargs.get("outline_width", None)
@@ -3368,27 +3481,14 @@ class MediaProcessor:
 
             draw = await asyncio.to_thread(ImageDraw.Draw, base_img)
 
-            def wrap_text(draw, text, font, max_width):
-                words = text.split(" ")
-                lines = []
-                current_line = ""
-                for word in words:
-                    test_line = current_line + word + " "
-                    width, _ = get_text_size(font, test_line)
-                    if width <= max_width:
-                        current_line = test_line
-                    else:
-                        lines.append(current_line.rstrip())
-                        current_line = word + " "
-                lines.append(current_line.rstrip())
-                return lines
-
             if wrap_width:
-                lines = await asyncio.to_thread(wrap_text, draw, text, font, wrap_width)
+                lines = await asyncio.to_thread(
+                    wrap_text, text, font, font_size, wrap_width
+                )
             else:
                 lines = [text]
 
-            text_width = max(get_text_size(font, line)[0] for line in lines)
+            text_width = max(get_visual_width(line, font, font_size) for line in lines)
             text_height_total = (
                 sum(get_text_size(font, line)[1] + line_spacing for line in lines)
                 - line_spacing
@@ -3397,19 +3497,30 @@ class MediaProcessor:
             if str(x_raw).lower() == "center":
                 x = (base_img.width - text_width) // 2
             else:
-                x = await self._resolve_dimension(x_raw, input_key)
+                x = await self._resolve_dimension(
+                    x_raw, input_key, dimension_type="width"
+                )
+                x = max(0, min(x, base_img.width - text_width))
 
             if str(y_raw).lower() == "center":
                 y = (base_img.height - text_height_total) // 2
             else:
-                y = await self._resolve_dimension(y_raw, input_key)
+                y = await self._resolve_dimension(
+                    y_raw, input_key, dimension_type="height"
+                )
+                y = max(0, min(y, base_img.height - text_height_total))
 
             txt_layer = await asyncio.to_thread(Image.new, "L", base_img.size, 0)
             txt_draw = await asyncio.to_thread(ImageDraw.Draw, txt_layer)
 
+            emoji_layer = await asyncio.to_thread(
+                Image.new, "RGBA", base_img.size, (0, 0, 0, 0)
+            )
+
             cur_y = y
             for line in lines:
-                line_width, line_height = get_text_size(font, line)
+                line_width = get_visual_width(line, font, font_size)
+                line_height = get_text_size(font, line)[1]
                 cur_x = (
                     (base_img.width - line_width) // 2
                     if str(x_raw).lower() == "center"
@@ -3419,11 +3530,126 @@ class MediaProcessor:
                 i = 0
                 while i < len(line):
                     char = line[i]
-                    if (
-                        ord(char) >= 0x1F600
-                        and ord(char) <= 0x1F64F
-                        or ord(char) >= 0x1F300
-                        and ord(char) <= 0x1F5FF
+
+                    if line[i:].startswith("<") and ":" in line[i:]:
+                        custom_match = re.match(r"<(a?):([^:]+):(\d+)>", line[i:])
+                        if custom_match:
+                            animated = custom_match.group(1) == "a"
+                            emoji_id = custom_match.group(3)
+                            emoji_len = len(custom_match.group(0))
+
+                            emoji_img = await self._fetch_discord_emoji(
+                                emoji_id, animated
+                            )
+                            if emoji_img:
+                                emoji_size = int(font_size)
+                                emoji_img = await asyncio.to_thread(
+                                    emoji_img.resize, (emoji_size, emoji_size)
+                                )
+
+                                if preserve_emoji_colors:
+                                    await asyncio.to_thread(
+                                        emoji_layer.paste,
+                                        emoji_img,
+                                        (char_x, cur_y),
+                                        emoji_img,
+                                    )
+                                else:
+                                    color_result = await asyncio.to_thread(
+                                        self._parse_color, color, emoji_img.size
+                                    )
+
+                                    if isinstance(color_result, tuple):
+                                        tinted_data = []
+                                        original_data = emoji_img.getdata()
+                                        tint_color = color_result
+
+                                        for original_pixel in original_data:
+                                            alpha = original_pixel[3]
+                                            if alpha > 0:
+                                                luminance = int(
+                                                    0.299 * original_pixel[0]
+                                                    + 0.587 * original_pixel[1]
+                                                    + 0.114 * original_pixel[2]
+                                                )
+                                                factor = luminance / 255.0
+                                                r = int(tint_color[0] * factor)
+                                                g = int(tint_color[1] * factor)
+                                                b = int(tint_color[2] * factor)
+                                                tinted_pixel = (r, g, b, alpha)
+                                            else:
+                                                tinted_pixel = (0, 0, 0, 0)
+                                            tinted_data.append(tinted_pixel)
+
+                                        tinted = await asyncio.to_thread(
+                                            Image.new, "RGBA", emoji_img.size
+                                        )
+                                        await asyncio.to_thread(
+                                            tinted.putdata, tinted_data
+                                        )
+                                    else:
+                                        gradient_img = color_result
+                                        tinted = await asyncio.to_thread(
+                                            Image.new, "RGBA", emoji_img.size
+                                        )
+                                        original_data = emoji_img.getdata()
+                                        if gradient_img.size != emoji_img.size:
+                                            gradient_img = await asyncio.to_thread(
+                                                gradient_img.resize, emoji_img.size
+                                            )
+                                        gradient_data = gradient_img.getdata()
+
+                                        tinted_data = []
+                                        for original_pixel, gradient_pixel in zip(
+                                            original_data, gradient_data
+                                        ):
+                                            alpha = original_pixel[3]
+                                            if alpha > 0:
+                                                luminance = int(
+                                                    0.299 * original_pixel[0]
+                                                    + 0.587 * original_pixel[1]
+                                                    + 0.114 * original_pixel[2]
+                                                )
+                                                factor = luminance / 255.0
+                                                r = int(gradient_pixel[0] * factor)
+                                                g = int(gradient_pixel[1] * factor)
+                                                b = int(gradient_pixel[2] * factor)
+                                                tinted_pixel = (r, g, b, alpha)
+                                            else:
+                                                tinted_pixel = (0, 0, 0, 0)
+                                            tinted_data.append(tinted_pixel)
+
+                                        await asyncio.to_thread(
+                                            tinted.putdata, tinted_data
+                                        )
+
+                                    await asyncio.to_thread(
+                                        emoji_layer.paste,
+                                        tinted,
+                                        (char_x, cur_y),
+                                        tinted,
+                                    )
+
+                                char_x += emoji_size
+                            else:
+                                await asyncio.to_thread(
+                                    txt_draw.text,
+                                    (char_x, cur_y),
+                                    char,
+                                    font=font,
+                                    fill=255,
+                                )
+                                char_x += get_text_size(font, char)[0]
+
+                            i += emoji_len
+                            continue
+
+                    elif (
+                        (0x1F600 <= ord(char) <= 0x1F64F)
+                        or (0x1F300 <= ord(char) <= 0x1F5FF)
+                        or (0x1F900 <= ord(char) <= 0x1F9FF)
+                        or (0x2600 <= ord(char) <= 0x26FF)
+                        or (0x2700 <= ord(char) <= 0x27BF)
                     ):
                         emoji_end = i + 1
                         while emoji_end < len(line) and (
@@ -3431,24 +3657,122 @@ class MediaProcessor:
                             or 0x1F3FB <= ord(line[emoji_end]) <= 0x1F3FF
                         ):
                             emoji_end += 1
+
+                        if (
+                            (0x1F1E6 <= ord(char) <= 0x1F1FF)
+                            and emoji_end < len(line)
+                            and (0x1F1E6 <= ord(line[emoji_end]) <= 0x1F1FF)
+                        ):
+                            emoji_end += 1
+
                         emoji = line[i:emoji_end]
-                        emoji_img = await download_twemoji(emoji)
+                        emoji_img = await self._download_twemoji(emoji)
                         if emoji_img:
                             emoji_size = int(font_size)
                             emoji_img = await asyncio.to_thread(
                                 emoji_img.resize, (emoji_size, emoji_size)
                             )
-                            await asyncio.to_thread(
-                                txt_layer.paste, emoji_img, (char_x, cur_y), emoji_img
-                            )
+
+                            if preserve_emoji_colors:
+                                await asyncio.to_thread(
+                                    emoji_layer.paste,
+                                    emoji_img,
+                                    (char_x, cur_y),
+                                    emoji_img,
+                                )
+                            else:
+                                color_result = await asyncio.to_thread(
+                                    self._parse_color, color, emoji_img.size
+                                )
+
+                                if isinstance(color_result, tuple):
+                                    tinted_data = []
+                                    original_data = emoji_img.getdata()
+                                    tint_color = color_result
+
+                                    for original_pixel in original_data:
+                                        alpha = original_pixel[3]
+                                        if alpha > 0:
+                                            luminance = int(
+                                                0.299 * original_pixel[0]
+                                                + 0.587 * original_pixel[1]
+                                                + 0.114 * original_pixel[2]
+                                            )
+                                            factor = luminance / 255.0
+                                            r = int(tint_color[0] * factor)
+                                            g = int(tint_color[1] * factor)
+                                            b = int(tint_color[2] * factor)
+                                            tinted_pixel = (r, g, b, alpha)
+                                        else:
+                                            tinted_pixel = (0, 0, 0, 0)
+                                        tinted_data.append(tinted_pixel)
+
+                                    tinted = await asyncio.to_thread(
+                                        Image.new, "RGBA", emoji_img.size
+                                    )
+                                    await asyncio.to_thread(tinted.putdata, tinted_data)
+                                else:
+                                    gradient_img = color_result
+                                    tinted = await asyncio.to_thread(
+                                        Image.new, "RGBA", emoji_img.size
+                                    )
+                                    original_data = emoji_img.getdata()
+                                    if gradient_img.size != emoji_img.size:
+                                        gradient_img = await asyncio.to_thread(
+                                            gradient_img.resize, emoji_img.size
+                                        )
+                                    gradient_data = gradient_img.getdata()
+
+                                    tinted_data = []
+                                    for original_pixel, gradient_pixel in zip(
+                                        original_data, gradient_data
+                                    ):
+                                        alpha = original_pixel[3]
+                                        if alpha > 0:
+                                            luminance = int(
+                                                0.299 * original_pixel[0]
+                                                + 0.587 * original_pixel[1]
+                                                + 0.114 * original_pixel[2]
+                                            )
+                                            factor = luminance / 255.0
+                                            r = int(gradient_pixel[0] * factor)
+                                            g = int(gradient_pixel[1] * factor)
+                                            b = int(gradient_pixel[2] * factor)
+                                            tinted_pixel = (r, g, b, alpha)
+                                        else:
+                                            tinted_pixel = (0, 0, 0, 0)
+                                        tinted_data.append(tinted_pixel)
+
+                                    await asyncio.to_thread(tinted.putdata, tinted_data)
+
+                                await asyncio.to_thread(
+                                    emoji_layer.paste,
+                                    tinted,
+                                    (char_x, cur_y),
+                                    tinted,
+                                )
+
                             char_x += emoji_size
-                            i = emoji_end
-                            continue
-                    await asyncio.to_thread(
-                        txt_draw.text, (char_x, cur_y), char, font=font, fill=255
-                    )
-                    char_x += get_text_size(font, char)[0]
-                    i += 1
+                        else:
+                            await asyncio.to_thread(
+                                txt_draw.text,
+                                (char_x, cur_y),
+                                char,
+                                font=font,
+                                fill=255,
+                            )
+                            char_x += get_text_size(font, char)[0]
+
+                        i = emoji_end
+                        continue
+
+                    else:
+                        await asyncio.to_thread(
+                            txt_draw.text, (char_x, cur_y), char, font=font, fill=255
+                        )
+                        char_x += get_text_size(font, char)[0]
+                        i += 1
+
                 cur_y += line_height + line_spacing
 
             if shadow_color:
@@ -3459,19 +3783,59 @@ class MediaProcessor:
 
                 cur_y = y
                 for line in lines:
-                    line_width, line_height = get_text_size(font, line)
+                    line_width = get_visual_width(line, font, font_size)
+                    line_height = get_text_size(font, line)[1]
                     cur_x = (
                         (base_img.width - line_width) // 2
                         if str(x_raw).lower() == "center"
                         else x
                     )
-                    await asyncio.to_thread(
-                        shadow_draw.text,
-                        (cur_x + ox, cur_y + oy),
-                        line,
-                        font=font,
-                        fill=255,
-                    )
+                    temp_x = cur_x
+                    temp_i = 0
+                    while temp_i < len(line):
+                        char = line[temp_i]
+
+                        if line[temp_i:].startswith("<") and ":" in line[temp_i:]:
+                            custom_match = re.match(
+                                r"<(a?):([^:]+):(\d+)>", line[temp_i:]
+                            )
+                            if custom_match:
+                                emoji_len = len(custom_match.group(0))
+                                temp_x += font_size
+                                temp_i += emoji_len
+                                continue
+                        elif preserve_emoji_colors and (
+                            (0x1F600 <= ord(char) <= 0x1F64F)
+                            or (0x1F300 <= ord(char) <= 0x1F5FF)
+                            or (0x1F900 <= ord(char) <= 0x1F9FF)
+                            or (0x2600 <= ord(char) <= 0x26FF)
+                            or (0x2700 <= ord(char) <= 0x27BF)
+                        ):
+                            emoji_end = temp_i + 1
+                            while emoji_end < len(line) and (
+                                line[emoji_end] in "\ufe0f\u200d"
+                                or 0x1F3FB <= ord(line[emoji_end]) <= 0x1F3FF
+                            ):
+                                emoji_end += 1
+                            if (
+                                (0x1F1E6 <= ord(char) <= 0x1F1FF)
+                                and emoji_end < len(line)
+                                and (0x1F1E6 <= ord(line[emoji_end]) <= 0x1F1FF)
+                            ):
+                                emoji_end += 1
+                            temp_i = emoji_end
+                            temp_x += font_size
+                            continue
+                        else:
+                            await asyncio.to_thread(
+                                shadow_draw.text,
+                                (temp_x + ox, cur_y + oy),
+                                char,
+                                font=font,
+                                fill=255,
+                            )
+                            temp_x += get_text_size(font, char)[0]
+                            temp_i += 1
                     cur_y += line_height + line_spacing
 
                 if shadow_blur > 0:
@@ -3509,25 +3873,74 @@ class MediaProcessor:
                 )
                 outline_draw = await asyncio.to_thread(ImageDraw.Draw, outline_layer)
 
-                for dx in range(-outline_width, outline_width + 1):
-                    for dy in range(-outline_width, outline_width + 1):
-                        if dx * dx + dy * dy <= outline_width * outline_width:
-                            cur_y = y
-                            for line in lines:
-                                line_width, line_height = get_text_size(font, line)
-                                cur_x = (
-                                    (base_img.width - line_width) // 2
-                                    if str(x_raw).lower() == "center"
-                                    else x
-                                )
-                                await asyncio.to_thread(
-                                    outline_draw.text,
-                                    (cur_x + dx, cur_y + dy),
-                                    line,
-                                    font=font,
-                                    fill=255,
-                                )
-                                cur_y += line_height + line_spacing
+                cur_y = y
+                for line in lines:
+                    line_width = get_visual_width(line, font, font_size)
+                    line_height = get_text_size(font, line)[1]
+                    cur_x = (
+                        (base_img.width - line_width) // 2
+                        if str(x_raw).lower() == "center"
+                        else x
+                    )
+                    for dx in range(-outline_width, outline_width + 1):
+                        for dy in range(-outline_width, outline_width + 1):
+                            if dx * dx + dy * dy <= outline_width * outline_width:
+                                temp_x = cur_x
+                                temp_i = 0
+                                while temp_i < len(line):
+                                    char = line[temp_i]
+
+                                    if (
+                                        line[temp_i:].startswith("<")
+                                        and ":" in line[temp_i:]
+                                    ):
+                                        custom_match = re.match(
+                                            r"<(a?):([^:]+):(\d+)>", line[temp_i:]
+                                        )
+                                        if custom_match:
+                                            emoji_len = len(custom_match.group(0))
+                                            temp_x += font_size
+                                            temp_i += emoji_len
+                                            continue
+                                    elif preserve_emoji_colors and (
+                                        (0x1F600 <= ord(char) <= 0x1F64F)
+                                        or (0x1F300 <= ord(char) <= 0x1F5FF)
+                                        or (0x1F900 <= ord(char) <= 0x1F9FF)
+                                        or (0x2600 <= ord(char) <= 0x26FF)
+                                        or (0x2700 <= ord(char) <= 0x27BF)
+                                    ):
+                                        emoji_end = temp_i + 1
+                                        while emoji_end < len(line) and (
+                                            line[emoji_end] in "\ufe0f\u200d"
+                                            or 0x1F3FB
+                                            <= ord(line[emoji_end])
+                                            <= 0x1F3FF
+                                        ):
+                                            emoji_end += 1
+                                        if (
+                                            (0x1F1E6 <= ord(char) <= 0x1F1FF)
+                                            and emoji_end < len(line)
+                                            and (
+                                                0x1F1E6
+                                                <= ord(line[emoji_end])
+                                                <= 0x1F1FF
+                                            )
+                                        ):
+                                            emoji_end += 1
+                                        temp_i = emoji_end
+                                        temp_x += font_size
+                                        continue
+                                    else:
+                                        await asyncio.to_thread(
+                                            outline_draw.text,
+                                            (temp_x + dx, cur_y + dy),
+                                            char,
+                                            font=font,
+                                            fill=255,
+                                        )
+                                        temp_x += get_text_size(font, char)[0]
+                                        temp_i += 1
+                    cur_y += line_height + line_spacing
 
                 outline_img = await asyncio.to_thread(
                     Image.new, "RGBA", base_img.size, (0, 0, 0, 0)
@@ -3556,37 +3969,37 @@ class MediaProcessor:
                 )
 
             bbox = txt_layer.getbbox()
-            if not bbox:
-                return "Error: Text bounding box could not be determined"
+            if bbox:
+                gradient_img = await asyncio.to_thread(
+                    self._parse_color, color, (bbox[2] - bbox[0], bbox[3] - bbox[1])
+                )
+                if isinstance(gradient_img, Image.Image):
+                    gradient_crop = await asyncio.to_thread(
+                        gradient_img.crop, (0, 0, bbox[2] - bbox[0], bbox[3] - bbox[1])
+                    )
+                    temp_grad = await asyncio.to_thread(
+                        Image.new, "RGBA", base_img.size, (0, 0, 0, 0)
+                    )
+                    await asyncio.to_thread(
+                        temp_grad.paste, gradient_crop, (bbox[0], bbox[1])
+                    )
+                    mask = txt_layer.point(lambda p: 255 if p > 0 else 0, mode="1")
+                    colored = await asyncio.to_thread(
+                        Image.composite, temp_grad, base_img, mask
+                    )
+                    base_img = colored
+                else:
+                    solid_color = gradient_img
+                    mask = txt_layer.point(lambda p: 255 if p > 0 else 0, mode="1")
+                    await asyncio.to_thread(draw.bitmap, (0, 0), mask, fill=solid_color)
 
-            gradient_img = await asyncio.to_thread(
-                self._parse_color, color, (bbox[2] - bbox[0], bbox[3] - bbox[1])
-            )
-            result = await asyncio.to_thread(base_img.copy)
-
-            if isinstance(gradient_img, Image.Image):
-                gradient_layer = await asyncio.to_thread(
-                    Image.new, "RGBA", base_img.size, (0, 0, 0, 0)
-                )
-                gradient_crop = await asyncio.to_thread(
-                    gradient_img.crop, (0, 0, bbox[2] - bbox[0], bbox[3] - bbox[1])
-                )
-                await asyncio.to_thread(
-                    gradient_layer.paste, gradient_crop, (bbox[0], bbox[1])
-                )
-                await asyncio.to_thread(
-                    result.paste, gradient_layer, (0, 0), mask=txt_layer
-                )
-            else:
-                solid_color = await asyncio.to_thread(
-                    Image.new, "RGBA", base_img.size, gradient_img
-                )
-                await asyncio.to_thread(
-                    result.paste, solid_color, (0, 0), mask=txt_layer
+            if emoji_layer.getbbox():
+                base_img = await asyncio.to_thread(
+                    Image.alpha_composite, base_img, emoji_layer
                 )
 
             output_file = self._get_temp_path("png")
-            await asyncio.to_thread(result.save, output_file)
+            await asyncio.to_thread(base_img.save, output_file)
             self.media_cache[output_key] = str(output_file)
             return f"media://{output_file.as_posix()}"
 
@@ -3612,6 +4025,9 @@ class MediaProcessor:
         padding = kwargs.get("padding", 0)
         auto_padding = padding == 0
         font_size = kwargs.get("font_size", 0)
+        if font_size is None:
+            font_size = 0
+        font_size = int(font_size)
         auto_font_size = font_size == 0
         font = kwargs.get("font", "Futura Condensed Extra Bold")
         color = kwargs.get("color", "#000000")
@@ -3624,6 +4040,7 @@ class MediaProcessor:
         wrap_width = kwargs.get("wrap_width", 0)
         auto_wrap_width = not wrap_width or wrap_width <= 0
         line_spacing = kwargs.get("line_spacing", 5)
+        preserve_emoji_colors = kwargs.get("preserve_emoji_colors", True)
 
         if input_key not in self.media_cache:
             return f"Error: {input_key} not found"
@@ -3644,77 +4061,54 @@ class MediaProcessor:
         if width == 0 or height == 0:
             return "Error: could not determine input media dimensions"
 
-        if auto_font_size or auto_padding or auto_wrap_width:
-            base_font_scale = 0.07
+        if auto_font_size:
             reference_dimension = min(width, height)
+            font_size = max(12, int(reference_dimension * 0.07))
 
-            if auto_font_size:
-                font_size = max(12, int(reference_dimension * base_font_scale))
+            is_only_emojis = True
+            i = 0
+            while i < len(text):
+                c = text[i]
+                if c.isspace():
+                    i += 1
+                    continue
+                if c == "<" and ">" in text[i:]:
+                    match = re.match(r"<(a?):([^:]+):(\d+)>", text[i:])
+                    if match:
+                        i += len(match.group(0))
+                        continue
+                if not (
+                    (0x1F600 <= ord(c) <= 0x1F64F)
+                    or (0x1F300 <= ord(c) <= 0x1F5FF)
+                    or (0x1F900 <= ord(c) <= 0x1F9FF)
+                    or (0x2600 <= ord(c) <= 0x26FF)
+                    or (0x2700 <= ord(c) <= 0x27BF)
+                ):
+                    is_only_emojis = False
+                    break
+                i += 1
 
-            font_obj = await self.load_font(font, font_size)
+            if is_only_emojis:
+                font_size = max(12, int(reference_dimension * 0.1))
 
-            def get_text_size(font, text):
-                bbox = font.getbbox(text)
-                return bbox[2] - bbox[0], bbox[3] - bbox[1]
+        if auto_wrap_width:
+            wrap_width = width - int(width * 0.1)
 
-            def wrap_text(text, font, max_width):
-                words = text.split(" ")
-                lines = []
-                current_line = ""
-                for word in words:
-                    test_line = current_line + word + " "
-                    test_width, _ = get_text_size(font, test_line)
-                    if test_width <= max_width:
-                        current_line = test_line
-                    else:
-                        lines.append(current_line.rstrip())
-                        current_line = word + " "
-                lines.append(current_line.rstrip())
-                return lines
-
-            if auto_wrap_width:
-                wrap_width = width - int(width * 0.1)
-
-            lines = await asyncio.to_thread(wrap_text, text, font_obj, wrap_width)
-
-            def measure_multiline_text(font, lines):
-                ascent, descent = font.getmetrics()
-                line_height = ascent + descent
-                return (line_height + line_spacing) * len(lines) - line_spacing
-
-            total_text_height = await asyncio.to_thread(
-                measure_multiline_text, font_obj, lines
-            )
-
-            buffer = int(font_size * 0.3)
-            if auto_padding:
-                padding = total_text_height + buffer
-
-        padding = int(padding)
-        bg_img = await asyncio.to_thread(
-            self._parse_color, background_color, (width, padding)
-        )
-        if isinstance(bg_img, tuple):
-            bg_img = await asyncio.to_thread(
-                Image.new, "RGBA", (width, padding), bg_img
-            )
-        caption_file = self._get_temp_path("png")
-        await asyncio.to_thread(bg_img.save, caption_file)
-
-        text_key = f"{output_key}_text"
+        temp_text_key = f"{output_key}_temp"
         await self._create_image(
-            media_key=text_key,
-            width=str(width),
-            height=str(padding),
+            media_key=temp_text_key,
+            width=str(wrap_width),
+            height=str(height),
             color="transparent",
         )
+
         await self._text(
-            input_key=text_key,
+            input_key=temp_text_key,
             text=text,
-            x="center",
-            y=str((padding - total_text_height) // 2),
+            x="0",
+            y="0",
             color=color,
-            output_key=text_key,
+            output_key=temp_text_key,
             font_size=font_size,
             font=font,
             outline_color=outline_color,
@@ -3724,11 +4118,50 @@ class MediaProcessor:
             shadow_blur=shadow_blur,
             wrap_width=wrap_width,
             line_spacing=line_spacing,
+            preserve_emoji_colors=preserve_emoji_colors,
         )
+
+        temp_path = Path(self.media_cache[temp_text_key])
+        temp_img = await asyncio.to_thread(Image.open, temp_path)
+        temp_img = await asyncio.to_thread(temp_img.convert, "RGBA")
+
+        bbox = temp_img.getbbox()
+        if bbox:
+            text_width = bbox[2] - bbox[0]
+            text_height = bbox[3] - bbox[1]
+            temp_cropped = await asyncio.to_thread(temp_img.crop, bbox)
+        else:
+            text_width = 0
+            text_height = 0
+            temp_cropped = None
+
+        if auto_padding:
+            padding = text_height + int(font_size * 0.3)
+        padding = int(padding)
+
+        y_center = max(0, (padding - text_height) // 2)
+        x_center = max(0, (width - text_width) // 2)
+
+        bg_img = await asyncio.to_thread(
+            self._parse_color, background_color, (width, padding)
+        )
+        if isinstance(bg_img, tuple):
+            bg_img = await asyncio.to_thread(
+                Image.new, "RGBA", (width, padding), bg_img
+            )
+
+        if temp_cropped:
+            await asyncio.to_thread(
+                bg_img.paste, temp_cropped, (x_center, y_center), temp_cropped
+            )
+
+        caption_file = self._get_temp_path("png")
+        await asyncio.to_thread(bg_img.save, caption_file)
 
         output_file = self._get_temp_path(input_path.suffix[1:])
         overlay_height = padding
-        padded_height = max(height + overlay_height, height + overlay_height + 2)
+        padded_height = height + overlay_height
+
         cmd = [
             "ffmpeg",
             "-hide_banner",
@@ -3736,17 +4169,16 @@ class MediaProcessor:
             str(input_path),
             "-i",
             str(caption_file),
-            "-i",
-            self.media_cache[text_key],
             "-filter_complex",
-            "[1:v][2:v]overlay=0:0[bgtext];"
-            f"[0:v]pad=width={width}:height={padded_height}:y={overlay_height}:color=black,setsar=1:1[padded];"
-            "[padded][bgtext]overlay=0:0,setsar=1:1[v]",
-            *(["-frames:v", "1"] if not is_video and not is_gif else []),
+            f"[0:v]pad=width={width}:height={padded_height}:y={overlay_height}:color=black[padded];"
+            "[1:v]scale=iw:ih[bg];"
+            "[padded][bg]overlay=0:0[outv]",
             "-map",
-            "[v]",
+            "[outv]",
             "-map",
             "0:a?",
+            "-y",
+            output_file.as_posix(),
         ]
 
         if is_webp:
@@ -3764,7 +4196,7 @@ class MediaProcessor:
                     "webp",
                 ]
             )
-        else:
+        elif is_video or is_gif:
             cmd.extend(
                 [
                     "-preset",
@@ -3777,8 +4209,9 @@ class MediaProcessor:
                     "+faststart",
                 ]
             )
+        else:
+            cmd.extend(["-frames:v", "1"])
 
-        cmd.extend(["-y", output_file.as_posix()])
         success, error = await self._run_ffmpeg(cmd)
         if success:
             self.media_cache[output_key] = str(output_file)
@@ -4083,8 +4516,12 @@ class MediaProcessor:
 
     async def _create_image_impl(self, **kwargs) -> str:
         try:
-            width = await self._resolve_dimension(kwargs["width"])
-            height = await self._resolve_dimension(kwargs["height"])
+            width = await self._resolve_dimension(
+                kwargs["width"], dimension_type="width"
+            )
+            height = await self._resolve_dimension(
+                kwargs["height"], dimension_type="height"
+            )
             size = (width, height)
 
             color = await asyncio.to_thread(self._parse_color, kwargs["color"], size)
@@ -5136,8 +5573,8 @@ class Tags(commands.Cog):
                     - speed [input_key] [speed] [output_key]
                     - volume [input_key] [volume_level] [output_key]
                     - overlay [base_key] [overlay_key] [x] [y] [output_key] [loop_media] [loop_overlay] [preserve_length]
-                    - text [input_key] [text] [x] [y] [color] [output_key] [font_size] [font] [outline_color] [outline_width] [shadow_color] [shadow_offset] [shadow_blur] [wrap_width] [line_spacing]
-                    - caption [input_key] [text] [output_key] [font_size] [font] [color] [background_color] [padding] [outline_color] [outline_width] [shadow_color] [shadow_offset] [shadow_blur] [wrap_width] [line_spacing]
+                    - text [input_key] [text] [x] [y] [color] [output_key] [font_size] [font] [outline_color] [outline_width] [shadow_color] [shadow_offset] [shadow_blur] [wrap_width] [line_spacing] [preserve_emoji_colors]
+                    - caption [input_key] [text] [output_key] [font_size] [font] [color] [background_color] [padding] [outline_color] [outline_width] [shadow_color] [shadow_offset] [shadow_blur] [wrap_width] [line_spacing] [preserve_emoji_colors]
                     - audioputreplace [media_key] [audio_key] [output_key] [preserve_length] [force_video] [loop_media]
                     - audioputmix [media_key] [audio_key] [output_key] [volume] [preserve_length] [loop_audio] [loop_media]
                     - tremolo [input_key] [frequency] [depth] [output_key]

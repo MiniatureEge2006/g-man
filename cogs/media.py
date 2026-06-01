@@ -395,6 +395,7 @@ class Media(commands.Cog):
         shadow_blur="Shadow blur.",
         wrap_width="Text wrap width.",
         line_spacing="Text line spacing amount.",
+        preserve_emoji_colors="Whether to preserve emoji's original colors.",
     )
     async def text(
         self,
@@ -414,6 +415,7 @@ class Media(commands.Cog):
         shadow_blur: int = 0,
         wrap_width: int = None,
         line_spacing: int = 5,
+        preserve_emoji_colors: bool = True,
     ):
         await ctx.typing()
         processor = self.new_processor()
@@ -442,6 +444,7 @@ class Media(commands.Cog):
             shadow_blur=shadow_blur,
             wrap_width=wrap_width,
             line_spacing=line_spacing,
+            preserve_emoji_colors=preserve_emoji_colors,
         )
 
     @iv.command(name="caption", description="Caption media.")
@@ -461,6 +464,7 @@ class Media(commands.Cog):
         shadow_blur="Caption font shadow blur amount.",
         wrap_width="Text wrap width amount.",
         line_spacing="Text line spacing amount.",
+        preserve_emoji_colors="Whether to preserve emoji's original colors.",
     )
     async def caption(
         self,
@@ -480,6 +484,7 @@ class Media(commands.Cog):
         shadow_blur: int = 0,
         wrap_width: int = None,
         line_spacing: int = 5,
+        preserve_emoji_colors: bool = True,
     ):
         await ctx.typing()
         processor = self.new_processor()
@@ -508,6 +513,7 @@ class Media(commands.Cog):
             shadow_blur=shadow_blur,
             wrap_width=wrap_width,
             line_spacing=line_spacing,
+            preserve_emoji_colors=preserve_emoji_colors,
         )
 
     @iv.command(name="fps", description="Change a video or image's frame rate.")
