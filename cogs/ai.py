@@ -66,9 +66,6 @@ class AI(commands.Cog):
                             if stripped_line:
                                 cleaned_lines.append(stripped_line)
 
-                            if len(cleaned_lines) >= 10:
-                                break
-
                         cleaned_doc = "\n".join(cleaned_lines)
 
                         docs[name] = cleaned_doc
