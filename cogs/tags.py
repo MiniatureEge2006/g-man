@@ -4094,21 +4094,21 @@ class MediaProcessor:
         if auto_wrap_width:
             wrap_width = width - int(width * 0.1)
 
-        temp_text_key = f"{output_key}_temp"
+        temp_calc_key = f"{output_key}_calc"
         await self._create_image(
-            media_key=temp_text_key,
+            media_key=temp_calc_key,
             width=str(wrap_width),
-            height=str(height),
+            height=str(height * 2),
             color="transparent",
         )
 
         await self._text(
-            input_key=temp_text_key,
+            input_key=temp_calc_key,
             text=text,
             x="0",
             y="0",
             color=color,
-            output_key=temp_text_key,
+            output_key=temp_calc_key,
             font_size=font_size,
             font=font,
             outline_color=outline_color,
@@ -4121,23 +4121,29 @@ class MediaProcessor:
             preserve_emoji_colors=preserve_emoji_colors,
         )
 
-        temp_path = Path(self.media_cache[temp_text_key])
-        temp_img = await asyncio.to_thread(Image.open, temp_path)
-        temp_img = await asyncio.to_thread(temp_img.convert, "RGBA")
+        calc_path = Path(self.media_cache[temp_calc_key])
+        calc_img = await asyncio.to_thread(Image.open, calc_path)
+        calc_img = await asyncio.to_thread(calc_img.convert, "RGBA")
 
-        bbox = temp_img.getbbox()
+        bbox = calc_img.getbbox()
         if bbox:
             text_width = bbox[2] - bbox[0]
             text_height = bbox[3] - bbox[1]
-            temp_cropped = await asyncio.to_thread(temp_img.crop, bbox)
+            temp_cropped = await asyncio.to_thread(calc_img.crop, bbox)
         else:
             text_width = 0
             text_height = 0
             temp_cropped = None
 
         if auto_padding:
-            padding = text_height + int(font_size * 0.3)
+            padding = text_height + int(font_size * 0.5)
         padding = int(padding)
+
+        if text_height > padding:
+            padding = text_height + int(font_size * 0.3)
+
+        if text.count("\n") > 1 or len(text) > 100:
+            padding = padding + int(font_size * 0.2)
 
         y_center = max(0, (padding - text_height) // 2)
         x_center = max(0, (width - text_width) // 2)
@@ -4151,6 +4157,11 @@ class MediaProcessor:
             )
 
         if temp_cropped:
+            if x_center + text_width > width:
+                x_center = max(0, width - text_width)
+            if y_center + text_height > padding:
+                y_center = max(0, padding - text_height)
+
             await asyncio.to_thread(
                 bg_img.paste, temp_cropped, (x_center, y_center), temp_cropped
             )
