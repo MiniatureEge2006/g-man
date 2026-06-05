@@ -29,53 +29,6 @@ class AI(commands.Cog):
             self._session = aiohttp.ClientSession()
         return self._session
 
-    def _get_tagscript_function_docs(
-        self, ctx: commands.Context, function_names: list[str] = None
-    ) -> dict[str, str]:
-        tags_cog = ctx.bot.get_cog("Tags")
-        if (
-            not tags_cog
-            or not hasattr(tags_cog, "formatter")
-            or not hasattr(tags_cog.formatter, "functions")
-        ):
-            return {}
-
-        formatter = tags_cog.formatter
-        available_functions = formatter.functions
-
-        target_function_names = (
-            function_names if function_names is not None else available_functions.keys()
-        )
-        target_function_names = [
-            name for name in target_function_names if name in available_functions
-        ]
-
-        docs = {}
-        for name in target_function_names:
-            func = available_functions.get(name)
-            if func:
-                try:
-                    docstring = inspect.getdoc(func)
-                    if docstring:
-                        lines = docstring.strip().splitlines()
-
-                        cleaned_lines = []
-                        for line in lines:
-                            stripped_line = line.strip()
-
-                            if stripped_line:
-                                cleaned_lines.append(stripped_line)
-
-                        cleaned_doc = "\n".join(cleaned_lines)
-
-                        docs[name] = cleaned_doc
-                    else:
-                        docs[name] = f"{name}: No documentation string found."
-                except Exception:
-                    docs[name] = f"{name}: Function reference not found."
-
-        return docs
-
     def get_conversation(self, ctx) -> tuple:
         return (
             (ctx.guild.id, ctx.channel.id, ctx.author.id)
@@ -125,7 +78,8 @@ class AI(commands.Cog):
         if self.db:
             if ctx.guild:
                 server_row = await self.db.fetchrow(
-                    "SELECT prompt FROM guild_prompts WHERE guild_id = $1", ctx.guild.id
+                    "SELECT prompt FROM guild_prompts WHERE guild_id = $1",
+                    ctx.guild.id,
                 )
                 if server_row and server_row["prompt"]:
                     base_prompt = server_row["prompt"]
@@ -147,53 +101,92 @@ class AI(commands.Cog):
         if tags and hasattr(tags, "formatter"):
             try:
                 text, _, _, _ = await tags.formatter.format(base_prompt, ctx)
-
                 if text:
                     base_prompt = text
             except Exception:
                 pass
 
-        formatted_docs = ""
-        if content:
-            tags_cog = ctx.bot.get_cog("Tags")
-            available_function_names = set()
-            if (
-                tags_cog
-                and hasattr(tags_cog, "formatter")
-                and hasattr(tags_cog.formatter, "functions")
-            ):
-                available_function_names = set(tags_cog.formatter.functions.keys())
+        return base_prompt.strip()
 
-            potential_function_mentions = set(
-                re.findall(r"\{(\w+)(?:[^\}]*)\}", content)
+    async def get_ai_tools(
+        self,
+        ctx: commands.Context,
+        content: str,
+        tools_list: list,
+        add_tools_list: list,
+        remove_tools_list: list,
+    ) -> list:
+        tags_cog = ctx.bot.get_cog("Tags")
+        if (
+            not tags_cog
+            or not hasattr(tags_cog, "formatter")
+            or not hasattr(tags_cog.formatter, "functions")
+        ):
+            return []
+
+        available_functions = tags_cog.formatter.functions
+        available_function_names = set(available_functions.keys())
+
+        potential_function_mentions = set(re.findall(r"\{(\w+)(?:[^\}]*)\}", content))
+        content_words = set(re.findall(r"\b\w+\b", content))
+        direct_name_mentions = content_words.intersection(available_function_names)
+        mentioned_function_names = potential_function_mentions.union(
+            direct_name_mentions
+        )
+
+        if tools_list == ["*"]:
+            target_function_names = set(available_function_names)
+        elif tools_list == ["-*"]:
+            target_function_names = set()
+        elif tools_list:
+            target_function_names = set(tools_list).intersection(
+                available_function_names
             )
-            content_words = set(re.findall(r"\b\w+\b", content))
-            direct_name_mentions = content_words.intersection(available_function_names)
-
-            mentioned_function_names = potential_function_mentions.union(
-                direct_name_mentions
-            )
-            relevant_function_names = list(
-                mentioned_function_names.intersection(available_function_names)
+        else:
+            target_function_names = mentioned_function_names.intersection(
+                available_function_names
             )
 
-            if relevant_function_names:
-                function_docs_dict = self._get_tagscript_function_docs(
-                    ctx, relevant_function_names
-                )
-                if function_docs_dict:
-                    formatted_docs_lines = [
-                        "\n\n--- Relevant Tag Functions (Contextual Reference) ---"
-                    ]
-                    for func_name in sorted(function_docs_dict.keys()):
-                        doc_str = function_docs_dict.get(
-                            func_name, f"{func_name}: No documentation retrieved."
-                        )
-                        formatted_docs_lines.append(f"\n{func_name}:\n{doc_str}\n---")
-                    formatted_docs = "\n".join(formatted_docs_lines)
-        final_prompt = f"{base_prompt.strip()}{formatted_docs}"
+        if add_tools_list:
+            target_function_names.update(
+                set(add_tools_list).intersection(available_function_names)
+            )
 
-        return final_prompt.strip()
+        if remove_tools_list:
+            target_function_names.difference_update(set(remove_tools_list))
+
+        tools = []
+        for name in target_function_names:
+            func = available_functions.get(name)
+            if func:
+                docstring = inspect.getdoc(func)
+                if docstring:
+                    lines = docstring.strip().splitlines()
+                    cleaned_lines = [line.strip() for line in lines if line.strip()]
+                    cleaned_doc = "\n".join(cleaned_lines)
+                else:
+                    cleaned_doc = f"No documentation string found for {name}."
+
+                tool_def = {
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "description": cleaned_doc,
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "arguments": {
+                                    "type": "string",
+                                    "description": "The arguments or content to pass to the tag function. Do not include the curly braces or the function name.",
+                                }
+                            },
+                            "required": ["arguments"],
+                        },
+                    },
+                }
+                tools.append(tool_def)
+
+        return tools
 
     @commands.hybrid_command(
         name="ai", description="Use G-AI to chat and execute TagScript."
@@ -251,7 +244,33 @@ class AI(commands.Cog):
             if shared_mode:
                 prompt = re.sub(r"(^|\s)--shared($|\s)", " ", prompt).strip()
 
-            reply_prefix = ""
+            tools_list = []
+            tools_match = re.search(r"(^|\s)--tools\s+(\S+)", prompt)
+            if tools_match:
+                tools_str = tools_match.group(2)
+                prompt = re.sub(r"(^|\s)--tools\s+\S+", " ", prompt).strip()
+                if tools_str == "*":
+                    tools_list = ["*"]
+                elif tools_str == "-*":
+                    tools_list = ["-*"]
+                else:
+                    tools_list = [t.strip() for t in tools_str.split(",")]
+
+            add_tools_list = []
+            add_tools_match = re.search(r"(^|\s)--add-tools\s+(\S+)", prompt)
+            if add_tools_match:
+                add_tools_str = add_tools_match.group(2)
+                prompt = re.sub(r"(^|\s)--add-tools\s+\S+", " ", prompt).strip()
+                add_tools_list = [t.strip() for t in add_tools_str.split(",")]
+
+            remove_tools_list = []
+            remove_tools_match = re.search(r"(^|\s)--remove-tools\s+(\S+)", prompt)
+            if remove_tools_match:
+                remove_tools_str = remove_tools_match.group(2)
+                prompt = re.sub(r"(^|\s)--remove-tools\s+\S+", " ", prompt).strip()
+                remove_tools_list = [t.strip() for t in remove_tools_str.split(",")]
+
+            reply_prefix = " "
             if ctx.message.reference and ctx.message.reference.message_id:
                 try:
                     ref_msg = await ctx.channel.fetch_message(
@@ -352,7 +371,11 @@ class AI(commands.Cog):
             messages.extend(conversation_turns)
             messages.append({"role": "user", "content": user_content})
 
-            if stream_mode and not web_mode:
+            tools = await self.get_ai_tools(
+                ctx, prompt, tools_list, add_tools_list, remove_tools_list
+            )
+
+            if stream_mode and not web_mode and not tools:
                 final_content = await self.stream_ai_response(
                     ctx, messages, think_mode, show_thinking, model_name, start_time
                 )
@@ -365,10 +388,13 @@ class AI(commands.Cog):
                 return
 
             response_data = await self.get_ai_response(
-                messages, think_mode, web_mode, model_name
+                ctx, messages, think_mode, web_mode, model_name, tools
             )
             final_content = response_data["choices"][0]["message"]["content"]
             display_content = final_content
+            tool_embeds = response_data.get("_tool_embeds", [])
+            tool_view = response_data.get("_tool_view", None)
+            tool_files = response_data.get("_tool_files", [])
 
             if debug_mode:
                 usage = response_data.get("usage", {})
@@ -397,55 +423,65 @@ class AI(commands.Cog):
                         f"{final_content}"
                     )
 
-            if not final_content:
+            if (
+                not final_content
+                and not tool_embeds
+                and not tool_view
+                and not tool_files
+            ):
                 await ctx.reply("AI returned no content.")
                 return
 
             tags = ctx.bot.get_cog("Tags")
+
+            final_text = display_content
+            final_embeds = list(tool_embeds)
+            final_view = tool_view
+            final_files = list(tool_files)
+
             if tags and hasattr(tags, "formatter"):
                 try:
                     text, embeds, view, files = await tags.formatter.format(
                         display_content, ctx
                     )
 
-                    if embeds or (view and view.children) or files:
-                        message_content = text[:2000] if text else None
-                        await ctx.reply(
-                            content=message_content,
-                            embeds=embeds[:10],
-                            view=view if view and view.children else None,
-                            files=files[:10],
-                        )
-                    elif text:
-                        if len(text) > 2000:
-                            embed = discord.Embed(
-                                title="G-AI Response",
-                                description=text if len(text) < 4096 else text[:4096],
-                                color=discord.Color.blurple(),
-                            )
-                            embed.set_author(
-                                name=f"{ctx.author.name}#{ctx.author.discriminator}",
-                                icon_url=ctx.author.display_avatar.url,
-                                url=f"https://discord.com/users/{ctx.author.id}",
-                            )
-                            embed.set_footer(
-                                text=f"AI response took {time.time() - start_time:.2f} seconds"
-                            )
-                            await ctx.reply(embed=embed)
+                    if text:
+                        final_text = text
+
+                    if embeds:
+                        final_embeds.extend(embeds)
+
+                    if files:
+                        final_files.extend(files)
+
+                    if view and view.children:
+                        if final_view is None:
+                            final_view = view
                         else:
-                            await ctx.reply(text)
+                            for item in view.children:
+                                final_view.add_item(item)
+
+                    message_content = final_text[:2000] if final_text else None
+
+                    await ctx.reply(
+                        content=message_content,
+                        embeds=final_embeds[:10],
+                        view=final_view if final_view and final_view.children else None,
+                        files=final_files[:10],
+                    )
 
                     user_history.append({"role": "user", "content": user_content})
                     user_history.append({"role": "assistant", "content": final_content})
                     await self.save_conversation_history(conversation_key, user_history)
                     return
+
                 except Exception:
                     pass
 
-            if len(display_content) > 2000:
+            if len(final_text) > 2000:
                 embed = discord.Embed(
                     title="G-AI Response",
-                    description=display_content[:4096],
+                    description=final_text[:4096],
                     color=discord.Color.blurple(),
                 )
                 embed.set_author(
@@ -456,9 +492,17 @@ class AI(commands.Cog):
                 embed.set_footer(
                     text=f"AI response took {time.time() - start_time:.2f} seconds"
                 )
-                await ctx.reply(embed=embed)
+                await ctx.reply(
+                    embed=embed,
+                    view=final_view if final_view and final_view.children else None,
+                    files=final_files[:10],
+                )
             else:
-                await ctx.reply(display_content)
+                await ctx.reply(
+                    final_text if final_text else None,
+                    view=final_view if final_view and final_view.children else None,
+                    files=final_files[:10],
+                )
 
             user_history.append({"role": "user", "content": user_content})
             user_history.append({"role": "assistant", "content": final_content})
@@ -507,6 +551,7 @@ class AI(commands.Cog):
                 f"{base_url}/v1/chat/completions",
                 headers=headers,
                 json=payload,
+                timeout=aiohttp.ClientTimeout(total=600),
             ) as resp:
                 if resp.status != 200:
                     text = await resp.text()
@@ -607,17 +652,23 @@ class AI(commands.Cog):
                 await sent_message.edit(content=display_content)
 
             return accumulated
-        except aiohttp.ClientError as e:
-            raise commands.CommandError(f"llama-server connection failed: {str(e)}")
+        except aiohttp.ClientConnectorError:
+            raise commands.CommandError(
+                "Cannot connect to llama-server, likely the server is off, sorry."
+            )
+        except TimeoutError:
+            raise commands.CommandError("AI stream timed out")
         except Exception as e:
             raise commands.CommandError(f"AI stream failed: {str(e)}")
 
     async def get_ai_response(
         self,
+        ctx: commands.Context,
         messages: list,
         think_mode: bool = False,
         web_mode: bool = False,
         model_name: Optional[str] = None,
+        tools: list = None,
     ) -> dict:
         base_url = bot_info.data.get("llama_base_url", "http://localhost:8080")
         api_key = bot_info.data.get("llama_api_key")
@@ -635,8 +686,11 @@ class AI(commands.Cog):
             {"enable_thinking": True} if think_mode else {"enable_thinking": False}
         )
 
+        if tools:
+            payload["tools"] = tools
+
         if web_mode:
-            payload["tools"] = [
+            web_tools = [
                 {
                     "type": "function",
                     "function": {
@@ -662,6 +716,14 @@ class AI(commands.Cog):
                     },
                 },
             ]
+            if "tools" in payload:
+                payload["tools"].extend(web_tools)
+            else:
+                payload["tools"] = web_tools
+
+        all_tool_embeds = []
+        all_tool_view = None
+        all_tool_files = []
 
         try:
             while True:
@@ -669,6 +731,7 @@ class AI(commands.Cog):
                     f"{base_url}/v1/chat/completions",
                     headers=headers,
                     json=payload,
+                    timeout=aiohttp.ClientTimeout(total=600),
                 ) as resp:
                     if resp.status != 200:
                         text = await resp.text()
@@ -679,7 +742,7 @@ class AI(commands.Cog):
 
                 msg = response_data["choices"][0]["message"]
 
-                if web_mode and msg.get("tool_calls"):
+                if msg.get("tool_calls"):
                     messages.append(msg)
                     for tool_call in msg["tool_calls"]:
                         func = tool_call["function"]
@@ -690,26 +753,77 @@ class AI(commands.Cog):
                             args = {}
 
                         result = ""
+                        tool_embeds = []
+                        tool_view = None
+                        tool_files = []
+
                         if tool_name == "web_search":
                             result = await self._web_search(args.get("query", ""))
                         elif tool_name == "web_fetch":
                             result = await self._web_fetch(args.get("url", ""))
                         else:
-                            result = f"Tool {tool_name} not found"
+                            tags_cog = ctx.bot.get_cog("Tags")
+                            if tags_cog and hasattr(tags_cog, "formatter"):
+                                func_obj = tags_cog.formatter.functions.get(tool_name)
+                                if func_obj:
+                                    try:
+                                        arg_str = args.get("arguments", "")
+                                        result_obj = await func_obj(ctx, arg_str)
+                                        if isinstance(result_obj, tuple):
+                                            text, embeds, view, files = result_obj
+                                            result = (
+                                                text
+                                                or "[Tag function executed successfully]"
+                                            )
+                                            tool_embeds.extend(embeds)
+                                            tool_files.extend(files)
+                                            if view:
+                                                if tool_view is None:
+                                                    tool_view = view
+                                                else:
+                                                    for item in view.children:
+                                                        tool_view.add_item(item)
+                                        else:
+                                            result = str(result_obj)
+                                    except Exception as e:
+                                        result = f"[Tag function error: {str(e)}]"
+                                else:
+                                    result = f"[Tool {tool_name} not found]"
+                            else:
+                                result = "[Tags cog not found]"
+
+                        if tool_embeds:
+                            all_tool_embeds.extend(tool_embeds)
+                        if tool_files:
+                            all_tool_files.extend(tool_files)
+                        if tool_view:
+                            if all_tool_view is None:
+                                all_tool_view = tool_view
+                            else:
+                                for item in tool_view.children:
+                                    all_tool_view.add_item(item)
 
                         messages.append(
                             {
                                 "role": "tool",
                                 "tool_call_id": tool_call["id"],
-                                "content": str(result)[:2000],
+                                "content": str(result)[:4000],
                             }
                         )
                     continue
+
+                response_data["_tool_embeds"] = all_tool_embeds
+                response_data["_tool_view"] = all_tool_view
+                response_data["_tool_files"] = all_tool_files
                 return response_data
-        except aiohttp.ClientError as e:
-            raise RuntimeError(f"llama-server connection failed: {str(e)}")
+        except aiohttp.ClientConnectorError:
+            raise commands.CommandError(
+                "Cannot connect to llama-server, likely the server is off, sorry."
+            )
+        except TimeoutError:
+            raise commands.CommandError("AI request timed out")
         except Exception as e:
-            raise RuntimeError(f"AI request failed: {str(e)}")
+            raise commands.CommandError(f"AI request failed: {str(e)}")
 
     async def _web_search(self, query: str) -> str:
         if not query:
@@ -807,7 +921,7 @@ class AI(commands.Cog):
             )
             await ctx.send("Your system prompt has been reset.")
         else:
-            await ctx.send("Database not initialized")
+            await ctx.send("Database not initialized.")
 
     @commands.hybrid_command(
         name="setchannelprompt",
@@ -984,7 +1098,7 @@ class AI(commands.Cog):
             buffer.seek(0)
 
             await ctx.send(
-                f"Here is {'the shared channel' if shared else 'your'} conversation history: ",
+                f"Here is {'the shared channel' if shared else 'your'} conversation history:",
                 file=discord.File(buffer, filename=filename),
             )
         except Exception as e:

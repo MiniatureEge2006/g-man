@@ -2,6 +2,7 @@ import ast
 import asyncio
 import base64
 import hashlib
+import inspect
 import json
 import math
 import os
@@ -383,7 +384,7 @@ class DiscordGenerator:
             )
 
         return discord.ui.Select(
-            custom_id=data.get("custom_id"),
+            custom_id=data.get("custom_id", "something"),
             placeholder=data.get("placeholder"),
             min_values=data.get("min", 1),
             max_values=data.get("max", 1),
@@ -5804,10 +5805,14 @@ class Tags(commands.Cog):
                     - G_AI_MEDIA
                     - G_AI_MEDIA_URL
                     - G_AI_SHARED
+                    - G_AI_TOOLS: Comma-separated list of tools to strictly use, "*" for all, "-*" for none.
+                    - G_AI_ADD_TOOLS: Comma-separated list of tools to add to the context.
+                    - G_AI_REMOVE_TOOLS: Comma-separated list of tools to remove from the context.
                 * Examples:
                     - {ai:hello}
                     - {settings:G_AI_THINKING|true} {ai:how many r letters are there in strawberry?}
                     - {settings:G_AI_SYSTEM_PROMPT|You are an assistant to {user}.} {ai:hi}
+                    - {settings:G_AI_TOOLS|embed,button} {ai:Make an embed saying hi}
             """
             try:
                 ai_cog = ctx.bot.get_cog("AI")
@@ -5853,6 +5858,29 @@ class Tags(commands.Cog):
                     "on",
                 )
                 media_url = tag_settings.get("G_AI_MEDIA_URL")
+
+                tools_list_str = tag_settings.get("G_AI_TOOLS", "")
+                add_tools_list_str = tag_settings.get("G_AI_ADD_TOOLS", "")
+                remove_tools_list_str = tag_settings.get("G_AI_REMOVE_TOOLS", "")
+
+                tools_list = []
+                if tools_list_str == "*":
+                    tools_list = ["*"]
+                elif tools_list_str == "-*":
+                    tools_list = ["-*"]
+                elif tools_list_str:
+                    tools_list = [t.strip() for t in tools_list_str.split(",")]
+
+                add_tools_list = (
+                    [t.strip() for t in add_tools_list_str.split(",")]
+                    if add_tools_list_str
+                    else []
+                )
+                remove_tools_list = (
+                    [t.strip() for t in remove_tools_list_str.split(",")]
+                    if remove_tools_list_str
+                    else []
+                )
 
                 reply_prefix = ""
                 if hasattr(ctx, "message") and ctx.message and ctx.message.reference:
@@ -5956,7 +5984,6 @@ class Tags(commands.Cog):
                     user_history[0]["content"] = system_prompt
 
                 messages = [{"role": "system", "content": system_prompt}]
-
                 conversation_turns = [
                     msg
                     for msg in user_history[1:]
@@ -5982,49 +6009,127 @@ class Tags(commands.Cog):
                     else {"enable_thinking": False}
                 )
 
-                if web_mode:
-                    payload["tools"] = [
-                        {
+                available_functions = self.formatter.functions
+                available_function_names = set(available_functions.keys())
+
+                potential_function_mentions = set(
+                    re.findall(r"\{(\w+)(?:[^\}]*)\}", prompt)
+                )
+                content_words = set(re.findall(r"\b\w+\b", prompt))
+                direct_name_mentions = content_words.intersection(
+                    available_function_names
+                )
+                mentioned_function_names = potential_function_mentions.union(
+                    direct_name_mentions
+                )
+
+                if tools_list == ["*"]:
+                    target_function_names = set(available_function_names)
+                elif tools_list == ["-*"]:
+                    target_function_names = set()
+                elif tools_list:
+                    target_function_names = set(tools_list).intersection(
+                        available_function_names
+                    )
+                else:
+                    target_function_names = mentioned_function_names.intersection(
+                        available_function_names
+                    )
+
+                if add_tools_list:
+                    target_function_names.update(
+                        set(add_tools_list).intersection(available_function_names)
+                    )
+
+                if remove_tools_list:
+                    target_function_names.difference_update(set(remove_tools_list))
+
+                tools_payload = []
+                for name in target_function_names:
+                    func = available_functions.get(name)
+                    if func:
+                        docstring = inspect.getdoc(func)
+                        if docstring:
+                            lines = docstring.strip().splitlines()
+                            cleaned_lines = [
+                                line.strip() for line in lines if line.strip()
+                            ]
+                            cleaned_doc = "\n".join(cleaned_lines)
+                        else:
+                            cleaned_doc = f"No documentation string found for {name}."
+
+                        tool_def = {
                             "type": "function",
                             "function": {
-                                "name": "web_search",
-                                "description": "Search the web for information",
+                                "name": name,
+                                "description": cleaned_doc,
                                 "parameters": {
                                     "type": "object",
-                                    "properties": {"query": {"type": "string"}},
-                                    "required": ["query"],
+                                    "properties": {
+                                        "arguments": {
+                                            "type": "string",
+                                            "description": "The arguments or content to pass to the tag function. Do not include the curly braces or the function name.",
+                                        }
+                                    },
+                                    "required": ["arguments"],
                                 },
                             },
-                        },
-                        {
-                            "type": "function",
-                            "function": {
-                                "name": "web_fetch",
-                                "description": "Fetch a webpage",
-                                "parameters": {
-                                    "type": "object",
-                                    "properties": {"url": {"type": "string"}},
-                                    "required": ["url"],
-                                },
-                            },
-                        },
-                    ]
+                        }
+                        tools_payload.append(tool_def)
+
+                tool_embeds = []
+                tool_view = None
+                tool_files = []
 
                 while True:
+                    current_tools = list(tools_payload)
+                    if web_mode:
+                        current_tools.extend(
+                            [
+                                {
+                                    "type": "function",
+                                    "function": {
+                                        "name": "web_search",
+                                        "description": "Search the web for information",
+                                        "parameters": {
+                                            "type": "object",
+                                            "properties": {"query": {"type": "string"}},
+                                            "required": ["query"],
+                                        },
+                                    },
+                                },
+                                {
+                                    "type": "function",
+                                    "function": {
+                                        "name": "web_fetch",
+                                        "description": "Fetch a webpage",
+                                        "parameters": {
+                                            "type": "object",
+                                            "properties": {"url": {"type": "string"}},
+                                            "required": ["url"],
+                                        },
+                                    },
+                                },
+                            ]
+                        )
+
+                    if current_tools:
+                        payload["tools"] = current_tools
+
                     async with session.post(
                         f"{base_url}/v1/chat/completions",
                         headers=headers,
                         json=payload,
+                        timeout=aiohttp.ClientTimeout(total=600),
                     ) as resp:
                         if resp.status != 200:
                             text = await resp.text()
                             return f"[AI error: llama-server error (status {resp.status}): {text}]"
-
                         response_data = await resp.json()
 
                     msg = response_data["choices"][0]["message"]
 
-                    if web_mode and msg.get("tool_calls"):
+                    if msg.get("tool_calls"):
                         messages.append(msg)
                         for tool_call in msg["tool_calls"]:
                             func = tool_call["function"]
@@ -6034,29 +6139,67 @@ class Tags(commands.Cog):
                             except json.JSONDecodeError:
                                 args = {}
 
-                            result = ""
+                            result = " "
+                            t_embeds = []
+                            t_view = None
+                            t_files = []
+
                             if tool_name == "web_search":
-                                result = await ai_cog._web_search(args.get("query", ""))
+                                result = await ai_cog._web_search(
+                                    args.get("query", " ")
+                                )
                             elif tool_name == "web_fetch":
-                                result = await ai_cog._web_fetch(args.get("url", ""))
+                                result = await ai_cog._web_fetch(args.get("url", " "))
                             else:
-                                result = f"Tool {tool_name} not found"
+                                func_obj = self.formatter.functions.get(tool_name)
+                                if func_obj:
+                                    try:
+                                        arg_str = args.get("arguments", "")
+                                        res = await func_obj(ctx, arg_str, **kwargs)
+                                        if isinstance(res, tuple):
+                                            text, embeds, view, files = res
+                                            result = (
+                                                text
+                                                or "[Tag function executed successfully]"
+                                            )
+                                            t_embeds.extend(embeds)
+                                            t_files.extend(files)
+                                            if view:
+                                                if t_view is None:
+                                                    t_view = view
+                                                else:
+                                                    for item in view.children:
+                                                        t_view.add_item(item)
+                                        else:
+                                            result = str(res)
+                                    except Exception as e:
+                                        result = f"[Tag function error: {str(e)}]"
+                                else:
+                                    result = f"[Tool {tool_name} not found]"
+
+                            if t_embeds:
+                                tool_embeds.extend(t_embeds)
+                            if t_files:
+                                tool_files.extend(t_files)
+                            if t_view:
+                                if tool_view is None:
+                                    tool_view = t_view
+                                else:
+                                    for item in t_view.children:
+                                        tool_view.add_item(item)
 
                             messages.append(
                                 {
                                     "role": "tool",
                                     "tool_call_id": tool_call["id"],
-                                    "content": str(result)[:2000],
+                                    "content": str(result)[:4000],
                                 }
                             )
                         continue
 
-                    final_content = msg.get("content", "")
                     break
 
-                if not final_content:
-                    return "[AI error: Model returned no content]"
-
+                final_content = msg.get("content", " ")
                 display_content = final_content
 
                 if debug_mode:
@@ -6077,21 +6220,18 @@ class Tags(commands.Cog):
                 if show_thinking:
                     reasoning = msg.get("reasoning_content")
                     if reasoning:
-                        display_content = (
-                            "**Thinking...**\n"
-                            f"{reasoning}\n"
-                            "**...done thinking.**\n"
-                            f"{final_content}"
-                        )
+                        display_content = f"**Thinking...**\n{reasoning}\n**...done thinking.**\n{final_content}"
 
                 user_history.append({"role": "user", "content": user_content})
                 user_history.append({"role": "assistant", "content": final_content})
                 await ai_cog.save_conversation_history(conversation_key, user_history)
 
-                return display_content
+                return (display_content, tool_embeds, tool_view, tool_files)
 
-            except aiohttp.ClientError as e:
-                return f"[AI error: llama-server connection failed: {str(e)}]"
+            except aiohttp.ClientConnectorError:
+                return "[AI error: Cannot connect to llama-server, likely the server is off, sorry.]"
+            except TimeoutError:
+                return "[AI error: AI request timed out]"
             except Exception as e:
                 return f"[AI error: {str(e)}]"
 
