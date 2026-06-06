@@ -6784,6 +6784,7 @@ class Tags(commands.Cog):
                 return args_str
 
         @self.formatter.register("timestamp")
+        @self.formatter.register("time")
         async def _timestamp(ctx, val, **kwargs):
             """
             ### {timestamp:format|timezone|offset}
