@@ -6342,7 +6342,7 @@ class Tags(commands.Cog):
                         if quote_mode == "keep":
                             current_arg.append(char)
                         quote_char = None
-                    elif char.isspace() and not in_quotes:
+                    elif char in (" ", "\t") and not in_quotes:
                         if current_arg:
                             args_list.append("".join(current_arg))
                             current_arg = []
