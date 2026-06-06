@@ -399,6 +399,31 @@ class AI(commands.Cog):
             if debug_mode:
                 usage = response_data.get("usage", {})
                 timings = response_data.get("timings", {})
+                tool_debug_lines = []
+                for msg in messages:
+                    if msg.get("role") == "assistant" and "tool_calls" in msg:
+                        for tc in msg["tool_calls"]:
+                            tool_name = tc["function"]["name"]
+                            tool_args = tc["function"].get("arguments", "{}")
+                            tool_debug_lines.append(
+                                f"Called Tool: `{tool_name}`\n"
+                                f"Arguments: ```json\n{tool_args}\n```"
+                            )
+                    elif msg.get("role") == "tool":
+                        tool_id = msg.get("tool_call_id", "unknown")
+                        tool_content = msg.get("content", "")
+
+                        if len(tool_content) > 600:
+                            tool_content = tool_content[:600] + "\n... *[truncated]*"
+                        tool_debug_lines.append(
+                            f"Tool Result (ID: `{tool_id}`):\n```\n{tool_content}\n```"
+                        )
+
+                tool_stats = (
+                    "\n\n".join(tool_debug_lines)
+                    if tool_debug_lines
+                    else "No tools were called."
+                )
                 stats_text = (
                     "**Debug**\n"
                     f"Model: {response_data.get('model', 'unknown')}\n"
@@ -408,6 +433,7 @@ class AI(commands.Cog):
                     f"Prompt ms: {timings.get('prompt_ms', 'N/A')}\n"
                     f"Predicted ms: {timings.get('predicted_ms', 'N/A')}\n"
                     f"Predicted per second: {timings.get('predicted_per_second', 'N/A')}\n"
+                    f"Tool Execution:\n{tool_stats}"
                 )
                 display_content = f"{stats_text}\n\n{display_content}"
 

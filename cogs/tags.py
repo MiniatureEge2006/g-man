@@ -6205,6 +6205,33 @@ class Tags(commands.Cog):
                 if debug_mode:
                     usage = response_data.get("usage", {})
                     timings = response_data.get("timings", {})
+                    tool_debug_lines = []
+                    for msg in messages:
+                        if msg.get("role") == "assistant" and "tool_calls" in msg:
+                            for tc in msg["tool_calls"]:
+                                tool_name = tc["function"]["name"]
+                                tool_args = tc["function"].get("arguments", "{}")
+                                tool_debug_lines.append(
+                                    f"Called Tool: `{tool_name}`\n"
+                                    f"Arguments: ```json\n{tool_args}\n```"
+                                )
+                        elif msg.get("role") == "tool":
+                            tool_id = msg.get("tool_call_id", "unknown")
+                            tool_content = msg.get("content", "")
+
+                            if len(tool_content) > 600:
+                                tool_content = (
+                                    tool_content[:600] + "\n... *[truncated]*"
+                                )
+                            tool_debug_lines.append(
+                                f"Tool Result (ID: `{tool_id}`):\n```\n{tool_content}\n```"
+                            )
+
+                    tool_stats = (
+                        "\n\n".join(tool_debug_lines)
+                        if tool_debug_lines
+                        else "No tools were called."
+                    )
                     stats_text = (
                         "**Debug**\n"
                         f"Model: {response_data.get('model', 'unknown')}\n"
@@ -6214,6 +6241,7 @@ class Tags(commands.Cog):
                         f"Prompt ms: {timings.get('prompt_ms', 'N/A')}\n"
                         f"Predicted ms: {timings.get('predicted_ms', 'N/A')}\n"
                         f"Predicted per second: {timings.get('predicted_per_second', 'N/A')}\n"
+                        f"Tool Execution:\n{tool_stats}"
                     )
                     display_content = f"{stats_text}\n\n{display_content}"
 
@@ -8118,7 +8146,7 @@ class Tags(commands.Cog):
         @self.formatter.register("user")
         async def _user(ctx, i, **kwargs):
             """
-            ### {user:user}
+            ### {user:user/displayname/userid/mention}
                 * Returns username of mentioned user or self.
                 * Example: `{user}`
             """
@@ -8130,7 +8158,7 @@ class Tags(commands.Cog):
         @self.formatter.register("userid")
         async def _userid(ctx, i, **kwargs):
             """
-            ### {userid:user}
+            ### {userid:user/displayname/userid/mention}
                 * Returns the user ID of an user or self.
                 * Example: `{userid}`
             """
@@ -8140,7 +8168,7 @@ class Tags(commands.Cog):
         @self.formatter.register("nick")
         async def _nick(ctx, i, **kwargs):
             """
-            ### {nick:user}
+            ### {nick:user/displayname/userid/mention}
                 * Returns server nickname of mentioned user or self. (returns display name instead if not available)
                 * Example: `{nick}`
             """
@@ -8152,7 +8180,7 @@ class Tags(commands.Cog):
         @self.formatter.register("userdisplay")
         async def _userdisplay(ctx, i, **kwargs):
             """
-            ### {userdisplay:user}
+            ### {userdisplay:user/displayname/userid/mention}
                 * Returns display name of mentioned user or self.
                 * Example: `{userdisplay}`
             """
@@ -8162,7 +8190,7 @@ class Tags(commands.Cog):
         @self.formatter.register("mention")
         async def _mention(ctx, i, **kwargs):
             """
-            ### {mention:user}
+            ### {mention:user/displayname/userid/mention}
                 * Mentions the user or self.
                 * Example: `{mention}`
             """
@@ -8172,7 +8200,7 @@ class Tags(commands.Cog):
         @self.formatter.register("avatar")
         async def _avatar(ctx, i, **kwargs):
             """
-            ### {avatar:user}
+            ### {avatar:user/displayname/userid/mention}
                 * Returns guild avatar URL, otherwise global if not available.
                 * Example: `{avatar}`
             """
@@ -8182,7 +8210,7 @@ class Tags(commands.Cog):
         @self.formatter.register("avatarkey")
         async def _avatarkey(ctx, i, **kwargs):
             """
-            ### {avatarkey:user}
+            ### {avatarkey:user/displayname/userid/mention}
                 * Returns guild avatar hash, otherwise global if not available.
                 * Example: `{avatarkey}`
             """
@@ -8192,7 +8220,7 @@ class Tags(commands.Cog):
         @self.formatter.register("useravatar")
         async def _useravatar(ctx, i, **kwargs):
             """
-            ### {useravatar:user}
+            ### {useravatar:user/displayname/userid/mention}
                 * Returns global avatar URL.
                 * Example: `{useravatar}`
             """
@@ -8202,7 +8230,7 @@ class Tags(commands.Cog):
         @self.formatter.register("useravatarkey")
         async def _useravatarkey(ctx, i, **kwargs):
             """
-            ### {useravatarkey:user}
+            ### {useravatarkey:user/displayname/userid/mention}
                 * Returns global avatar hash.
                 * Example: `{useravatarkey}`
             """
@@ -8212,7 +8240,7 @@ class Tags(commands.Cog):
         @self.formatter.register("banner")
         async def _banner(ctx, i, **kwargs):
             """
-            ### {banner:user}
+            ### {banner:user/displayname/userid/mention}
                 * Returns guild banner URL, otherwise global banner if unavailable.
                 * Example: `{banner}`
             """
@@ -8227,7 +8255,7 @@ class Tags(commands.Cog):
         @self.formatter.register("bannerkey")
         async def _bannerkey(ctx, i, **kwargs):
             """
-            ### {bannerkey:user}
+            ### {bannerkey:user/displayname/userid/mention}
                 * Returns guild banner hash, otherwise global banner if unavailable.
                 * Example: `{bannerkey}`
             """
@@ -8242,7 +8270,7 @@ class Tags(commands.Cog):
         @self.formatter.register("userbanner")
         async def _userbanner(ctx, i, **kwargs):
             """
-            ### {userbanner:user}
+            ### {userbanner:user/displayname/userid/mention}
                 * Returns global banner URL.
                 * Example: `{userbanner}`
             """
@@ -8256,7 +8284,7 @@ class Tags(commands.Cog):
         @self.formatter.register("userbannerkey")
         async def _userbannerkey(ctx, i, **kwargs):
             """
-            ### {userbannerkey:user}
+            ### {userbannerkey:user/displayname/userid/mention}
                 * Returns global banner hash.
                 * Example: `{userbannerkey}`
             """
@@ -8270,7 +8298,7 @@ class Tags(commands.Cog):
         @self.formatter.register("usercreatedate")
         async def _usercreatedate(ctx, i, **kwargs):
             """
-            ### {usercreatedate:user}
+            ### {usercreatedate:user/displayname/userid/mention}
                 * Returns user creation date in ISO format.
             """
             user = await self.formatter.resolve_user(ctx, i)
@@ -8279,7 +8307,7 @@ class Tags(commands.Cog):
         @self.formatter.register("userjoindate")
         async def _userjoindate(ctx, i, **kwargs):
             """
-            ### {userjoindate:user}
+            ### {userjoindate:user/displayname/userid/mention}
                 * Returns user creation date in ISO format. Will return server join date if available in server.
             """
             user = await self.formatter.resolve_user(ctx, i)
@@ -8295,7 +8323,7 @@ class Tags(commands.Cog):
         @self.formatter.register("userstatus")
         async def _userstatus(ctx, i, **kwargs):
             """
-            ### {userstatus:user}
+            ### {userstatus:user/displayname/userid/mention}
                 * Returns user status.
                 * Example: `{userstatus}`
             """
@@ -8307,7 +8335,7 @@ class Tags(commands.Cog):
         @self.formatter.register("usercustomstatus")
         async def _usercustomstatus(ctx, i, **kwargs):
             """
-            ### {usercustomstatus:user}
+            ### {usercustomstatus:user/displayname/userid/mention}
                 * Returns custom status if set.
                 * Example: `{usercustomstatus}`
             """
@@ -8356,7 +8384,7 @@ class Tags(commands.Cog):
         @self.formatter.register("userbadges")
         async def _userbadges(ctx, i, **kwargs):
             """
-            ### {userbadges:user}
+            ### {userbadges:user/displayname/userid/mention}
                 * Returns user badges.
                 * Example: `{userbadges}`
             """
@@ -8464,7 +8492,7 @@ class Tags(commands.Cog):
         @self.formatter.register("channel")
         async def _channel(ctx, channel, **kwargs):
             """
-            ### {channel:channel}
+            ### {channel:channel/channelid/mention}
                 * Returns a channel name. Defaults to current channel.
                 * Example: `{channel}`
             """
@@ -8479,7 +8507,7 @@ class Tags(commands.Cog):
         @self.formatter.register("channelmention")
         async def _channelmention(ctx, channel, **kwargs):
             """
-            ### {channelmention:channel}
+            ### {channelmention:channel/channelid/mention}
                 * Returns a channel mention. Defaults to current channel.
                 * Example: `{channelmention}`
             """
@@ -8494,7 +8522,7 @@ class Tags(commands.Cog):
         @self.formatter.register("channelid")
         async def _channelid(ctx, channel, **kwargs):
             """
-            ### {channelid:channel}
+            ### {channelid:channel/channelid/mention}
                 * Returns a channel ID. Defaults to current channel.
                 * Example: `{channelid}`
             """
@@ -8639,6 +8667,11 @@ class Tags(commands.Cog):
                     - Merges multiple {component} tags.
                 * Component Types (Numerical):
                     1: Action Row, 2: Button, 3: Select Menu, 9: Section, 10: Text Display, 11: Thumbnail, 12: Media Gallery, 13: File, 14: Separator, 17: Container.
+                * Examples:
+                    - `{component:{"type":17,"components":[{"type":10,"content":"hi"}]}}` Outputs a non-colored Container with a TextDisplay of "hi".
+                    - `{component:{"type":17,"accent_color":"#FF0000","components":[{"type":10,"content":"hi"}]}}` Outputs the same as above except with red color.
+                    - `{component:{"type":17,"accent_color":"#FF0000","spoiler":true,"components":[{"type":10,"content":"hi"}]}}` Same output as above except spoilerized Container.
+                    - `{component:{"type":10,"content":"hi"}}` Outputs "hi" with no Container, almost as if it was an actual Discord message.
             """
             try:
                 processed_args = await self.formatter.format(args_str, ctx, **kwargs)
