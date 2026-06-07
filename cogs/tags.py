@@ -4917,7 +4917,7 @@ class MediaProcessor:
             self._trim_media(
                 input_key=input_key,
                 start_time=resolved_end,
-                end_time="9999999",
+                end_time="100%",
                 output_key=after_key,
             ),
         ]
