@@ -1,70 +1,87 @@
-FROM archlinux:latest
+FROM gentoo/stage3:amd64-openrc
 
-
-RUN pacman -Syu --noconfirm --needed \
-    base-devel \
-    git \
-    pacman-contrib
-
-
-RUN pacman -S --noconfirm --needed \
-    nushell fish elvish \
-    python-pip python-pillow python-requests uvicorn python-fastapi \
-    python-aiohttp python-aiofiles python-dotenv python-pydantic python-pydantic-settings \
-    ffmpeg lame opencore-amr flite opus libvpx libvorbis fribidi x264 x265 dav1d libfdk-aac \
-    imagemagick sox libvips mesa libgdiplus cairo cups ghostscript \
-    go rust ruby lua mono nim zig php nodejs npm openjdk-src kotlin \
-    wget yt-dlp jq fastfetch libqalculate \
-    nspr nss atk gtk3 libxkbcommon alsa-lib
-
-
-RUN useradd -m -G wheel builduser && \
-    echo "builduser ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
-
-USER builduser
-WORKDIR /tmp
-
-
-RUN git clone https://aur.archlinux.org/yay.git && \
-    cd yay && makepkg -si --noconfirm
-
-
-RUN yay -S --noconfirm \
-    python-sqlmodel \
-    python-strawberry-graphql \
-    python-aiosqlite \
-    python-annotated-types \
-    python-pwdlib
-
-
-USER root
-WORKDIR /
-
-RUN userdel -r builduser && \
-    paccache -rk0 && \
-    rm -rf /var/cache/pacman/pkg/* /tmp/*
+RUN echo 'dev-lang/kotlin-bin' >> /etc/portage/package.accept_keywords/keywords
+RUN echo 'dev-python/fastapi' >> /etc/portage/package.accept_keywords/keywords
+RUN echo 'dev-python/annotated-doc' >> /etc/portage/package.accept_keywords/keywords
+RUN echo 'dev-python/aiosqlite' >> /etc/portage/package.accept_keywords/keywords
+RUN echo 'dev-python/pwdlib' >> /etc/portage/package.accept_keywords/keywords
+RUN echo 'dev-python/pydantic-extra-types' >> /etc/portage/package.accept_keywords/keywords
+RUN echo 'dev-python/pydantic-settings' >> /etc/portage/package.accept_keywords/keywords
+RUN echo 'dev-python/strawberry-graphql' >> /etc/portage/package.accept_keywords/keywords
+RUN echo 'dev-python/sqlmodel' >> /etc/portage/package.accept_keywords/keywords
+RUN echo 'app-shells/nushell' >> /etc/portage/package.accept_keywords/keywords
+RUN echo 'app-shells/fish' >> /etc/portage/package.accept_keywords/keywords
+RUN echo 'app-shells/elvish' >> /etc/portage/package.accept_keywords/keywords
+RUN echo 'dev-dotnet/libgdiplus cairo' >> /etc/portage/package.use/use
+RUN echo 'media-video/ffmpeg lame qrcode opus vpx vorbis truetype rubberband quirc fribidi flite x264 x265 dav1d fdk' >> /etc/portage/package.use/use
+RUN echo 'net-print/cups-meta postscript' >> /etc/portage/package.use/use
+RUN echo 'app-text/ghostscript-gpl cups' >> /etc/portage/package.use/use
+RUN echo 'ACCEPT_LICENSE="*"' >> /etc/portage/make.conf
+RUN getuto
+RUN emerge --sync
+RUN emerge --getbinpkg app-eselect/eselect-repository
+RUN eselect repository enable guru
+RUN emerge --sync guru
+RUN emerge --getbinpkg --update --deep --newuse @world
+RUN emerge --getbinpkg --noreplace \
+    app-shells/nushell \
+    app-shells/fish \
+    app-shells/elvish \
+    dev-python/pip \
+    dev-python/ffmpeg-python \
+    dev-python/pillow \
+    dev-python/requests \
+    dev-python/uvicorn \
+    dev-python/fastapi \
+    dev-python/aiohttp \
+    dev-python/aiofiles \
+    dev-python/python-dotenv \
+    dev-lang/go \
+    dev-lang/rust-bin \
+    dev-lang/ruby \
+    dev-lang/lua \
+    dev-lang/mono \
+    dev-lang/nim \
+    dev-lang/zig-bin \
+    dev-lang/php \
+    dev-lang/kotlin-bin \
+    dev-lang/typescript \
+    dev-java/openjdk-bin \
+    app-portage/gentoolkit \
+    net-misc/wget \
+    net-misc/yt-dlp \
+    net-libs/nodejs \
+    app-misc/jq \
+    app-misc/fastfetch \
+    media-video/ffmpeg \
+    media-gfx/imagemagick \
+    media-sound/sox \
+    media-libs/vips \
+    media-libs/mesa \
+    dev-libs/nspr \
+    dev-libs/nss \
+    dev-libs/atk \
+    x11-libs/gtk+ \
+    x11-libs/libxkbcommon \
+    net-print/cups-meta \
+    media-libs/alsa-lib \
+    sci-libs/libqalculate
 
 
 RUN groupadd -g 1000 gcoder && useradd -r -u 1000 -g gcoder -m -d /home/gcoder gcoder
-
-RUN pip install --break-system-packages pyvips playwright python-multipart
+RUN pip install --break-system-packages pyvips playwright
 RUN npm install -g ts-node mathjs imagescript
-
-ENV NODE_PATH=/usr/lib/node_modules
+ENV NODE_PATH=/usr/local/lib/node_modules
 ENV PLAYWRIGHT_BROWSERS_PATH=/usr/lib/playwright
-
 RUN mkdir -p $PLAYWRIGHT_BROWSERS_PATH
 RUN playwright install && \
     chown -R root:root $PLAYWRIGHT_BROWSERS_PATH && \
     chmod -R 755 $PLAYWRIGHT_BROWSERS_PATH
-
-
 RUN mkdir -p /app && \
     chown -R root:root /app && \
     chmod -R 555 /app
-
 COPY --chown=gcoder:gcoder . /app
-
+RUN rm /latest-stage3-amd64-openrc.txt && rm /latest.txt
 USER gcoder
 EXPOSE 8000
 
