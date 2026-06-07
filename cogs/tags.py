@@ -510,6 +510,14 @@ class MediaProcessor:
                 "input_key": {"required": True, "type": str},
                 "output_key": {"required": True, "type": str},
             },
+            "tint": {
+                "input_key": {"required": True, "type": str},
+                "red": {"default": 255, "type": int},
+                "green": {"default": 255, "type": int},
+                "blue": {"default": 255, "type": int},
+                "alpha": {"default": 255, "type": int},
+                "output_key": {"required": True, "type": str},
+            },
             "resize": {
                 "input_key": {"required": True, "type": str},
                 "width": {"required": True, "type": str},  # Can be "iw/2" etc.
@@ -698,6 +706,7 @@ class MediaProcessor:
             "grayscale": self._apply_grayscale,
             "sepia": self._apply_sepia,
             "invert": self._invert_media,
+            "tint": self._tint_media,
             "resize": self._resize_media,
             "crop": self._crop_media,
             "rotate": self._rotate_media,
@@ -2734,6 +2743,47 @@ class MediaProcessor:
             input_path.as_posix(),
             "-vf",
             "negate",
+            "-y",
+            output_file.as_posix(),
+        ]
+
+        success, error = await self._run_ffmpeg(cmd)
+        if success:
+            self.media_cache[output_key] = str(output_file)
+            return f"media://{output_file.as_posix()}"
+        return error
+
+    async def _tint_media(self, **kwargs) -> str:
+        try:
+            if "input_key" not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            if "output_key" not in kwargs:
+                raise ValueError("Missing 'input_key' parameter")
+            return await self._tint_media_impl(**kwargs)
+        except Exception as e:
+            return await self._handle_error("tint", e)
+
+    async def _tint_media_impl(self, **kwargs) -> str:
+        input_key = kwargs["input_key"]
+        output_key = kwargs["output_key"]
+        red = kwargs.get("red", 255)
+        green = kwargs.get("green", 255)
+        blue = kwargs.get("blue", 255)
+        alpha = kwargs.get("alpha", 255)
+        if input_key not in self.media_cache:
+            return f"Error: {input_key} not found"
+
+        input_path = Path(self.media_cache[input_key])
+        output_file = self._get_temp_path(input_path.suffix[1:])
+        cmd = [
+            "ffmpeg",
+            "-hide_banner",
+            "-i",
+            input_path.as_posix(),
+            "-vf",
+            f"lutrgb=r={red}*val/maxval:g={green}*val/maxval:b={blue}*val/maxval:a={alpha}*val/maxval",
+            "-pix_fmt",
+            "yuv420p",
             "-y",
             output_file.as_posix(),
         ]
@@ -5578,6 +5628,7 @@ class Tags(commands.Cog):
                     - grayscale [input_key] [output_key]
                     - sepia [input_key] [output_key]
                     - invert [input_key] [output_key]
+                    - tint [input_key] [red] [green] [blue] [alpha] [output_key]
                     - resize [input_key] [width] [height] [output_key]
                     - crop [input_key] [x] [y] [width] [height] [output_key]
                     - rotate [input_key] [angle] [output_key]

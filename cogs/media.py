@@ -835,6 +835,48 @@ class Media(commands.Cog):
         await processor._load_media(url=input_url, media_key=input_key)
         await self.run_gscript_command(ctx, "invert", input_key, processor)
 
+    @iv.command(
+        name="tint",
+        description="Tint the colors of a video or image to an exact RGBA color.",
+    )
+    @app_commands.describe(
+        url="URL/Emoji/User.",
+        attachment="Image/Video file.",
+        red="The red value. (0-255)",
+        green="The green value. (0-255)",
+        blue="The blue value. (0-255)",
+        alpha="The alpha value. (0-255)",
+    )
+    async def tint(
+        self,
+        ctx: commands.Context,
+        url: Optional[str] = None,
+        attachment: Optional[discord.Attachment] = None,
+        red: int = 255,
+        green: int = 255,
+        blue: int = 255,
+        alpha: int = 255,
+    ):
+        await ctx.typing()
+        processor = self.new_processor()
+        input_key = f"tint_{ctx.message.id}"
+        parsed = await self.process_media_input(ctx, url, attachment)
+        if parsed[2]:
+            raise commands.CommandError(parsed[2])
+        input_url = parsed[0][8:]
+
+        await processor._load_media(url=input_url, media_key=input_key)
+        await self.run_gscript_command(
+            ctx,
+            "tint",
+            input_key,
+            processor,
+            red=red,
+            green=green,
+            blue=blue,
+            alpha=alpha,
+        )
+
     @iv.command(name="fadein", description="Apply fade-in effect to a video or image.")
     @app_commands.describe(
         url="URL/Emoji/User.",
