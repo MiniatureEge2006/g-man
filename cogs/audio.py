@@ -1457,10 +1457,13 @@ class Audio(commands.Cog):
         except asyncpg.UniqueViolationError:
             await ctx.send("This playlist already exists.")
 
-    @playlist.command(name="add", description="Add a track to an existing playlist.")
+    @playlist.command(
+        name="add",
+        description="Add a track or an entire playlist to an existing playlist.",
+    )
     @app_commands.describe(
-        name="The name of the playlist to add a track to.",
-        url="URL of the track to add.",
+        name="The name of the playlist to add to.",
+        url="URL of the track or playlist to add.",
     )
     @app_commands.allowed_installs(guilds=True, users=False)
     async def playlist_add(self, ctx: commands.Context, name: str, url: str):
@@ -1470,6 +1473,19 @@ class Audio(commands.Cog):
                 "Database is currently not available, sorry. (is the database connected?)"
             )
             return
+
+        try:
+            info = await self.fetch_yt_info(url, download=False)
+        except Exception as e:
+            await ctx.send(f"Failed to fetch info for URL: {e}")
+            return
+
+        if not info:
+            await ctx.send("Could not retrieve information for the provided URL.")
+            return
+
+        is_playlist = "entries" in info and info["entries"] is not None
+
         async with self.db_pool.acquire() as conn:
             pid = await conn.fetchval(
                 "SELECT id FROM music_playlists WHERE owner_id = $1 AND name = $2",
@@ -1479,25 +1495,64 @@ class Audio(commands.Cog):
             if not pid:
                 await ctx.send(f"You don't have a playlist named `{name}`")
                 return
-            pos = await conn.fetchval(
+
+            start_pos = await conn.fetchval(
                 "SELECT COALESCE(MAX(position), 0) + 1 FROM music_playlist_entries WHERE playlist_id = $1",
                 pid,
             )
-            try:
-                info = await self.fetch_yt_info(url, download=False)
-                title = info.get("title", "Unknown")
-            except Exception:
-                title = url
-            duration = info.get("duration", 0) if isinstance(info, dict) else 0
-            await conn.execute(
-                "INSERT INTO music_playlist_entries (playlist_id, url, title, position, duration) VALUES ($1, $2, $3, $4, $5)",
-                pid,
-                url,
-                title,
-                pos,
-                int(duration),
-            )
-        await ctx.send(f"Added {title} `({url})` to playlist `{name}` successfully.")
+
+            if is_playlist:
+                valid_entries = [e for e in info["entries"] if e and "url" in e]
+                if not valid_entries:
+                    await ctx.send(
+                        "The provided playlist URL contains no valid tracks."
+                    )
+                    return
+
+                tracks_to_add = []
+                for entry in valid_entries:
+                    track_url = entry.get("webpage_url") or entry.get("url")
+                    track_title = entry.get("title", "Unknown")
+                    track_duration = entry.get("duration") or 0
+
+                    tracks_to_add.append(
+                        (
+                            pid,
+                            track_url,
+                            track_title,
+                            start_pos + len(tracks_to_add),
+                            int(track_duration),
+                        )
+                    )
+
+                if tracks_to_add:
+                    await conn.executemany(
+                        "INSERT INTO music_playlist_entries (playlist_id, url, title, position, duration) VALUES ($1, $2, $3, $4, $5)",
+                        tracks_to_add,
+                    )
+                    await ctx.send(
+                        f"Successfully added {len(tracks_to_add)} tracks from the playlist to `{name}`."
+                    )
+                else:
+                    await ctx.send(
+                        "No valid tracks found in the provided playlist URL."
+                    )
+            else:
+                track_url = info.get("webpage_url") or url
+                track_title = info.get("title", "Unknown")
+                track_duration = info.get("duration") or 0
+
+                await conn.execute(
+                    "INSERT INTO music_playlist_entries (playlist_id, url, title, position, duration) VALUES ($1, $2, $3, $4, $5)",
+                    pid,
+                    track_url,
+                    track_title,
+                    start_pos,
+                    int(track_duration),
+                )
+                await ctx.send(
+                    f"Added `{track_title}` to playlist `{name}` successfully."
+                )
 
     @playlist.command(name="play", description="Play a playlist.")
     @app_commands.describe(name="The name of the playlist to play.")
