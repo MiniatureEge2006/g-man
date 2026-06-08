@@ -6836,13 +6836,15 @@ class Tags(commands.Cog):
 
         @self.formatter.register("timestamp")
         @self.formatter.register("time")
+        @self.formatter.register("datetime")
+        @self.formatter.register("date")
         async def _timestamp(ctx, val, **kwargs):
             """
             ### {timestamp:format|timezone|offset}
                 * Formats timestamp with timezone support.
                 * Format options:
                     - discord: t/T/d/D/f/F/R (Discord-style timestamps)
-                    - strftime: Any valid format string
+                    - strftime format strings such as %Y
                     - unix/iso: UNIX timestamp or ISO-8601
                 * Timezone: IANA name (e.g. "Europe/Paris")
                 * Offset: +- hours adjustment (e.g. "+1")
