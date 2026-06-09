@@ -487,14 +487,36 @@ class AI(commands.Cog):
                             for item in view.children:
                                 final_view.add_item(item)
 
-                    message_content = final_text[:2000] if final_text else None
-
-                    await ctx.reply(
-                        content=message_content,
-                        embeds=final_embeds[:10],
-                        view=final_view if final_view and final_view.children else None,
-                        files=final_files[:10],
-                    )
+                    if len(final_text) > 2000:
+                        embed = discord.Embed(
+                            title="G-AI Response",
+                            description=final_text[:4096],
+                            color=discord.Color.blurple(),
+                        )
+                        embed.set_author(
+                            name=f"{ctx.author.name}#{ctx.author.discriminator}",
+                            icon_url=ctx.author.display_avatar.url,
+                            url=f"https://discord.com/users/{ctx.author.id}",
+                        )
+                        embed.set_footer(
+                            text=f"AI response took {time.time() - start_time:.2f} seconds"
+                        )
+                        await ctx.reply(
+                            embed=embed,
+                            view=final_view
+                            if final_view and final_view.children
+                            else None,
+                            files=final_files[:10],
+                        )
+                    else:
+                        await ctx.reply(
+                            content=final_text if final_text else None,
+                            embeds=final_embeds[:10],
+                            view=final_view
+                            if final_view and final_view.children
+                            else None,
+                            files=final_files[:10],
+                        )
 
                     user_history.append({"role": "user", "content": user_content})
                     user_history.append({"role": "assistant", "content": final_content})
