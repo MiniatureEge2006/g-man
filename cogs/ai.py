@@ -270,7 +270,7 @@ class AI(commands.Cog):
                 prompt = re.sub(r"(^|\s)--remove-tools\s+\S+", " ", prompt).strip()
                 remove_tools_list = [t.strip() for t in remove_tools_str.split(",")]
 
-            reply_prefix = " "
+            ref_message_content = None
             if ctx.message.reference and ctx.message.reference.message_id:
                 try:
                     ref_msg = await ctx.channel.fetch_message(
@@ -281,8 +281,87 @@ class AI(commands.Cog):
                         if isinstance(ref_msg.author, discord.Member)
                         else ref_msg.author.name
                     )
-                    ref_content = ref_msg.content or "[Media/No text available]"
-                    reply_prefix = f'Replying to {ref_author}: "{ref_content}"\n\n'
+                    ref_text = ref_msg.content or "[No text content]"
+
+                    ref_media_parts = []
+                    for attachment in ref_msg.attachments:
+                        if (
+                            attachment.content_type
+                            and attachment.content_type.startswith(
+                                ("image/", "audio/", "video/")
+                            )
+                        ):
+                            try:
+                                async with self.session.get(attachment.url) as resp:
+                                    if resp.status == 200:
+                                        media_data = await resp.read()
+                                        b64_data = base64.b64encode(media_data).decode(
+                                            "utf-8"
+                                        )
+
+                                        if attachment.content_type.startswith("image/"):
+                                            ref_media_parts.append(
+                                                {
+                                                    "type": "image_url",
+                                                    "image_url": {
+                                                        "url": f"data:{attachment.content_type};base64,{b64_data}"
+                                                    },
+                                                }
+                                            )
+                                        elif attachment.content_type.startswith(
+                                            "audio/"
+                                        ):
+                                            raw_format = (
+                                                attachment.content_type.replace(
+                                                    "audio/", ""
+                                                ).lower()
+                                            )
+                                            if (
+                                                "mpeg" in raw_format
+                                                or "mp3" in raw_format
+                                            ):
+                                                audio_format = "mp3"
+                                            elif "wav" in raw_format:
+                                                audio_format = "wav"
+                                            elif "flac" in raw_format:
+                                                audio_format = "flac"
+                                            elif (
+                                                "ogg" in raw_format
+                                                or "opus" in raw_format
+                                            ):
+                                                audio_format = raw_format
+                                            else:
+                                                audio_format = "mp3"
+                                            ref_media_parts.append(
+                                                {
+                                                    "type": "input_audio",
+                                                    "input_audio": {
+                                                        "data": b64_data,
+                                                        "format": audio_format,
+                                                    },
+                                                }
+                                            )
+                                        elif attachment.content_type.startswith(
+                                            "video/"
+                                        ):
+                                            ref_media_parts.append(
+                                                {
+                                                    "type": "input_video",
+                                                    "input_video": {"data": b64_data},
+                                                }
+                                            )
+                            except Exception:
+                                pass
+
+                    if ref_media_parts:
+                        ref_message_content = [
+                            {
+                                "type": "text",
+                                "text": f"Replying to {ref_author}: {ref_text}",
+                            }
+                        ] + ref_media_parts
+                    else:
+                        ref_message_content = f"Replying to {ref_author}: {ref_text}"
                 except Exception:
                     pass
 
@@ -292,31 +371,62 @@ class AI(commands.Cog):
                 else ctx.author.name
             )
             if shared_mode:
-                prompt = f"[{author_name}]: {reply_prefix}{prompt}"
+                prompt = f"[{author_name}]: {prompt}"
             else:
-                prompt = f"{reply_prefix}{prompt}"
+                prompt = prompt
 
-            image_parts = []
+            media_parts = []
             if media_flag and ctx.message.attachments:
                 for attachment in ctx.message.attachments:
                     if attachment.content_type and attachment.content_type.startswith(
-                        "image/"
+                        ("image/", "audio/", "video/")
                     ):
                         try:
                             async with self.session.get(attachment.url) as resp:
                                 if resp.status == 200:
-                                    img_data = await resp.read()
-                                    b64_data = base64.b64encode(img_data).decode(
+                                    media_data = await resp.read()
+                                    b64_data = base64.b64encode(media_data).decode(
                                         "utf-8"
                                     )
-                                    image_parts.append(
-                                        {
-                                            "type": "image_url",
-                                            "image_url": {
-                                                "url": f"data:{attachment.content_type};base64,{b64_data}"
-                                            },
-                                        }
-                                    )
+                                    if attachment.content_type.startswith("image/"):
+                                        media_parts.append(
+                                            {
+                                                "type": "image_url",
+                                                "image_url": {
+                                                    "url": f"data:{attachment.content_type};base64,{b64_data}"
+                                                },
+                                            }
+                                        )
+                                    elif attachment.content_type.startswith("audio/"):
+                                        raw_format = attachment.content_type.replace(
+                                            "audio/", ""
+                                        ).lower()
+                                        if "mpeg" in raw_format or "mp3" in raw_format:
+                                            audio_format = "mp3"
+                                        elif "wav" in raw_format:
+                                            audio_format = "wav"
+                                        elif "flac" in raw_format:
+                                            audio_format = "flac"
+                                        elif (
+                                            "ogg" in raw_format or "opus" in raw_format
+                                        ):
+                                            audio_format = raw_format
+                                        media_parts.append(
+                                            {
+                                                "type": "input_audio",
+                                                "input_audio": {
+                                                    "data": f"{b64_data}",
+                                                    "format": audio_format,
+                                                },
+                                            }
+                                        )
+                                    elif attachment.content_type.startswith("video/"):
+                                        media_parts.append(
+                                            {
+                                                "type": "input_video",
+                                                "input_video": {"data": f"{b64_data}"},
+                                            }
+                                        )
                                     break
                         except Exception:
                             pass
@@ -327,23 +437,54 @@ class AI(commands.Cog):
                         if (
                             resp.status == 200
                             and resp.content_type
-                            and resp.content_type.startswith("image/")
-                        ):
-                            img_data = await resp.read()
-                            b64_data = base64.b64encode(img_data).decode("utf-8")
-                            image_parts.append(
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:{resp.content_type};base64,{b64_data}"
-                                    },
-                                }
+                            and resp.content_type.startswith(
+                                ("image/", "audio/", "video/")
                             )
+                        ):
+                            media_data = await resp.read()
+                            b64_data = base64.b64encode(media_data).decode("utf-8")
+                            if resp.content_type.startswith("image/"):
+                                media_parts.append(
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": f"data:{resp.content_type};base64,{b64_data}"
+                                        },
+                                    }
+                                )
+                            elif resp.content_type.startswith("audio/"):
+                                raw_format = resp.content_type.replace(
+                                    "audio/", ""
+                                ).lower()
+                                if "mpeg" in raw_format or "mp3" in raw_format:
+                                    audio_format = "mp3"
+                                elif "wav" in raw_format:
+                                    audio_format = "wav"
+                                elif "flac" in raw_format:
+                                    audio_format = "flac"
+                                elif "ogg" in raw_format or "opus" in raw_format:
+                                    audio_format = raw_format
+                                media_parts.append(
+                                    {
+                                        "type": "input_audio",
+                                        "input_audio": {
+                                            "data": f"{b64_data}",
+                                            "format": audio_format,
+                                        },
+                                    }
+                                )
+                            elif resp.content_type.startswith("video/"):
+                                media_parts.append(
+                                    {
+                                        "type": "input_video",
+                                        "input_video": {"data": f"{b64_data}"},
+                                    }
+                                )
                 except Exception:
                     pass
 
-            if image_parts:
-                user_content = [{"type": "text", "text": prompt}] + image_parts
+            if media_parts:
+                user_content = [{"type": "text", "text": prompt}] + media_parts
             else:
                 user_content = prompt
 
@@ -369,6 +510,8 @@ class AI(commands.Cog):
 
             messages = [{"role": "system", "content": system_prompt}]
             messages.extend(conversation_turns)
+            if ref_message_content is not None:
+                messages.append({"role": "user", "content": ref_message_content})
             messages.append({"role": "user", "content": user_content})
 
             tools = await self.get_ai_tools(
