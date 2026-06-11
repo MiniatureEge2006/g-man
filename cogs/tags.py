@@ -6192,6 +6192,13 @@ class Tags(commands.Cog):
                     else await ai_cog.create_system_prompt(ctx, prompt)
                 )
 
+                if web_mode:
+                    system_prompt += (
+                        "\n\n[MANDATORY INSTRUCTION]: You are currently operating in web search mode. "
+                        "You MUST use the 'web_search' and 'web_fetch' tools to find information before formulating your response. "
+                        "Do not rely on your internal knowledge. Always perform a web search first for any user query."
+                    )
+
                 if not user_history or user_history[0].get("role") != "system":
                     user_history.insert(0, {"role": "system", "content": system_prompt})
                 else:
