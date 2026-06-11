@@ -70,8 +70,8 @@ RUN emerge --getbinpkg --noreplace \
 
 RUN groupadd -g 1000 gcoder && useradd -r -u 1000 -g gcoder -m -d /home/gcoder gcoder
 RUN pip install --break-system-packages pyvips playwright
-RUN npm install -g ts-node mathjs imagescript
-ENV NODE_PATH=/usr/local/lib/node_modules
+RUN npm install -g --force ts-node mathjs imagescript playwright
+ENV NODE_PATH=/usr/lib64/node_modules
 ENV PLAYWRIGHT_BROWSERS_PATH=/usr/lib/playwright
 RUN mkdir -p $PLAYWRIGHT_BROWSERS_PATH
 RUN playwright install && \
