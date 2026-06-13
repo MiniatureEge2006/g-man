@@ -3799,7 +3799,7 @@ class Moderation(commands.Cog):
         self,
         ctx: commands.Context,
         members: commands.Greedy[discord.User],
-        delete_days: Optional[int] = 0,
+        delete_days: Optional[int] = 7,
         *,
         reason: str = "No reason provided.",
     ):
