@@ -691,6 +691,25 @@ class Moderation(commands.Cog):
             elif filter["action"] == "kick":
                 try:
                     await message.author.kick(reason="Violated the chat filter.")
+                    if not filter.get("custom_message"):
+                        await message.channel.send(
+                            f"{message.author.mention} has been kicked from the server for violating the chat filter.",
+                            **delete_kwarg,
+                        )
+                except discord.Forbidden:
+                    pass
+            elif filter["action"] == "softban":
+                try:
+                    await message.author.ban(
+                        reason="Violated the chat filter.",
+                        delete_message_seconds=filter.get("delete_seconds", 0),
+                    )
+                    await message.author.unban(reason="Violated the chat filter.")
+                    if not filter.get("custom_message"):
+                        await message.channel.send(
+                            f"{message.author.mention} has been softbanned from the server for violating the chat filter.",
+                            **delete_kwarg,
+                        )
                 except discord.Forbidden:
                     pass
             elif filter["action"] == "ban":
@@ -699,6 +718,11 @@ class Moderation(commands.Cog):
                         reason="Violated the chat filter.",
                         delete_message_seconds=filter.get("delete_seconds", 0),
                     )
+                    if not filter.get("custom_message"):
+                        await message.channel.send(
+                            f"{message.author.mention} has been banned from the server for violating the chat filter.",
+                            **delete_kwarg,
+                        )
                 except discord.Forbidden:
                     pass
         except discord.Forbidden:
@@ -774,7 +798,7 @@ class Moderation(commands.Cog):
         action="Action to take when triggered.",
         custom_message="Custom message sent in channel when triggered. (supports TagScript.)",
         timeout_minutes="Timeout duration for mute action. (1-40320 minutes)",
-        delete_days="Days of messages to delete for ban action. (0-7)",
+        delete_days="Days of messages to delete for ban and softban action. (0-7)",
         delete_after="Seconds to auto-delete response. (0 = keep forever)",
     )
     async def filter_add(
@@ -784,7 +808,7 @@ class Moderation(commands.Cog):
         target_id: Optional[str] = None,
         filter_type: Literal["regex", "word", "link"] = "word",
         pattern: Optional[str] = None,
-        action: Literal["delete", "warn", "mute", "kick", "ban"] = "delete",
+        action: Literal["delete", "warn", "mute", "kick", "softban", "ban"] = "delete",
         custom_message: Optional[str] = None,
         timeout_minutes: Optional[int] = 60,
         delete_days: Optional[int] = 1,
@@ -834,7 +858,7 @@ class Moderation(commands.Cog):
                 )
                 return
 
-        if action == "ban":
+        if action in ["softban", "ban"]:
             if delete_days < 0 or delete_days > 7:
                 await ctx.send("Delete days must be between 0 and 7.", ephemeral=True)
                 return
@@ -3883,6 +3907,108 @@ class Moderation(commands.Cog):
             except discord.HTTPException as e:
                 await ctx.send(f"Failed to ban `{replied_user}`: {e}")
 
+    @commands.hybrid_command(
+        name="softban",
+        description="Softbans provided member(s). (bans but unbans right after to delete messages.)",
+    )
+    @app_commands.describe(
+        members="Members to softban. Can be multiple.",
+        delete_days="Number of days worth of messages to delete.",
+        reason="Reason for the softban.",
+    )
+    @app_commands.allowed_installs(guilds=True, users=False)
+    @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
+    @commands.has_permissions(kick_members=True)
+    async def softban(
+        self,
+        ctx: commands.Context,
+        members: commands.Greedy[discord.Member],
+        *,
+        delete_days: Optional[int] = 7,
+        reason: str = "No reason provided.",
+    ):
+        await ctx.typing()
+        delete_seconds = delete_days * 86400
+        audit_log_reason = f"Timestamp: {datetime.now(timezone.utc)}\nAdmin: {ctx.author}\nReason: {reason}"
+
+        softbanned_members = []
+        guild = ctx.guild
+
+        for member in members:
+            if member == ctx.author:
+                await ctx.send("You cannot softban yourself.")
+                continue
+
+            if member.top_role >= ctx.author.top_role:
+                await ctx.send(
+                    f"You can't softban `{member}` because they have an equal or higher role than you."
+                )
+                continue
+
+            if member.top_role >= ctx.me.top_role:
+                await ctx.send(
+                    f"I can't softban `{member}` because they have an equal or higher role than me."
+                )
+                continue
+
+            try:
+                await member.ban(
+                    delete_message_seconds=delete_seconds, reason=audit_log_reason
+                )
+                await member.unban(reason=audit_log_reason)
+                softbanned_members.append(str(member))
+            except discord.Forbidden:
+                await ctx.send(f"I don't have permission to softban `{member}`.")
+            except discord.HTTPException as e:
+                await ctx.send(f"Failed to softban `{member}`: {e}")
+
+        if softbanned_members:
+            await ctx.send(
+                f"Softbanned members(s): `{', '.join(softbanned_members)}`\n**Reason:** `{reason}`"
+            )
+
+        reference = ctx.message.reference
+        if reference and isinstance(reference.resolved, discord.Message):
+            replied_msg = reference.resolved
+            replied_member = replied_msg.author
+
+            if not isinstance(replied_member, discord.Member):
+                replied_member = guild.get_member(replied_member.id)
+                if replied_member is None:
+                    await ctx.send("Replied member is not in this server.")
+                    return
+
+            if replied_member == ctx.author:
+                await ctx.send("You cannot softban yourself via reply.")
+                return
+
+            if replied_member.top_role >= ctx.author.top_role:
+                await ctx.send(
+                    f"You can't softban `{replied_member}` because they have an equal or higher role than you."
+                )
+                return
+
+            if replied_member.top_role >= ctx.me.top_role:
+                await ctx.send(
+                    f"I can't softban `{replied_member}` because they have an equal or higher role than me."
+                )
+                return
+
+            try:
+                await replied_member.ban(
+                    delete_message_seconds=delete_seconds, reason=audit_log_reason
+                )
+                await replied_member.unban(reason=audit_log_reason)
+                await ctx.send(
+                    f"Softbanned replied member: `{replied_member}`\n**Reason:** `{reason}`"
+                )
+            except discord.Forbidden:
+                await ctx.send(
+                    f"I don't have permission to softban `{replied_member}`."
+                )
+            except discord.HTTPException as e:
+                await ctx.send(f"Failed to softban `{replied_member}`: {e}")
+
     @commands.hybrid_command(name="kick", description="Kicks provided member(s).")
     @app_commands.describe(
         members="Members to kick. Can be multiple.", reason="Reason for the kick."
@@ -3900,7 +4026,7 @@ class Moderation(commands.Cog):
         await ctx.typing()
         audit_log_reason = f"Timestamp: {datetime.now(timezone.utc)}\nAdmin: {ctx.author}\nReason: {reason}"
 
-        kicked_users = []
+        kicked_members = []
         guild = ctx.guild
 
         for member in members:
@@ -3922,15 +4048,15 @@ class Moderation(commands.Cog):
 
             try:
                 await member.kick(reason=audit_log_reason)
-                kicked_users.append(str(member))
+                kicked_members.append(str(member))
             except discord.Forbidden:
                 await ctx.send(f"I don't have permission to kick `{member}`.")
             except discord.HTTPException as e:
                 await ctx.send(f"Failed to kick `{member}`: {e}")
 
-        if kicked_users:
+        if kicked_members:
             await ctx.send(
-                f"Kicked member(s): `{', '.join(kicked_users)}`\n**Reason:** `{reason}`"
+                f"Kicked member(s): `{', '.join(kicked_members)}`\n**Reason:** `{reason}`"
             )
 
         reference = ctx.message.reference
@@ -3941,7 +4067,7 @@ class Moderation(commands.Cog):
             if not isinstance(replied_member, discord.Member):
                 replied_member = guild.get_member(replied_member.id)
                 if replied_member is None:
-                    await ctx.send("Replied user is not in this server.")
+                    await ctx.send("Replied member is not in this server.")
                     return
 
             if replied_member == ctx.author:
@@ -3963,7 +4089,7 @@ class Moderation(commands.Cog):
             try:
                 await replied_member.kick(reason=audit_log_reason)
                 await ctx.send(
-                    f"Kicked replied user: `{replied_member}`\n**Reason:** `{reason}`"
+                    f"Kicked replied member: `{replied_member}`\n**Reason:** `{reason}`"
                 )
             except discord.Forbidden:
                 await ctx.send(f"I don't have permission to kick `{replied_member}`.")

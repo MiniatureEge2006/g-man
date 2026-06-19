@@ -168,7 +168,7 @@ CREATE TABLE IF NOT EXISTS chat_filters (
     guild_id BIGINT NOT NULL,
     filter_type TEXT NOT NULL CHECK (filter_type IN ('regex', 'word', 'link')),
     pattern TEXT NOT NULL,
-    action TEXT NOT NULL CHECK (action IN ('warn', 'delete', 'mute', 'kick', 'ban')),
+    action TEXT NOT NULL CHECK (action IN ('warn', 'delete', 'mute', 'kick', 'softban', 'ban')),
     target_type TEXT NOT NULL CHECK (target_type IN ('server', 'channel', 'user', 'role')),
     target_id BIGINT,
     custom_message TEXT,
