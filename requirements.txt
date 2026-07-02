@@ -12,3 +12,4 @@ yt-dlp
 matplotlib
 jsonschema
 davey
+gTTS

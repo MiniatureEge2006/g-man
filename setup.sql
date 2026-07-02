@@ -296,3 +296,19 @@ CREATE INDEX IF NOT EXISTS idx_music_logs_user ON music_play_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_music_logs_guild ON music_play_logs(guild_id);
 CREATE INDEX IF NOT EXISTS idx_music_playlists_owner ON music_playlists(owner_id);
 CREATE INDEX IF NOT EXISTS idx_music_playlist_entries ON music_playlist_entries(playlist_id);
+
+CREATE TABLE IF NOT EXISTS tts_bindings (
+    guild_id BIGINT NOT NULL,
+    text_channel_id BIGINT PRIMARY KEY,
+    filters TEXT,
+    language TEXT
+);
+
+CREATE TABLE IF NOT EXISTS tts_configs (
+    entity_id BIGINT NOT NULL,
+    guild_id BIGINT NOT NULL,
+    entity_type TEXT NOT NULL CHECK (entity_type IN ('user', 'channel', 'guild')),
+    language TEXT,
+    filters TEXT,
+    PRIMARY KEY (entity_id, guild_id)
+);

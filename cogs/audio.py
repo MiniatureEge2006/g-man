@@ -1,4 +1,5 @@
 import asyncio
+import audioop
 import os
 import random
 import tempfile
@@ -9,11 +10,137 @@ from typing import Any, Dict, List, Optional
 
 import asyncpg
 import discord
+import gtts
 import yt_dlp
 from discord import app_commands
 from discord.ext import commands
+from gtts import gTTS
 
 import bot_info
+
+
+class MixerAudioSource(discord.AudioSource):
+    def __init__(self, main_source: Optional[discord.AudioSource] = None):
+        self.main_source = main_source
+        self.tts_source: Optional[discord.AudioSource] = None
+        self.after_main = None
+        self.after_tts = None
+        self.FRAME_SIZE = 3840
+        self.bot = None
+
+    def read(self) -> bytes:
+        main_data = b""
+        if self.main_source:
+            try:
+                main_data = self.main_source.read()
+            except Exception:
+                main_data = b""
+
+            if not main_data:
+                self.main_source = None
+                if self.after_main:
+                    callback = self.after_main
+                    self.after_main = None
+                    if self.bot:
+                        self.bot.loop.call_soon_threadsafe(callback)
+                    else:
+                        callback()
+
+        tts_data = b""
+        if self.tts_source:
+            try:
+                tts_data = self.tts_source.read()
+            except Exception:
+                tts_data = b""
+
+            if not tts_data:
+                self.tts_source = None
+                if self.after_tts:
+                    self.after_tts(None)
+                    self.after_tts = None
+
+        if not main_data and not tts_data:
+            return b""
+
+        if len(main_data) < self.FRAME_SIZE:
+            main_data += b"\x00" * (self.FRAME_SIZE - len(main_data))
+        elif len(main_data) > self.FRAME_SIZE:
+            main_data = main_data[: self.FRAME_SIZE]
+
+        if len(tts_data) < self.FRAME_SIZE:
+            tts_data += b"\x00" * (self.FRAME_SIZE - len(tts_data))
+        elif len(tts_data) > self.FRAME_SIZE:
+            tts_data = tts_data[: self.FRAME_SIZE]
+
+        try:
+            return audioop.add(main_data, tts_data, 2)
+        except Exception:
+            return main_data
+
+    @property
+    def volume(self):
+        if self.main_source and hasattr(self.main_source, "volume"):
+            return self.main_source.volume
+        return 1.0
+
+    @volume.setter
+    def volume(self, value):
+        if self.main_source and hasattr(self.main_source, "volume"):
+            self.main_source.volume = value
+
+    def is_opus(self) -> bool:
+        return False
+
+    def cleanup(self):
+        if self.main_source:
+            self.main_source.cleanup()
+        if self.tts_source:
+            self.tts_source.cleanup()
+
+
+class VoicePaginator(discord.ui.View):
+    def __init__(self, pages: list[discord.Embed], timeout: float = 60.0):
+        super().__init__(timeout=timeout)
+        self.pages = pages
+        self.current_page = 0
+
+        self.update_buttons()
+
+    def update_buttons(self):
+        self.prev_page.disabled = self.current_page == 0
+        self.next_page.disabled = self.current_page == len(self.pages) - 1
+
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.blurple)
+    async def prev_page(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.update_buttons()
+            await interaction.response.edit_message(
+                embed=self.pages[self.current_page], view=self
+            )
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.blurple)
+    async def next_page(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        if self.current_page < len(self.pages) - 1:
+            self.current_page += 1
+            self.update_buttons()
+            await interaction.response.edit_message(
+                embed=self.pages[self.current_page], view=self
+            )
+
+    async def on_timeout(self):
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = True
+        try:
+            if hasattr(self, "message"):
+                await self.message.edit(view=self)
+        except Exception:
+            pass
 
 
 class GuildMusicState:
@@ -26,6 +153,8 @@ class GuildMusicState:
         self.original_queue: List[Any] = []
         self.voice_channel_id: Optional[int] = None
         self.is_seeking: bool = False
+        self.is_tts_playing: bool = False
+        self.tts_queue: deque = deque()
 
 
 class Audio(commands.Cog):
@@ -158,6 +287,192 @@ class Audio(commands.Cog):
             await ctx.send(f"Connected to {channel.name}.")
             return True
 
+    async def _resolve_tts_config(
+        self,
+        author_id: int,
+        voice_channel_id: int,
+        guild_id: int,
+        text_channel_id: Optional[int] = None,
+    ) -> dict:
+        config = {"language": None, "filters": []}
+        if not self.db_pool:
+            return config
+
+        async with self.db_pool.acquire() as conn:
+            if text_channel_id:
+                row = await conn.fetchrow(
+                    "SELECT language, filters FROM tts_bindings WHERE text_channel_id = $1",
+                    text_channel_id,
+                )
+                if row:
+                    return {
+                        "language": row["language"],
+                        "filters": row["filters"].split(",") if row["filters"] else [],
+                    }
+
+            rows = await conn.fetch(
+                """
+                SELECT entity_type, language, filters FROM tts_configs
+                   WHERE (entity_id = $1 AND guild_id = $4)
+                      OR (entity_id = $2 AND guild_id = $4)
+                      OR (entity_id = $3 AND guild_id = $4)
+                """,
+                author_id,
+                voice_channel_id,
+                guild_id,
+                guild_id,
+            )
+
+            mapping = {r["entity_type"]: r for r in rows}
+            for entity_type in ["user", "channel", "guild"]:
+                if entity_type in mapping:
+                    r = mapping[entity_type]
+                    return {
+                        "language": r["language"] or config["language"],
+                        "filters": r["filters"].split(",") if r["filters"] else [],
+                    }
+        return config
+
+    def _generate_tts_file(self, text: str, language: Optional[str]) -> str:
+        fp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+        filename = fp.name
+        fp.close()
+        lang = language if language else "en"
+        try:
+            tts = gTTS(text=text, lang=lang, slow=False)
+            tts.save(filename)
+        except Exception:
+            tts = gTTS(text=text, lang="en", slow=False)
+            tts.save(filename)
+        return filename
+
+    async def _play_tts_file(
+        self,
+        vc: discord.VoiceClient,
+        filename: str,
+        filters: List[str],
+        state: GuildMusicState,
+    ):
+        ffmpeg_opts = {"options": "-vn"}
+        if filters:
+            ffmpeg_opts["options"] += f' -af "{",".join(filters)}"'
+
+        source = discord.FFmpegPCMAudio(filename, **ffmpeg_opts)
+        source = discord.PCMVolumeTransformer(source, volume=1.0)
+
+        state.is_tts_playing = True
+
+        if vc.source and isinstance(vc.source, MixerAudioSource):
+            if vc.source.main_source and hasattr(vc.source.main_source, "volume"):
+                vc.source.main_source.volume = state.volume * 0.20
+
+            def finish_mixed_tts(e):
+                if vc.source and isinstance(vc.source, MixerAudioSource):
+                    if vc.source.main_source and hasattr(
+                        vc.source.main_source, "volume"
+                    ):
+                        vc.source.main_source.volume = state.volume
+                state.is_tts_playing = False
+                try:
+                    os.remove(filename)
+                except Exception:
+                    pass
+                asyncio.run_coroutine_threadsafe(
+                    self._check_tts_queue(vc, state), self.bot.loop
+                )
+
+            vc.source.after_tts = finish_mixed_tts
+            vc.source.tts_source = source
+
+        else:
+
+            def finish_standalone_tts(e):
+                state.is_tts_playing = False
+                try:
+                    os.remove(filename)
+                except Exception:
+                    pass
+                asyncio.run_coroutine_threadsafe(
+                    self._check_tts_queue(vc, state), self.bot.loop
+                )
+
+            vc.play(source, after=finish_standalone_tts)
+
+    async def _check_tts_queue(self, vc: discord.VoiceClient, state: GuildMusicState):
+        if not vc or not vc.is_connected():
+            state.tts_queue.clear()
+            state.is_tts_playing = False
+            return
+
+        if not vc.is_playing() and not vc.is_paused():
+            state.is_tts_playing = False
+
+        if state.is_tts_playing or not state.tts_queue:
+            return
+
+        filename, filters = state.tts_queue.popleft()
+        await self._play_tts_file(vc, filename, filters, state)
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if message.author.bot or not message.guild or not self.db_pool:
+            return
+
+        async with self.db_pool.acquire() as conn:
+            bound = await conn.fetchrow(
+                "SELECT text_channel_id FROM tts_bindings WHERE text_channel_id = $1",
+                message.channel.id,
+            )
+
+        if bound:
+            vc = message.guild.voice_client
+            if (
+                vc
+                and vc.is_connected()
+                and message.author.voice
+                and message.author.voice.channel == vc.channel
+            ):
+                state = self.get_state(message.guild.id)
+                config = await self._resolve_tts_config(
+                    author_id=message.author.id,
+                    voice_channel_id=vc.channel.id,
+                    guild_id=message.guild.id,
+                    text_channel_id=message.channel.id,
+                )
+                try:
+                    filename = await self.run_in_executor(
+                        self._generate_tts_file,
+                        message.content,
+                        config["language"],
+                    )
+                    state.tts_queue.append((filename, config["filters"]))
+                    await self._check_tts_queue(vc, state)
+                except Exception:
+                    pass
+
+    async def _internal_say(self, ctx: commands.Context, text: str):
+        state = self.get_state(ctx.guild.id)
+        vc = ctx.voice_client
+        if not vc or not vc.is_connected():
+            return await ctx.send("I must be connected to a voice channel first.")
+
+        config = await self._resolve_tts_config(
+            author_id=ctx.author.id,
+            voice_channel_id=vc.channel.id,
+            guild_id=ctx.guild.id,
+        )
+
+        try:
+            filename = await self.run_in_executor(
+                self._generate_tts_file,
+                text,
+                config["language"],
+            )
+            state.tts_queue.append((filename, config["filters"]))
+            await self._check_tts_queue(vc, state)
+        except Exception as e:
+            await ctx.send(f"gTTS error: {e}", delete_after=5)
+
     async def play_next(self, ctx: Optional[commands.Context], guild_id: int):
         if not ctx:
             guild = self.bot.get_guild(guild_id)
@@ -276,12 +591,29 @@ class Audio(commands.Cog):
                 **ffmpeg_opts,
             )
         source = discord.PCMVolumeTransformer(source, volume=state.volume)
-        voice_client.play(
-            source,
-            after=lambda e: asyncio.run_coroutine_threadsafe(
+
+        def after_callback(e):
+            asyncio.run_coroutine_threadsafe(
                 self._after_play(ctx, actual_file_path, guild_id), self.bot.loop
-            ),
-        )
+            )
+
+        if voice_client.source and isinstance(voice_client.source, MixerAudioSource):
+            mixer = voice_client.source
+            mixer.bot = self.bot
+            mixer.main_source = source
+            mixer.after_main = lambda: after_callback(None)
+
+            if not voice_client.is_playing() and not voice_client.is_paused():
+                voice_client.play(mixer, after=lambda e: mixer.cleanup())
+        else:
+            mixer = MixerAudioSource(source)
+            mixer.bot = self.bot
+
+            def trigger_after_main():
+                after_callback(None)
+
+            mixer.after_main = trigger_after_main
+            voice_client.play(mixer, after=lambda e: mixer.cleanup())
         duration = info.get("duration", 0)
         state.currently_playing = {
             "url": url,
@@ -1424,6 +1756,394 @@ class Audio(commands.Cog):
             icon_url=ctx.author.display_avatar.url,
         )
         await ctx.send(embed=embed)
+
+    @commands.hybrid_command(
+        name="say",
+        description="Manually use Text-to-Speech.",
+    )
+    @app_commands.describe(text="The message string content to read aloud.")
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def say(self, ctx: commands.Context, *, text: str):
+        await ctx.typing()
+        if ctx.voice_client:
+            if not ctx.author.voice:
+                return await ctx.send("You are not in a voice channel.")
+            elif ctx.author.voice.channel != ctx.voice_client.channel:
+                return await ctx.send("You are not in the same voice channel as me.")
+        elif not ctx.voice_client and ctx.author.voice:
+            await ctx.author.voice.channel.connect()
+        elif not ctx.voice_client and not ctx.author.voice:
+            return await ctx.send("You are not in a voice channel.")
+        await self._internal_say(ctx, text)
+
+    @commands.hybrid_group(
+        name="tts",
+        description="Manage gTTS configuration.",
+    )
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def tts(self, ctx: commands.Context):
+        return
+
+    @tts.command(
+        name="config",
+        description="Set custom gTTS configuration for users, voice channels, and guilds.",
+    )
+    @app_commands.describe(
+        target_type="The target type. ('user', 'channel', or 'guild')",
+        target_id="Optional: Explicit channel ID to configure. (channel type only)",
+        language="Language.",
+        filters="Comma-separated FFmpeg filter graph blocks. (e.g., vibrato=f=15,asetrate=44100*1.2)",
+    )
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def tts_config(
+        self,
+        ctx: commands.Context,
+        target_type: str,
+        target_id: Optional[str] = None,
+        language: Optional[str] = None,
+        filters: Optional[str] = None,
+    ):
+        if target_type not in ["user", "channel", "guild"]:
+            return await ctx.send("Target can only be: 'user', 'channel', or 'guild'.")
+
+        if not self.db_pool:
+            return await ctx.send("Database connection pool is not available.")
+
+        if target_id and target_type != "channel":
+            return await ctx.send("You can only configure channels via ID.")
+
+        if target_type == "user":
+            entity_id = ctx.author.id
+
+        elif target_type == "guild":
+            if not ctx.author.guild_permissions.manage_guild:
+                return await ctx.send(
+                    "You need the `Manage Server` permission to modify server-wide gTTS configuration."
+                )
+            entity_id = ctx.guild.id
+
+        elif target_type == "channel":
+            if not ctx.author.guild_permissions.manage_channels:
+                return await ctx.send(
+                    "You need the `Manage Channels` permission to modify channel-wide gTTS configuration."
+                )
+            if target_id:
+                try:
+                    entity_id = int(target_id)
+                except ValueError:
+                    return await ctx.send("The provided channel ID must be valid.")
+            else:
+                entity_id = ctx.channel.id
+
+        async with self.db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO tts_configs (entity_id, guild_id, entity_type, language, filters)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (entity_id, guild_id) DO UPDATE 
+                SET language = EXCLUDED.language, filters = EXCLUDED.filters;
+            """,
+                entity_id,
+                ctx.guild.id,
+                target_type,
+                language,
+                filters,
+            )
+
+        await ctx.send(
+            f"Successfully saved gTTS configuration for `{target_type}` on this server."
+        )
+
+    @tts.command(
+        name="bind",
+        description="Bind the current text channel as a TTS channel.",
+    )
+    @app_commands.describe(
+        language="Optional TTS language.",
+        filters="Optional FFmpeg filters for this TTS channel.",
+    )
+    @commands.has_guild_permissions(manage_channels=True)
+    async def tts_bind(
+        self,
+        ctx: commands.Context,
+        language: Optional[str] = None,
+        filters: Optional[str] = None,
+    ):
+        if not self.db_pool:
+            return await ctx.send("Database connection pool is not available.")
+
+        async with self.db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO tts_bindings (guild_id, text_channel_id, filters, language)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (text_channel_id) DO UPDATE 
+                SET filters = EXCLUDED.filters, language = EXCLUDED.language;
+            """,
+                ctx.guild.id,
+                ctx.channel.id,
+                filters,
+                language,
+            )
+
+        await ctx.send(f"Successfully binded {ctx.channel.mention} as a TTS channel.")
+
+    @tts.command(
+        name="reset",
+        description="Reset gTTS configurations or channel bindings back to defaults.",
+    )
+    @app_commands.describe(
+        scope="What scope to reset. ('self', 'user', 'channel', 'guild', or 'binding')",
+        target_id="The ID of the target user/channel to reset (Required for 'user', 'channel', and 'binding' if admin).",
+    )
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def tts_reset(
+        self,
+        ctx: commands.Context,
+        scope: str,
+        target_id: Optional[str] = None,
+    ):
+        scope = scope.lower()
+        valid_scopes = ["self", "user", "channel", "guild", "binding"]
+        if scope not in valid_scopes:
+            return await ctx.send(
+                f"Invalid scope. Choose from: {', '.join(f'`{s}`' for s in valid_scopes)}"
+            )
+
+        if not self.db_pool:
+            return await ctx.send("Database connection pool is not available.")
+
+        await ctx.typing()
+
+        if scope == "self":
+            async with self.db_pool.acquire() as conn:
+                await conn.execute(
+                    "DELETE FROM tts_configs WHERE entity_id = $1 AND guild_id = $2 AND entity_type = 'user'",
+                    ctx.author.id,
+                    ctx.guild.id,
+                )
+            return await ctx.send(
+                "Your personal gTTS configuration on this server has been reset to defaults."
+            )
+
+        if scope == "guild" and not ctx.author.guild_permissions.manage_guild:
+            return await ctx.send(
+                "You need the `Manage Server` permission to reset guild-wide configs."
+            )
+
+        if (
+            scope in ["user", "channel", "binding"]
+            and not ctx.author.guild_permissions.manage_channels
+        ):
+            return await ctx.send(
+                "You need the `Manage Channels` permission to administratively wipe these parameters."
+            )
+
+        entity_id = None
+        if target_id:
+            try:
+                entity_id = int(target_id)
+            except ValueError:
+                return await ctx.send(
+                    "The provided target ID must be a valid numerical ID."
+                )
+        else:
+            if scope == "channel":
+                entity_id = ctx.channel.id
+            elif scope == "binding":
+                entity_id = ctx.channel.id
+            elif scope == "guild":
+                entity_id = ctx.guild.id
+            elif scope == "user":
+                return await ctx.send("Please provide a specific user ID to reset.")
+
+        if scope == "user":
+            async with self.db_pool.acquire() as conn:
+                await conn.execute(
+                    "DELETE FROM tts_configs WHERE entity_id = $1 AND guild_id = $2 AND entity_type = 'user'",
+                    entity_id,
+                    ctx.guild.id,
+                )
+            return await ctx.send(
+                f"gTTS configuration for user ID `{entity_id}` has been cleared on this server."
+            )
+
+        elif scope == "channel":
+            async with self.db_pool.acquire() as conn:
+                await conn.execute(
+                    "DELETE FROM tts_configs WHERE entity_id = $1 AND guild_id = $2 AND entity_type = 'channel'",
+                    entity_id,
+                    ctx.guild.id,
+                )
+            return await ctx.send(
+                f"gTTS configuration for channel ID `{entity_id}` has been cleared."
+            )
+
+        elif scope == "guild":
+            async with self.db_pool.acquire() as conn:
+                await conn.execute(
+                    "DELETE FROM tts_configs WHERE entity_id = $1 AND guild_id = $2 AND entity_type = 'guild'",
+                    entity_id,
+                    ctx.guild.id,
+                )
+            return await ctx.send(
+                "Server-wide default gTTS configuration has been cleared."
+            )
+
+        elif scope == "binding":
+            async with self.db_pool.acquire() as conn:
+                deleted = await conn.fetchval(
+                    "DELETE FROM tts_bindings WHERE text_channel_id = $1 RETURNING text_channel_id",
+                    entity_id,
+                )
+            if deleted:
+                return await ctx.send(
+                    f"Text channel binding for channel ID `{entity_id}` has been un-bound successfully."
+                )
+            else:
+                return await ctx.send(
+                    f"No active gTTS binding was found on channel ID `{entity_id}`."
+                )
+
+    @tts.command(
+        name="status",
+        description="View your active gTTS configuration overrides on this server.",
+    )
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def tts_status(self, ctx: commands.Context):
+        if not self.db_pool:
+            return await ctx.send("Database connection pool is not available.")
+
+        await ctx.typing()
+
+        voice_channel_id = (
+            ctx.author.voice.channel.id
+            if ctx.author.voice and ctx.author.voice.channel
+            else 0
+        )
+
+        async with self.db_pool.acquire() as conn:
+            binding = await conn.fetchrow(
+                "SELECT language, filters FROM tts_bindings WHERE text_channel_id = $1",
+                ctx.channel.id,
+            )
+
+            rows = await conn.fetch(
+                """SELECT entity_type, language, filters FROM tts_configs
+                   WHERE (entity_id = $1 AND guild_id = $4)
+                      OR (entity_id = $2 AND guild_id = $4)
+                      OR (entity_id = $3 AND guild_id = $4)""",
+                ctx.author.id,
+                voice_channel_id,
+                ctx.guild.id,
+                ctx.guild.id,
+            )
+
+        mapping = {r["entity_type"]: r for r in rows}
+
+        embed = discord.Embed(
+            title="gTTS Configuration Hierarchy Status",
+            color=discord.Color.blue(),
+            description="Settings resolve from top to bottom. The first active configuration found is used.",
+        )
+
+        if binding:
+            embed.add_field(
+                name="Text Channel Binding (Active here)",
+                value=f"**Language:** `{binding['language']}`\n**Filters:** `{binding['filters'] or 'None'}`",
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name="Text Channel Binding",
+                value="*No explicit binding for this channel.*",
+                inline=False,
+            )
+
+        user_cfg = mapping.get("user")
+        if user_cfg:
+            embed.add_field(
+                name=f"Your Per-Server Overrides ({ctx.author.display_name})",
+                value=f"**Language:** `{user_cfg['language']}`\n**Filters:** `{user_cfg['filters'] or 'None'}`",
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name="Your Per-Server Overrides",
+                value="*No personal overrides set on this server.*",
+                inline=False,
+            )
+
+        vc_cfg = mapping.get("channel")
+        if vc_cfg:
+            embed.add_field(
+                name="Current Voice Channel Overrides",
+                value=f"**Language:** `{vc_cfg['language']}`\n**Filters:** `{vc_cfg['filters'] or 'None'}`",
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name="Voice Channel Overrides",
+                value="*No voice channel specific overrides encountered.*",
+                inline=False,
+            )
+
+        guild_cfg = mapping.get("guild")
+        if guild_cfg:
+            embed.add_field(
+                name=f"Server-Wide Defaults ({ctx.guild.name})",
+                value=f"**Language:** `{guild_cfg['language']}`\n**Filters:** `{guild_cfg['filters'] or 'None'}`",
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name="Server-Wide Defaults",
+                value="*No custom server defaults set. Using gTTS defaults.*",
+                inline=False,
+            )
+
+        await ctx.send(embed=embed)
+
+    @tts.command(
+        name="langs",
+        description="List all available gTTS languages.",
+    )
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def tts_langs(self, ctx: commands.Context):
+        await ctx.typing()
+        try:
+            all_langs = gtts.lang.tts_langs()
+            voices = [f"`{code}`: {name}" for code, name in all_langs.items()]
+
+            if not voices:
+                return await ctx.send("No voices reported by gTTS.")
+
+            voices_per_page = 25
+            pages = []
+
+            chunks = [
+                voices[i : i + voices_per_page]
+                for i in range(0, len(voices), voices_per_page)
+            ]
+            total_pages = len(chunks)
+
+            for index, chunk in enumerate(chunks):
+                embed = discord.Embed(
+                    title="Available TTS Languages",
+                    color=discord.Color.green(),
+                    description="\n".join(chunk),
+                )
+
+                embed.set_footer(
+                    text=f"Page {index + 1} of {total_pages} | Total Voices: {len(voices)}"
+                )
+                pages.append(embed)
+
+            view = VoicePaginator(pages=pages, timeout=120.0)
+            view.message = await ctx.send(embed=pages[0], view=view)
+
+        except Exception as e:
+            await ctx.send(f"Failed to retrieve gTTS languages: {e}")
 
     @commands.hybrid_group(
         name="playlist",
