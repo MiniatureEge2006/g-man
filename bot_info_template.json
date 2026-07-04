@@ -7,5 +7,6 @@
   "llama_model": "Your default llama.cpp model",
   "llama_system_prompt": "Your llama.cpp model's default system prompt (Leave empty for default)",
   "llama_api_key": "Your llama.cpp server api key",
-  "searxng_url": "Your SearXNG url"
+  "searxng_url": "Your SearXNG url",
+  "gman_site_path": "Website repository path (completely optional, leave empty to ignore completely)"
 }
