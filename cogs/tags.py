@@ -8084,11 +8084,11 @@ class Tags(commands.Cog):
             """
             return await self.execute_language(ctx, "elvish", code, **kwargs)
 
-        @self.formatter.register("_elvish")
-        @self.formatter.register("_elv")
+        @self.formatter.register("elvish_")
+        @self.formatter.register("elv_")
         async def _elvish_suppress(ctx, code, **kwargs):
             """
-            ### {_elvish:code}
+            ### {elvish_:code}
                 * Execute Elvish code. Output files go into the registry but are NOT sent to Discord.
             """
             return await self.execute_language(
