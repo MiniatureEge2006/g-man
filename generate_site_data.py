@@ -43,27 +43,26 @@ def generate_commands_json(bot, output_path):
             {
                 "name": command.qualified_name,
                 "description": command.help or command.description or "",
-                "aliases": list(command.aliases),
+                "aliases": sorted(command.aliases),
                 "parameters": _extract_parameters(command),
                 "is_group": is_group,
             }
         )
+
     for category in groups:
         groups[category].sort(key=lambda c: c["name"])
+    groups = dict(sorted(groups.items()))
+
     with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(groups, f, indent=2)
+        json.dump(groups, f, indent=2, sort_keys=False)
+        f.write("\n")
 
 
 def generate_tags_json(bot, output_path):
     tags_cog = bot.get_cog("Tags")
     if tags_cog is None:
-        print(
-            "[site-data] Skipped tags.json: no 'Tags' cog is loaded. "
-            "Check your bot's logs for 'Failed to load extension cogs.tags'."
-        )
         return
     if not hasattr(tags_cog, "formatter"):
-        print("[site-data] Skipped tags.json: 'Tags' cog has no 'formatter' attribute.")
         return
 
     by_func = {}
