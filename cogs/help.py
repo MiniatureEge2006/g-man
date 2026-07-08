@@ -106,9 +106,9 @@ class HelpPaginator(discord.ui.LayoutView):
             error_container.add_item(
                 discord.ui.TextDisplay("You cannot control this help menu.")
             )
-            await interaction.response.send_message(
-                view=error_container, ephemeral=True
-            )
+            error_view = discord.ui.LayoutView()
+            error_view.add_item(error_container)
+            await interaction.response.send_message(view=error_view, ephemeral=True)
             return False
         return True
 
@@ -200,21 +200,10 @@ class Help(commands.Cog):
                     )
                 )
 
-                action_row = discord.ui.ActionRow()
-                close_btn = discord.ui.Button(
-                    label="Close",
-                    style=discord.ButtonStyle.danger,
-                    custom_id="error_close",
-                )
-                action_row.add_item(close_btn)
-                error_container.add_item(action_row)
+                error_view = discord.ui.LayoutView()
+                error_view.add_item(error_container)
 
-                async def close_callback(interaction: discord.Interaction):
-                    await interaction.response.edit_message(view=None)
-
-                close_btn.callback = close_callback
-
-                await ctx.send(view=error_container)
+                await ctx.send(view=error_view)
                 return
             pages = result
 
@@ -229,7 +218,9 @@ class Help(commands.Cog):
             error_container.add_item(
                 discord.ui.TextDisplay("No commands or categories found.")
             )
-            await ctx.send(view=error_container)
+            error_view = discord.ui.LayoutView()
+            error_view.add_item(error_container)
+            await ctx.send(view=error_view)
             return
 
         paginator = HelpPaginator(ctx, pages)
