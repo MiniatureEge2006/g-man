@@ -299,16 +299,22 @@ class Audio(commands.Cog):
             return config
 
         async with self.db_pool.acquire() as conn:
+            binding_language = None
+            binding_filters = None
+
             if text_channel_id:
                 row = await conn.fetchrow(
                     "SELECT language, filters FROM tts_bindings WHERE text_channel_id = $1",
                     text_channel_id,
                 )
                 if row:
-                    return {
-                        "language": row["language"],
-                        "filters": row["filters"].split(",") if row["filters"] else [],
-                    }
+                    binding_language = row["language"]
+                    binding_filters = (
+                        row["filters"].split(",") if row["filters"] else None
+                    )
+
+            if binding_language and binding_filters is not None:
+                return {"language": binding_language, "filters": binding_filters}
 
             rows = await conn.fetch(
                 """
@@ -324,14 +330,26 @@ class Audio(commands.Cog):
             )
 
             mapping = {r["entity_type"]: r for r in rows}
+            hierarchy_language = None
+            hierarchy_filters = None
             for entity_type in ["user", "channel", "guild"]:
                 if entity_type in mapping:
                     r = mapping[entity_type]
-                    return {
-                        "language": r["language"] or config["language"],
-                        "filters": r["filters"].split(",") if r["filters"] else [],
-                    }
-        return config
+                    if hierarchy_language is None and r["language"]:
+                        hierarchy_language = r["language"]
+                    if hierarchy_filters is None and r["filters"]:
+                        hierarchy_filters = r["filters"].split(",")
+                    if hierarchy_language is not None and hierarchy_filters is not None:
+                        break
+
+            return {
+                "language": binding_language or hierarchy_language,
+                "filters": (
+                    binding_filters
+                    if binding_filters is not None
+                    else (hierarchy_filters or [])
+                ),
+            }
 
     def _generate_tts_file(self, text: str, language: Optional[str]) -> str:
         fp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
@@ -363,8 +381,11 @@ class Audio(commands.Cog):
         state.is_tts_playing = True
 
         if vc.source and isinstance(vc.source, MixerAudioSource):
-            if vc.source.main_source and hasattr(vc.source.main_source, "volume"):
-                vc.source.main_source.volume = state.volume * 0.20
+            mixer = vc.source
+            mixer.bot = self.bot
+
+            if mixer.main_source and hasattr(mixer.main_source, "volume"):
+                mixer.main_source.volume = state.volume * 0.20
 
             def finish_mixed_tts(e):
                 if vc.source and isinstance(vc.source, MixerAudioSource):
@@ -381,8 +402,11 @@ class Audio(commands.Cog):
                     self._check_tts_queue(vc, state), self.bot.loop
                 )
 
-            vc.source.after_tts = finish_mixed_tts
-            vc.source.tts_source = source
+            mixer.after_tts = finish_mixed_tts
+            mixer.tts_source = source
+
+            if not vc.is_playing() and not vc.is_paused():
+                vc.play(mixer, after=lambda e: mixer.cleanup())
 
         else:
 
@@ -450,7 +474,13 @@ class Audio(commands.Cog):
                 except Exception:
                     pass
 
-    async def _internal_say(self, ctx: commands.Context, text: str):
+    async def _internal_say(
+        self,
+        ctx: commands.Context,
+        text: str,
+        language: Optional[str] = None,
+        filters: Optional[List[str]] = None,
+    ):
         state = self.get_state(ctx.guild.id)
         vc = ctx.voice_client
         if not vc or not vc.is_connected():
@@ -462,13 +492,16 @@ class Audio(commands.Cog):
             guild_id=ctx.guild.id,
         )
 
+        resolved_language = language or config["language"]
+        resolved_filters = filters if filters is not None else config["filters"]
+
         try:
             filename = await self.run_in_executor(
                 self._generate_tts_file,
                 text,
-                config["language"],
+                resolved_language,
             )
-            state.tts_queue.append((filename, config["filters"]))
+            state.tts_queue.append((filename, resolved_filters))
             await self._check_tts_queue(vc, state)
         except Exception as e:
             await ctx.send(f"gTTS error: {e}", delete_after=5)
@@ -1761,9 +1794,20 @@ class Audio(commands.Cog):
         name="say",
         description="Manually use Text-to-Speech.",
     )
-    @app_commands.describe(text="The message string content to read aloud.")
+    @app_commands.describe(
+        text="The message string content to read aloud.",
+        language="Optional: language to use for this message only (does not change your saved config).",
+        filters="Optional: comma-separated FFmpeg filter graph blocks for this message only (e.g., vibrato=f=15,asetrate=44100*1.2).",
+    )
     @app_commands.allowed_installs(guilds=True, users=False)
-    async def say(self, ctx: commands.Context, *, text: str):
+    async def say(
+        self,
+        ctx: commands.Context,
+        *,
+        text: str,
+        language: Optional[str] = None,
+        filters: Optional[str] = None,
+    ):
         await ctx.typing()
         if ctx.voice_client:
             if not ctx.author.voice:
@@ -1774,7 +1818,22 @@ class Audio(commands.Cog):
             await ctx.author.voice.channel.connect()
         elif not ctx.voice_client and not ctx.author.voice:
             return await ctx.send("You are not in a voice channel.")
-        await self._internal_say(ctx, text)
+
+        if language:
+            try:
+                supported_langs = gtts.lang.tts_langs()
+            except Exception:
+                supported_langs = None
+            if supported_langs is not None and language not in supported_langs:
+                return await ctx.send(
+                    f"`{language}` is not a supported gTTS language code. "
+                    f"Use `{ctx.prefix}tts langs` to see the list of available languages."
+                )
+
+        filters_list = filters.split(",") if filters else None
+
+        await self._internal_say(ctx, text, language=language, filters=filters_list)
+        await ctx.send(f"Saying `{text}`")
 
     @commands.hybrid_group(
         name="tts",
