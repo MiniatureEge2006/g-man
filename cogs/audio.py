@@ -2,6 +2,7 @@ import asyncio
 import audioop
 import os
 import random
+import subprocess
 import tempfile
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
@@ -262,6 +263,42 @@ class Audio(commands.Cog):
                 return ydl.extract_info(url, download=download)
 
         return await self.run_in_executor(sync_extract)
+
+    async def get_duration_ffprobe(self, target: Optional[str]) -> float:
+        if not target:
+            return 0.0
+
+        def sync_probe() -> float:
+            try:
+                result = subprocess.run(
+                    [
+                        "ffprobe",
+                        "-v",
+                        "error",
+                        "-show_entries",
+                        "format=duration",
+                        "-of",
+                        "default=noprint_wrappers=1:nokey=1",
+                        target,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                )
+                duration_str = result.stdout.strip()
+                if not duration_str:
+                    return 0.0
+                duration = float(duration_str)
+                return duration if duration > 0 else 0.0
+            except (
+                subprocess.TimeoutExpired,
+                ValueError,
+                FileNotFoundError,
+                OSError,
+            ):
+                return 0.0
+
+        return await self.run_in_executor(sync_probe)
 
     async def connect_to_channel(self, ctx: commands.Context) -> bool:
         if not ctx.author.voice:
@@ -624,6 +661,13 @@ class Audio(commands.Cog):
                 **ffmpeg_opts,
             )
         source = discord.PCMVolumeTransformer(source, volume=state.volume)
+
+        probe_target = stream_url if is_stream else actual_file_path
+        probed_duration = await self.get_duration_ffprobe(probe_target)
+        if probed_duration:
+            info["duration"] = probed_duration
+        elif not info.get("duration"):
+            info["duration"] = 0
 
         def after_callback(e):
             asyncio.run_coroutine_threadsafe(
