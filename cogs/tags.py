@@ -899,6 +899,8 @@ class MediaProcessor:
             vars[f"{safe}_duration"] = info["duration"]
             vars[f"{safe}_fps"] = info["fps"]
             vars[f"{safe}_frame_count"] = info["frame_count"]
+            vars[f"{safe}w"] = info["width"]
+            vars[f"{safe}h"] = info["height"]
 
         if user_vars:
             vars.update(user_vars)
