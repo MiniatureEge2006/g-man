@@ -13,3 +13,4 @@ matplotlib
 jsonschema
 davey
 gTTS
+emoji

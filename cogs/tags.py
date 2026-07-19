@@ -25,6 +25,7 @@ import aiohttp
 import asyncpg
 import dateparser
 import discord
+import emoji as emoji_lib
 import matplotlib.font_manager
 import yt_dlp
 from discord import app_commands
@@ -3439,17 +3440,13 @@ class MediaProcessor:
 
     async def _download_twemoji(self, emoji_unicode: str):
         try:
-            codepoints = []
-            for c in emoji_unicode:
-                if 0xFE00 <= ord(c) <= 0xFE0F:
-                    continue
-                codepoints.append(f"{ord(c):x}")
-
+            codepoints = "-".join(
+                f"{ord(c):x}" for c in emoji_unicode if c not in "\ufe0f\u200d"
+            )
             if not codepoints:
                 return None
 
-            codepoint = "-".join(codepoints)
-            url = f"https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/72x72/{codepoint}.png"
+            url = f"https://cdn.jsdelivr.net/gh/jdecked/twemoji@latest/assets/72x72/{codepoints}.png"
 
             async with aiohttp.ClientSession() as session:
                 async with session.get(url) as resp:
@@ -3473,6 +3470,9 @@ class MediaProcessor:
         def get_visual_width(text, font, font_size):
             width = 0
             i = 0
+            emoji_positions = {
+                e["match_start"]: e["emoji"] for e in emoji_lib.emoji_list(text)
+            }
             while i < len(text):
                 if text[i:].startswith("<") and ":" in text[i:]:
                     m = re.match(r"<(a?):([^:]+):(\d+)>", text[i:])
@@ -3480,8 +3480,11 @@ class MediaProcessor:
                         width += font_size
                         i += len(m.group(0))
                         continue
-                char = text[i]
-                width += font.getlength(char)
+                if i in emoji_positions:
+                    width += font_size
+                    i += len(emoji_positions[i])
+                    continue
+                width += font.getlength(text[i])
                 i += 1
             return int(width)
 
@@ -3503,6 +3506,7 @@ class MediaProcessor:
         try:
             input_key = kwargs["input_key"]
             text = kwargs["text"]
+            text = emoji_lib.emojize(text, language="alias")
             x_raw = kwargs.get("x", "0")
             y_raw = kwargs.get("y", "0")
             font_size = kwargs["font_size"]
@@ -3574,6 +3578,9 @@ class MediaProcessor:
             for line in lines:
                 line_width = get_visual_width(line, font, font_size)
                 line_height = get_text_size(font, line)[1]
+                emoji_positions = {
+                    e["match_start"]: e["emoji"] for e in emoji_lib.emoji_list(line)
+                }
                 cur_x = (
                     (base_img.width - line_width) // 2
                     if str(x_raw).lower() == "center"
@@ -3697,29 +3704,11 @@ class MediaProcessor:
                             i += emoji_len
                             continue
 
-                    elif (
-                        (0x1F600 <= ord(char) <= 0x1F64F)
-                        or (0x1F300 <= ord(char) <= 0x1F5FF)
-                        or (0x1F900 <= ord(char) <= 0x1F9FF)
-                        or (0x2600 <= ord(char) <= 0x26FF)
-                        or (0x2700 <= ord(char) <= 0x27BF)
-                    ):
-                        emoji_end = i + 1
-                        while emoji_end < len(line) and (
-                            line[emoji_end] in "\ufe0f\u200d"
-                            or 0x1F3FB <= ord(line[emoji_end]) <= 0x1F3FF
-                        ):
-                            emoji_end += 1
+                    if i in emoji_positions:
+                        emoji_str = emoji_positions[i]
+                        emoji_end = i + len(emoji_str)
 
-                        if (
-                            (0x1F1E6 <= ord(char) <= 0x1F1FF)
-                            and emoji_end < len(line)
-                            and (0x1F1E6 <= ord(line[emoji_end]) <= 0x1F1FF)
-                        ):
-                            emoji_end += 1
-
-                        emoji = line[i:emoji_end]
-                        emoji_img = await self._download_twemoji(emoji)
+                        emoji_img = await self._download_twemoji(emoji_str)
                         if emoji_img:
                             emoji_size = int(font_size)
                             emoji_img = await asyncio.to_thread(
@@ -3838,6 +3827,9 @@ class MediaProcessor:
                 for line in lines:
                     line_width = get_visual_width(line, font, font_size)
                     line_height = get_text_size(font, line)[1]
+                    emoji_positions = {
+                        e["match_start"]: e["emoji"] for e in emoji_lib.emoji_list(line)
+                    }
                     cur_x = (
                         (base_img.width - line_width) // 2
                         if str(x_raw).lower() == "center"
@@ -3857,26 +3849,9 @@ class MediaProcessor:
                                 temp_x += font_size
                                 temp_i += emoji_len
                                 continue
-                        elif preserve_emoji_colors and (
-                            (0x1F600 <= ord(char) <= 0x1F64F)
-                            or (0x1F300 <= ord(char) <= 0x1F5FF)
-                            or (0x1F900 <= ord(char) <= 0x1F9FF)
-                            or (0x2600 <= ord(char) <= 0x26FF)
-                            or (0x2700 <= ord(char) <= 0x27BF)
-                        ):
-                            emoji_end = temp_i + 1
-                            while emoji_end < len(line) and (
-                                line[emoji_end] in "\ufe0f\u200d"
-                                or 0x1F3FB <= ord(line[emoji_end]) <= 0x1F3FF
-                            ):
-                                emoji_end += 1
-                            if (
-                                (0x1F1E6 <= ord(char) <= 0x1F1FF)
-                                and emoji_end < len(line)
-                                and (0x1F1E6 <= ord(line[emoji_end]) <= 0x1F1FF)
-                            ):
-                                emoji_end += 1
-                            temp_i = emoji_end
+                        elif temp_i in emoji_positions and preserve_emoji_colors:
+                            emoji_str = emoji_positions[temp_i]
+                            temp_i += len(emoji_str)
                             temp_x += font_size
                             continue
                         else:
@@ -3938,6 +3913,10 @@ class MediaProcessor:
                     for dx in range(-outline_width, outline_width + 1):
                         for dy in range(-outline_width, outline_width + 1):
                             if dx * dx + dy * dy <= outline_width * outline_width:
+                                emoji_positions = {
+                                    e["match_start"]: e["emoji"]
+                                    for e in emoji_lib.emoji_list(line)
+                                }
                                 temp_x = cur_x
                                 temp_i = 0
                                 while temp_i < len(line):
@@ -3955,32 +3934,12 @@ class MediaProcessor:
                                             temp_x += font_size
                                             temp_i += emoji_len
                                             continue
-                                    elif preserve_emoji_colors and (
-                                        (0x1F600 <= ord(char) <= 0x1F64F)
-                                        or (0x1F300 <= ord(char) <= 0x1F5FF)
-                                        or (0x1F900 <= ord(char) <= 0x1F9FF)
-                                        or (0x2600 <= ord(char) <= 0x26FF)
-                                        or (0x2700 <= ord(char) <= 0x27BF)
+                                    elif (
+                                        temp_i in emoji_positions
+                                        and preserve_emoji_colors
                                     ):
-                                        emoji_end = temp_i + 1
-                                        while emoji_end < len(line) and (
-                                            line[emoji_end] in "\ufe0f\u200d"
-                                            or 0x1F3FB
-                                            <= ord(line[emoji_end])
-                                            <= 0x1F3FF
-                                        ):
-                                            emoji_end += 1
-                                        if (
-                                            (0x1F1E6 <= ord(char) <= 0x1F1FF)
-                                            and emoji_end < len(line)
-                                            and (
-                                                0x1F1E6
-                                                <= ord(line[emoji_end])
-                                                <= 0x1F1FF
-                                            )
-                                        ):
-                                            emoji_end += 1
-                                        temp_i = emoji_end
+                                        emoji_str = emoji_positions[temp_i]
+                                        temp_i += len(emoji_str)
                                         temp_x += font_size
                                         continue
                                     else:
@@ -4071,6 +4030,40 @@ class MediaProcessor:
         except Exception as e:
             return await self._handle_error("caption", e)
 
+    def _is_only_emojis(self, text: str) -> bool:
+        text = emoji_lib.emojize(text, language="alias")
+
+        i = 0
+        found_at_least_one_emoji = False
+        while i < len(text):
+            char = text[i]
+            if char.isspace():
+                i += 1
+                continue
+
+            if char == "<":
+                match = re.match(r"<(a?):([^:]+):(\d+)>", text[i:])
+                if match:
+                    found_at_least_one_emoji = True
+                    i += len(match.group(0))
+                    continue
+                else:
+                    return False
+
+            if emoji_lib.is_emoji(char):
+                found_at_least_one_emoji = True
+                emoji_end = i + 1
+                while emoji_end < len(text) and (
+                    emoji_lib.is_emoji(text[emoji_end])
+                    or text[emoji_end] in "\ufe0f\u200d"
+                ):
+                    emoji_end += 1
+                i = emoji_end
+                continue
+
+            return False
+        return found_at_least_one_emoji
+
     async def _apply_caption_impl(self, **kwargs) -> str:
         input_key = kwargs["input_key"]
         text = kwargs["text"]
@@ -4118,28 +4111,7 @@ class MediaProcessor:
             reference_dimension = min(width, height)
             font_size = max(12, int(reference_dimension * 0.07))
 
-            is_only_emojis = True
-            i = 0
-            while i < len(text):
-                c = text[i]
-                if c.isspace():
-                    i += 1
-                    continue
-                if c == "<" and ">" in text[i:]:
-                    match = re.match(r"<(a?):([^:]+):(\d+)>", text[i:])
-                    if match:
-                        i += len(match.group(0))
-                        continue
-                if not (
-                    (0x1F600 <= ord(c) <= 0x1F64F)
-                    or (0x1F300 <= ord(c) <= 0x1F5FF)
-                    or (0x1F900 <= ord(c) <= 0x1F9FF)
-                    or (0x2600 <= ord(c) <= 0x26FF)
-                    or (0x2700 <= ord(c) <= 0x27BF)
-                ):
-                    is_only_emojis = False
-                    break
-                i += 1
+            is_only_emojis = self._is_only_emojis(text)
 
             if is_only_emojis:
                 font_size = max(12, int(reference_dimension * 0.1))
