@@ -8344,6 +8344,7 @@ class Tags(commands.Cog):
             )
 
         @self.formatter.register("user")
+        @self.formatter.register("username")
         async def _user(ctx, i, **kwargs):
             """
             ### {user:user/displayname/userid/mention}
@@ -8356,6 +8357,7 @@ class Tags(commands.Cog):
             return user.name
 
         @self.formatter.register("userid")
+        @self.formatter.register("id")
         async def _userid(ctx, i, **kwargs):
             """
             ### {userid:user/displayname/userid/mention}
@@ -8366,6 +8368,7 @@ class Tags(commands.Cog):
             return user.id
 
         @self.formatter.register("nick")
+        @self.formatter.register("nickname")
         async def _nick(ctx, i, **kwargs):
             """
             ### {nick:user/displayname/userid/mention}
@@ -8632,6 +8635,7 @@ class Tags(commands.Cog):
                 return None
 
         @self.formatter.register("randuser")
+        @self.formatter.register("randomuser")
         async def _randuser(ctx, user, **kwargs):
             """
             ### {randuser}
@@ -8644,6 +8648,7 @@ class Tags(commands.Cog):
             return None
 
         @self.formatter.register("randonline")
+        @self.formatter.register("randomonline")
         async def _randonline(ctx, user, **kwargs):
             """
             ### {randonline}
@@ -8661,6 +8666,7 @@ class Tags(commands.Cog):
             return None
 
         @self.formatter.register("randonlineid")
+        @self.formatter.register("randomonlineid")
         async def _randonlineid(ctx, user, **kwargs):
             """
             ### {randonlineid}
@@ -8678,6 +8684,7 @@ class Tags(commands.Cog):
             return None
 
         @self.formatter.register("randuserid")
+        @self.formatter.register("randomuserid")
         async def _randuserid(ctx, user, **kwargs):
             """
             ### {randuserid}
@@ -8735,6 +8742,7 @@ class Tags(commands.Cog):
                 return ctx.channel.id
 
         @self.formatter.register("randchannel")
+        @self.formatter.register("randomchannel")
         async def _randchannel(ctx, channel, **kwargs):
             """
             ### {randchannel}
@@ -8747,6 +8755,7 @@ class Tags(commands.Cog):
             return None
 
         @self.formatter.register("randchannelmention")
+        @self.formatter.register("randomchannelmention")
         async def _randchannelmention(ctx, channel, **kwargs):
             """
             ### {randchannelmention}
@@ -8759,6 +8768,7 @@ class Tags(commands.Cog):
             return None
 
         @self.formatter.register("randchannelid")
+        @self.formatter.register("randomchannelid")
         async def _randchannelid(ctx, channel, **kwargs):
             """
             ### {randchannelid}
