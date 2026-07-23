@@ -19,8 +19,6 @@ from discord.ext import commands
 
 import bot_info
 
-if bot_info.data["gman_site_path"]:
-    from generate_site_data import generate_site_data
 
 uptime_start = datetime.datetime.now(datetime.timezone.utc)
 
@@ -360,8 +358,6 @@ async def on_ready():
                 logger.info(f"Loaded extension: {ex}")
         except Exception as e:
             logger.error(f"Failed to load extension {ex}: {e}")
-    if bot_info.data["gman_site_path"]:
-        generate_site_data(bot, bot_info.data["gman_site_path"])
     try:
         bot.db = await asyncpg.create_pool(bot_info.data["database"])
         logger.info(f"Connected to PostgreSQL database via {bot_info.data['database']}")
