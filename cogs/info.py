@@ -1053,12 +1053,12 @@ class Info(commands.Cog):
         )
         embed.add_field(
             name="Developers",
-            value="[nkrasn](https://github.com/nkrasn 'Original Developer.'), [MiniatureEge2006](https://codeberg.org/MiniatureEge2006 'Current Developer.')",
+            value="[nkrasn](https://github.com/nkrasn 'Original Developer.'), [MiniatureEge2006](https://github.com/MiniatureEge2006 'Current Developer.')",
             inline=True,
         )
         embed.add_field(
             name="Source Code",
-            value="https://codeberg.org/MiniatureEge2006/g-man",
+            value="https://github.com/MiniatureEge2006/g-man",
             inline=True,
         )
         embed.set_thumbnail(url=self.bot.user.avatar.url)
