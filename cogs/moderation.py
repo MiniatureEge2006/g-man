@@ -3564,13 +3564,17 @@ class Moderation(commands.Cog):
         )
 
         obfuscated = re.findall(
-            r"(?:[\w-]+)\s*[\[\(\{]?\s*[.]\s*[\]\)\}]?\s*[\w-]+", content
+            r"(?:[\w-]+)\s*[\[\(\{]?\s*(?:\.|dot)\s*[\]\)\}]?\s*[\w-]+",
+            content,
+            re.IGNORECASE,
         )
         for obs in obfuscated:
-            clean = (
-                re.sub(r"[\[\](){}]", "", obs).replace("•", ".").replace(" dot ", ".")
-            )
-            clean = re.sub(r"\s+", ".", clean)
+            clean = obs.lower()
+            clean = re.sub(r"[\[\](){}]", "", clean)
+            clean = clean.replace("•", ".").replace("dot", ".")
+            clean = re.sub(r"\s*\.\s*", ".", clean)
+            clean = clean.replace(" ", "")
+            clean = re.sub(r"\.+", ".", clean)
             if "." in clean:
                 domains.append(clean)
 
@@ -3578,15 +3582,18 @@ class Moderation(commands.Cog):
             try:
                 parsed = urlparse(url if "://" in url else f"http://{url}")
                 domain = parsed.netloc.lower()
+                if ":" in domain:
+                    domain = domain.split(":")[0]
                 if domain.startswith("www."):
                     domain = domain[4:]
 
                 for f in forbidden:
-                    if domain == f or domain.endswith(f".{f}") or f in url.lower():
+                    if domain == f or domain.endswith(f".{f}"):
                         return True
             except Exception:
-                if any(f in url.lower() for f in forbidden):
-                    return True
+                for f in forbidden:
+                    if re.search(r"\b" + re.escape(f) + r"\b", url.lower()):
+                        return True
 
         return False
 
