@@ -177,8 +177,7 @@ CREATE TABLE IF NOT EXISTS chat_filters (
     delete_after INTEGER DEFAULT 10,
     added_by BIGINT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (guild_id, filter_id),
-    UNIQUE (guild_id, filter_type, pattern, target_type, target_id)
+    UNIQUE (guild_id, filter_id)
 );
 
 CREATE TABLE IF NOT EXISTS chat_reactions (
@@ -192,8 +191,7 @@ CREATE TABLE IF NOT EXISTS chat_reactions (
     target_id BIGINT,
     added_by BIGINT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (guild_id, reaction_id),
-    UNIQUE (guild_id, trigger_type, pattern, target_type, target_id)
+    UNIQUE (guild_id, reaction_id)
 );
 
 CREATE TABLE IF NOT EXISTS chat_replies (
@@ -208,8 +206,7 @@ CREATE TABLE IF NOT EXISTS chat_replies (
     delete_after INTEGER DEFAULT 10,
     added_by BIGINT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (guild_id, reply_id),
-    UNIQUE (guild_id, trigger_type, pattern, target_type, target_id)
+    UNIQUE (guild_id, reply_id)
 );
 
 CREATE TABLE IF NOT EXISTS manual_slowmodes (
