@@ -2015,6 +2015,8 @@ class Moderation(commands.Cog):
                 and before.attachments == after.attachments
                 and before.embeds == after.embeds
             )
+            or after.edited_at is None
+            or before.edited_at == after.edited_at
         ):
             return
 
