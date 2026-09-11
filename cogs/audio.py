@@ -729,9 +729,12 @@ class Audio(commands.Cog):
                 embed.add_field(
                     name="Duration", value=self.format_time(duration), inline=True
                 )
-                embed.add_field(
-                    name="Uploader", value=info.get("uploader", "Unknown"), inline=True
+                uploader = info["uploader"] or "Unknown"
+                uploader_url = info["uploader_url"]
+                uploader_label = (
+                    f"[{uploader}]({uploader_url})" if uploader_url else uploader
                 )
+                embed.add_field(name="Uploader", value=uploader_label, inline=True)
                 if info.get("view_count"):
                     embed.add_field(
                         name="Views", value=f"{info['view_count']:,}", inline=True
@@ -1262,14 +1265,12 @@ class Audio(commands.Cog):
                     else "Unknown"
                 )
                 embed.add_field(name="Length", value=formatted_position, inline=True)
-                embed.add_field(
-                    name="Uploader", value=info.get("uploader", "Unknown"), inline=True
+                uploader = info["uploader"] or "Unknown"
+                uploader_url = info["uploader_url"]
+                uploader_label = (
+                    f"[{uploader}]({uploader_url})" if uploader_url else uploader
                 )
-                embed.add_field(
-                    name="Channel",
-                    value=info.get("uploader_url", "Unknown"),
-                    inline=True,
-                )
+                embed.add_field(name="Uploader", value=uploader_label, inline=True)
                 if info.get("view_count"):
                     embed.add_field(
                         name="Views", value=f"{info['view_count']:,}", inline=True
