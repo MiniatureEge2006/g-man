@@ -729,8 +729,8 @@ class Audio(commands.Cog):
                 embed.add_field(
                     name="Duration", value=self.format_time(duration), inline=True
                 )
-                uploader = info["uploader"] or "Unknown"
-                uploader_url = info["uploader_url"]
+                uploader = info.get("uploader", "Unknown")
+                uploader_url = info.get("uploader_url")
                 uploader_label = (
                     f"[{uploader}]({uploader_url})" if uploader_url else uploader
                 )
@@ -1265,8 +1265,8 @@ class Audio(commands.Cog):
                     else "Unknown"
                 )
                 embed.add_field(name="Length", value=formatted_position, inline=True)
-                uploader = info["uploader"] or "Unknown"
-                uploader_url = info["uploader_url"]
+                uploader = info.get("uploader", "Unknown")
+                uploader_url = info.get("uploader_url")
                 uploader_label = (
                     f"[{uploader}]({uploader_url})" if uploader_url else uploader
                 )
